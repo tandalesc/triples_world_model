@@ -83,6 +83,15 @@ uv run python scripts/inference_tool.py \
 
 For existing checkpoints (already trained), you can skip `--train-if-missing`.
 
+If your input contains out-of-vocabulary tokens, enable canonicalization:
+
+```bash
+uv run python scripts/inference_tool.py \
+  --checkpoint results/inference_ready \
+  --canonicalize-oov --show-canonicalization \
+  --input '[["cedric","state","curious"],["alice","state","thirsty"]]'
+```
+
 ### Rebuilding from scratch
 
 If you want to rebuild everything from raw data:
