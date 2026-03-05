@@ -1,0 +1,252 @@
+{
+  "split": "test_context",
+  "few_shot": 5,
+  "model": "ramblerun/Multimodal-AI",
+  "n_examples": 30,
+  "exact_f1": 0.5888888888888888,
+  "exact_match": 0.2,
+  "sem_f1": 0.7777777777777778,
+  "sem_exact": 0.4,
+  "per_example": [
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.3333333333333333,
+      "sem_recall": 0.3333333333333333,
+      "sem_f1": 0.3333333333333333,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.0,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.6666666666666666,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.0,
+      "exact_match": 0,
+      "sem_precision": 0.6666666666666666,
+      "sem_recall": 0.6666666666666666,
+      "sem_f1": 0.6666666666666666,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.0,
+      "exact_match": 0,
+      "sem_precision": 0.3333333333333333,
+      "sem_recall": 0.3333333333333333,
+      "sem_f1": 0.3333333333333333,
+      "sem_exact": 0
+    }
+  ]
+}

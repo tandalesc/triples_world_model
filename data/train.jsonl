@@ -1,15 +1,15 @@
-{"state_t": [["glass", "state", "full"], ["person_a", "state", "thirsty"]], "state_t+1": [["glass", "state", "empty"], ["person_a", "state", "satisfied"]]}
+{"state_t": [["glass", "state", "full"], ["alice", "state", "thirsty"]], "state_t+1": [["glass", "state", "empty"], ["alice", "state", "satisfied"]]}
 {"state_t": [["food", "state", "raw"], ["stove", "state", "on"]], "state_t+1": [["food", "state", "cooked"], ["stove", "state", "on"]]}
 {"state_t": [["food", "state", "cooked"], ["stove", "state", "on"]], "state_t+1": [["food", "state", "burnt"], ["stove", "state", "on"]]}
 {"state_t": [["pot", "state", "full"], ["stove", "state", "on"]], "state_t+1": [["pot", "state", "boiling"], ["stove", "state", "on"]]}
 {"state_t": [["pot", "state", "boiling"], ["stove", "state", "off"]], "state_t+1": [["pot", "state", "cooling"], ["stove", "state", "off"]]}
 {"state_t": [["food", "state", "cooked"], ["plate", "state", "clean"]], "state_t+1": [["food", "state", "served"], ["plate", "state", "dirty"]]}
-{"state_t": [["person_a", "state", "hungry"], ["food", "state", "cooked"]], "state_t+1": [["person_a", "state", "satisfied"], ["food", "state", "eaten"]]}
+{"state_t": [["alice", "state", "hungry"], ["food", "state", "cooked"]], "state_t+1": [["alice", "state", "satisfied"], ["food", "state", "eaten"]]}
 {"state_t": [["food", "state", "frozen"], ["oven", "state", "on"]], "state_t+1": [["food", "state", "thawed"], ["oven", "state", "on"]]}
 {"state_t": [["food", "state", "thawed"], ["oven", "state", "on"]], "state_t+1": [["food", "state", "cooked"], ["oven", "state", "on"]]}
 {"state_t": [["cup", "state", "empty"], ["kettle", "state", "full"]], "state_t+1": [["cup", "state", "full"], ["kettle", "state", "empty"]]}
-{"state_t": [["stove", "state", "off"], ["person_a", "action", "ignite"]], "state_t+1": [["stove", "state", "on"], ["person_a", "action", "idle"]]}
-{"state_t": [["oven", "state", "off"], ["person_a", "action", "ignite"]], "state_t+1": [["oven", "state", "on"], ["person_a", "action", "idle"]]}
+{"state_t": [["stove", "state", "off"], ["alice", "action", "ignite"]], "state_t+1": [["stove", "state", "on"], ["alice", "action", "idle"]]}
+{"state_t": [["oven", "state", "off"], ["alice", "action", "ignite"]], "state_t+1": [["oven", "state", "on"], ["alice", "action", "idle"]]}
 {"state_t": [["ice", "state", "solid"], ["temperature", "state", "warm"]], "state_t+1": [["ice", "state", "melting"], ["temperature", "state", "warm"]]}
 {"state_t": [["ice", "state", "melting"], ["temperature", "state", "hot"]], "state_t+1": [["ice", "state", "liquid"], ["temperature", "state", "hot"]]}
 {"state_t": [["candle", "state", "unlit"], ["match", "state", "available"]], "state_t+1": [["candle", "state", "lit"], ["match", "state", "used"]]}
@@ -27,72 +27,72 @@
 {"state_t": [["sky", "state", "storming"], ["wind", "state", "gusty"]], "state_t+1": [["sky", "state", "raining"], ["wind", "state", "breezy"]]}
 {"state_t": [["sky", "state", "cloudy"], ["temperature", "state", "warm"]], "state_t+1": [["sky", "state", "clear"], ["temperature", "state", "warm"]]}
 {"state_t": [["sky", "state", "snowing"], ["ground", "state", "dry"]], "state_t+1": [["sky", "state", "snowing"], ["ground", "state", "snowy"]]}
-{"state_t": [["person_a", "state", "lonely"], ["person_b", "proximity", "nearby"]], "state_t+1": [["person_a", "state", "social"], ["person_b", "proximity", "nearby"]]}
-{"state_t": [["person_a", "state", "social"], ["person_b", "state", "friendly"]], "state_t+1": [["person_a", "state", "happy"], ["person_b", "state", "happy"]]}
-{"state_t": [["person_a", "state", "angry"], ["person_b", "proximity", "nearby"]], "state_t+1": [["person_a", "state", "angry"], ["person_b", "state", "uncomfortable"]]}
-{"state_t": [["person_a", "state", "sad"], ["person_b", "state", "friendly"]], "state_t+1": [["person_a", "state", "comforted"], ["person_b", "state", "caring"]]}
-{"state_t": [["person_a", "state", "bored"], ["person_b", "proximity", "far"]], "state_t+1": [["person_a", "state", "lonely"], ["person_b", "proximity", "far"]]}
-{"state_t": [["person_a", "state", "tired"], ["bed", "state", "available"]], "state_t+1": [["person_a", "state", "resting"], ["bed", "state", "occupied"]]}
-{"state_t": [["person_a", "state", "resting"], ["bed", "state", "occupied"]], "state_t+1": [["person_a", "state", "rested"], ["bed", "state", "available"]]}
-{"state_t": [["person_a", "state", "stressed"], ["person_b", "state", "caring"]], "state_t+1": [["person_a", "state", "relaxed"], ["person_b", "state", "caring"]]}
+{"state_t": [["alice", "state", "lonely"], ["bob", "proximity", "nearby"]], "state_t+1": [["alice", "state", "social"], ["bob", "proximity", "nearby"]]}
+{"state_t": [["alice", "state", "social"], ["bob", "state", "friendly"]], "state_t+1": [["alice", "state", "happy"], ["bob", "state", "happy"]]}
+{"state_t": [["alice", "state", "angry"], ["bob", "proximity", "nearby"]], "state_t+1": [["alice", "state", "angry"], ["bob", "state", "uncomfortable"]]}
+{"state_t": [["alice", "state", "sad"], ["bob", "state", "friendly"]], "state_t+1": [["alice", "state", "comforted"], ["bob", "state", "caring"]]}
+{"state_t": [["alice", "state", "bored"], ["bob", "proximity", "far"]], "state_t+1": [["alice", "state", "lonely"], ["bob", "proximity", "far"]]}
+{"state_t": [["alice", "state", "tired"], ["bed", "state", "available"]], "state_t+1": [["alice", "state", "resting"], ["bed", "state", "occupied"]]}
+{"state_t": [["alice", "state", "resting"], ["bed", "state", "occupied"]], "state_t+1": [["alice", "state", "rested"], ["bed", "state", "available"]]}
+{"state_t": [["alice", "state", "stressed"], ["bob", "state", "caring"]], "state_t+1": [["alice", "state", "relaxed"], ["bob", "state", "caring"]]}
 {"state_t": [["ball", "position", "high"], ["ball", "support", "unsupported"]], "state_t+1": [["ball", "position", "low"], ["ball", "support", "unsupported"]]}
 {"state_t": [["ball", "position", "low"], ["ball", "support", "surface"]], "state_t+1": [["ball", "position", "low"], ["ball", "support", "surface"]]}
-{"state_t": [["switch", "state", "off"], ["person_a", "action", "press"]], "state_t+1": [["switch", "state", "on"], ["person_a", "action", "idle"]]}
-{"state_t": [["switch", "state", "on"], ["person_a", "action", "press"]], "state_t+1": [["switch", "state", "off"], ["person_a", "action", "idle"]]}
+{"state_t": [["switch", "state", "off"], ["alice", "action", "press"]], "state_t+1": [["switch", "state", "on"], ["alice", "action", "idle"]]}
+{"state_t": [["switch", "state", "on"], ["alice", "action", "press"]], "state_t+1": [["switch", "state", "off"], ["alice", "action", "idle"]]}
 {"state_t": [["door", "state", "closed"], ["switch", "state", "on"]], "state_t+1": [["door", "state", "open"], ["switch", "state", "on"]]}
 {"state_t": [["door", "state", "open"], ["switch", "state", "off"]], "state_t+1": [["door", "state", "closed"], ["switch", "state", "off"]]}
 {"state_t": [["light", "state", "off"], ["switch", "state", "on"]], "state_t+1": [["light", "state", "on"], ["switch", "state", "on"]]}
 {"state_t": [["light", "state", "on"], ["switch", "state", "off"]], "state_t+1": [["light", "state", "off"], ["switch", "state", "off"]]}
-{"state_t": [["ball", "state", "still"], ["person_a", "action", "kick"]], "state_t+1": [["ball", "state", "rolling"], ["person_a", "action", "idle"]]}
+{"state_t": [["ball", "state", "still"], ["alice", "action", "kick"]], "state_t+1": [["ball", "state", "rolling"], ["alice", "action", "idle"]]}
 {"state_t": [["ball", "state", "rolling"], ["ground", "state", "flat"]], "state_t+1": [["ball", "state", "still"], ["ground", "state", "flat"]]}
 {"state_t": [["ball", "state", "rolling"], ["wall", "state", "solid"]], "state_t+1": [["ball", "state", "still"], ["wall", "state", "solid"]]}
 {"state_t": [["door", "state", "locked"], ["key", "state", "available"]], "state_t+1": [["door", "state", "closed"], ["key", "state", "used"]]}
-{"state_t": [["lever", "state", "up"], ["person_a", "action", "pull"]], "state_t+1": [["lever", "state", "down"], ["person_a", "action", "idle"]]}
+{"state_t": [["lever", "state", "up"], ["alice", "action", "pull"]], "state_t+1": [["lever", "state", "down"], ["alice", "action", "idle"]]}
 {"state_t": [["lever", "state", "down"], ["gate", "state", "closed"]], "state_t+1": [["lever", "state", "down"], ["gate", "state", "open"]]}
-{"state_t": [["glass", "state", "full"], ["person_a", "state", "thirsty"], ["temperature", "state", "hot"]], "state_t+1": [["glass", "state", "empty"], ["person_a", "state", "satisfied"], ["temperature", "state", "hot"]]}
-{"state_t": [["food", "state", "raw"], ["stove", "state", "on"], ["person_a", "state", "hungry"]], "state_t+1": [["food", "state", "cooked"], ["stove", "state", "on"], ["person_a", "state", "hungry"]]}
+{"state_t": [["glass", "state", "full"], ["alice", "state", "thirsty"], ["temperature", "state", "hot"]], "state_t+1": [["glass", "state", "empty"], ["alice", "state", "satisfied"], ["temperature", "state", "hot"]]}
+{"state_t": [["food", "state", "raw"], ["stove", "state", "on"], ["alice", "state", "hungry"]], "state_t+1": [["food", "state", "cooked"], ["stove", "state", "on"], ["alice", "state", "hungry"]]}
 {"state_t": [["sky", "state", "raining"], ["ground", "state", "dry"], ["plants", "state", "dry"]], "state_t+1": [["sky", "state", "raining"], ["ground", "state", "wet"], ["plants", "state", "watered"]]}
 {"state_t": [["ball", "position", "high"], ["ball", "support", "unsupported"], ["ground", "state", "soft"]], "state_t+1": [["ball", "position", "low"], ["ball", "support", "surface"], ["ground", "state", "dented"]]}
-{"state_t": [["person_a", "state", "lonely"], ["person_b", "proximity", "nearby"], ["person_b", "state", "friendly"]], "state_t+1": [["person_a", "state", "social"], ["person_b", "proximity", "nearby"], ["person_b", "state", "friendly"]]}
+{"state_t": [["alice", "state", "lonely"], ["bob", "proximity", "nearby"], ["bob", "state", "friendly"]], "state_t+1": [["alice", "state", "social"], ["bob", "proximity", "nearby"], ["bob", "state", "friendly"]]}
 {"state_t": [["switch", "state", "off"], ["light", "state", "off"], ["room", "state", "dark"]], "state_t+1": [["switch", "state", "on"], ["light", "state", "on"], ["room", "state", "bright"]]}
 {"state_t": [["pot", "state", "full"], ["stove", "state", "on"], ["food", "state", "raw"]], "state_t+1": [["pot", "state", "boiling"], ["stove", "state", "on"], ["food", "state", "cooked"]]}
 {"state_t": [["sky", "state", "cloudy"], ["wind", "state", "strong"], ["temperature", "state", "cold"]], "state_t+1": [["sky", "state", "raining"], ["wind", "state", "strong"], ["temperature", "state", "cold"]]}
-{"state_t": [["person_a", "state", "hungry"], ["food", "state", "cooked"], ["plate", "state", "clean"]], "state_t+1": [["person_a", "state", "satisfied"], ["food", "state", "eaten"], ["plate", "state", "dirty"]]}
+{"state_t": [["alice", "state", "hungry"], ["food", "state", "cooked"], ["plate", "state", "clean"]], "state_t+1": [["alice", "state", "satisfied"], ["food", "state", "eaten"], ["plate", "state", "dirty"]]}
 {"state_t": [["fire", "state", "burning"], ["wood", "state", "dry"], ["temperature", "state", "cold"]], "state_t+1": [["fire", "state", "burning"], ["wood", "state", "burnt"], ["temperature", "state", "warm"]]}
 {"state_t": [["sky", "state", "clear"], ["temperature", "state", "hot"], ["ground", "state", "wet"]], "state_t+1": [["sky", "state", "clear"], ["temperature", "state", "hot"], ["ground", "state", "dry"]]}
-{"state_t": [["person_a", "state", "sad"], ["person_b", "state", "friendly"], ["person_b", "proximity", "nearby"]], "state_t+1": [["person_a", "state", "comforted"], ["person_b", "state", "caring"], ["person_b", "proximity", "nearby"]]}
+{"state_t": [["alice", "state", "sad"], ["bob", "state", "friendly"], ["bob", "proximity", "nearby"]], "state_t+1": [["alice", "state", "comforted"], ["bob", "state", "caring"], ["bob", "proximity", "nearby"]]}
 {"state_t": [["candle", "state", "lit"], ["wind", "state", "strong"], ["room", "state", "bright"]], "state_t+1": [["candle", "state", "unlit"], ["wind", "state", "strong"], ["room", "state", "dark"]]}
-{"state_t": [["food", "state", "frozen"], ["oven", "state", "on"], ["person_a", "state", "hungry"]], "state_t+1": [["food", "state", "thawed"], ["oven", "state", "on"], ["person_a", "state", "hungry"]]}
-{"state_t": [["glass", "state", "empty"], ["person_a", "state", "satisfied"]], "state_t+1": [["glass", "state", "empty"], ["person_a", "state", "satisfied"]]}
+{"state_t": [["food", "state", "frozen"], ["oven", "state", "on"], ["alice", "state", "hungry"]], "state_t+1": [["food", "state", "thawed"], ["oven", "state", "on"], ["alice", "state", "hungry"]]}
+{"state_t": [["glass", "state", "empty"], ["alice", "state", "satisfied"]], "state_t+1": [["glass", "state", "empty"], ["alice", "state", "satisfied"]]}
 {"state_t": [["stove", "state", "off"], ["pot", "state", "empty"]], "state_t+1": [["stove", "state", "off"], ["pot", "state", "empty"]]}
 {"state_t": [["sky", "state", "clear"], ["wind", "state", "calm"]], "state_t+1": [["sky", "state", "clear"], ["wind", "state", "calm"]]}
-{"state_t": [["person_a", "state", "happy"], ["person_b", "state", "happy"]], "state_t+1": [["person_a", "state", "happy"], ["person_b", "state", "happy"]]}
+{"state_t": [["alice", "state", "happy"], ["bob", "state", "happy"]], "state_t+1": [["alice", "state", "happy"], ["bob", "state", "happy"]]}
 {"state_t": [["door", "state", "open"], ["switch", "state", "on"]], "state_t+1": [["door", "state", "open"], ["switch", "state", "on"]]}
 {"state_t": [["light", "state", "on"], ["switch", "state", "on"]], "state_t+1": [["light", "state", "on"], ["switch", "state", "on"]]}
 {"state_t": [["ball", "position", "low"], ["ball", "support", "surface"], ["ground", "state", "flat"]], "state_t+1": [["ball", "position", "low"], ["ball", "support", "surface"], ["ground", "state", "flat"]]}
-{"state_t": [["person_a", "state", "rested"], ["bed", "state", "available"], ["room", "state", "bright"]], "state_t+1": [["person_a", "state", "rested"], ["bed", "state", "available"], ["room", "state", "bright"]]}
+{"state_t": [["alice", "state", "rested"], ["bed", "state", "available"], ["room", "state", "bright"]], "state_t+1": [["alice", "state", "rested"], ["bed", "state", "available"], ["room", "state", "bright"]]}
 {"state_t": [["food", "state", "raw"], ["stove", "state", "off"]], "state_t+1": [["food", "state", "raw"], ["stove", "state", "off"]]}
 {"state_t": [["candle", "state", "lit"], ["wind", "state", "calm"]], "state_t+1": [["candle", "state", "lit"], ["wind", "state", "calm"]]}
-{"state_t": [["person_a", "state", "thirsty"], ["glass", "state", "empty"]], "state_t+1": [["person_a", "state", "thirsty"], ["glass", "state", "empty"]]}
-{"state_t": [["lever", "state", "down"], ["gate", "state", "open"], ["person_a", "state", "happy"]], "state_t+1": [["lever", "state", "down"], ["gate", "state", "open"], ["person_a", "state", "happy"]]}
+{"state_t": [["alice", "state", "thirsty"], ["glass", "state", "empty"]], "state_t+1": [["alice", "state", "thirsty"], ["glass", "state", "empty"]]}
+{"state_t": [["lever", "state", "down"], ["gate", "state", "open"], ["alice", "state", "happy"]], "state_t+1": [["lever", "state", "down"], ["gate", "state", "open"], ["alice", "state", "happy"]]}
 {"state_t": [["ice", "state", "solid"], ["temperature", "state", "cold"]], "state_t+1": [["ice", "state", "solid"], ["temperature", "state", "cold"]]}
 {"state_t": [["sky", "state", "raining"], ["ground", "state", "wet"], ["plants", "state", "watered"], ["temperature", "state", "cold"]], "state_t+1": [["sky", "state", "raining"], ["ground", "state", "wet"], ["plants", "state", "growing"], ["temperature", "state", "cold"]]}
-{"state_t": [["person_a", "state", "hungry"], ["food", "state", "raw"], ["stove", "state", "on"], ["plate", "state", "clean"]], "state_t+1": [["person_a", "state", "hungry"], ["food", "state", "cooked"], ["stove", "state", "on"], ["plate", "state", "clean"]]}
+{"state_t": [["alice", "state", "hungry"], ["food", "state", "raw"], ["stove", "state", "on"], ["plate", "state", "clean"]], "state_t+1": [["alice", "state", "hungry"], ["food", "state", "cooked"], ["stove", "state", "on"], ["plate", "state", "clean"]]}
 {"state_t": [["switch", "state", "off"], ["light", "state", "off"], ["door", "state", "closed"], ["room", "state", "dark"]], "state_t+1": [["switch", "state", "on"], ["light", "state", "on"], ["door", "state", "open"], ["room", "state", "bright"]]}
 {"state_t": [["pot", "state", "boiling"], ["lid", "state", "on"]], "state_t+1": [["pot", "state", "boiling"], ["lid", "state", "on"], ["steam", "state", "rising"]]}
-{"state_t": [["glass", "state", "full"], ["person_a", "action", "drop"]], "state_t+1": [["glass", "state", "broken"], ["water", "state", "spilled"], ["person_a", "action", "idle"]]}
+{"state_t": [["glass", "state", "full"], ["alice", "action", "drop"]], "state_t+1": [["glass", "state", "broken"], ["water", "state", "spilled"], ["alice", "action", "idle"]]}
 {"state_t": [["sky", "state", "clear"], ["temperature", "state", "dropping"]], "state_t+1": [["sky", "state", "cloudy"], ["temperature", "state", "cold"], ["wind", "state", "breezy"]]}
 {"state_t": [["fire", "state", "dying"], ["wood", "state", "ash"], ["temperature", "state", "warm"]], "state_t+1": [["fire", "state", "dead"], ["temperature", "state", "cooling"]]}
-{"state_t": [["person_a", "action", "kick"], ["ball", "state", "still"], ["ground", "state", "flat"]], "state_t+1": [["ball", "state", "rolling"], ["ground", "state", "flat"]]}
+{"state_t": [["alice", "action", "kick"], ["ball", "state", "still"], ["ground", "state", "flat"]], "state_t+1": [["ball", "state", "rolling"], ["ground", "state", "flat"]]}
 {"state_t": [["candle", "state", "lit"], ["match", "state", "used"]], "state_t+1": [["candle", "state", "lit"]]}
-{"state_t": [["door", "state", "open"], ["person_a", "action", "close"], ["light", "state", "on"]], "state_t+1": [["door", "state", "closed"], ["light", "state", "on"]]}
-{"state_t": [["sky", "state", "raining"], ["person_a", "state", "outside"]], "state_t+1": [["sky", "state", "raining"], ["person_a", "state", "outside"], ["person_a", "state", "wet"]]}
+{"state_t": [["door", "state", "open"], ["alice", "action", "close"], ["light", "state", "on"]], "state_t+1": [["door", "state", "closed"], ["light", "state", "on"]]}
+{"state_t": [["sky", "state", "raining"], ["alice", "state", "outside"]], "state_t+1": [["sky", "state", "raining"], ["alice", "state", "outside"], ["alice", "state", "wet"]]}
 {"state_t": [["stove", "state", "on"], ["pot", "state", "empty"]], "state_t+1": [["stove", "state", "on"], ["pot", "state", "empty"], ["pot", "temperature", "hot"]]}
-{"state_t": [["person_a", "state", "hungry"], ["person_a", "state", "thirsty"], ["food", "state", "cooked"], ["glass", "state", "full"]], "state_t+1": [["person_a", "state", "satisfied"], ["food", "state", "eaten"], ["glass", "state", "empty"]]}
-{"state_t": [["mug", "state", "full"], ["person_a", "state", "thirsty"]], "state_t+1": [["mug", "state", "empty"], ["person_a", "state", "satisfied"]]}
-{"state_t": [["bottle", "state", "full"], ["person_a", "state", "thirsty"]], "state_t+1": [["bottle", "state", "empty"], ["person_a", "state", "satisfied"]]}
-{"state_t": [["flask", "state", "full"], ["person_a", "state", "thirsty"]], "state_t+1": [["flask", "state", "empty"], ["person_a", "state", "satisfied"]]}
-{"state_t": [["mug", "state", "full"], ["person_b", "state", "thirsty"]], "state_t+1": [["mug", "state", "empty"], ["person_b", "state", "satisfied"]]}
+{"state_t": [["alice", "state", "hungry"], ["alice", "state", "thirsty"], ["food", "state", "cooked"], ["glass", "state", "full"]], "state_t+1": [["alice", "state", "satisfied"], ["food", "state", "eaten"], ["glass", "state", "empty"]]}
+{"state_t": [["mug", "state", "full"], ["alice", "state", "thirsty"]], "state_t+1": [["mug", "state", "empty"], ["alice", "state", "satisfied"]]}
+{"state_t": [["bottle", "state", "full"], ["alice", "state", "thirsty"]], "state_t+1": [["bottle", "state", "empty"], ["alice", "state", "satisfied"]]}
+{"state_t": [["flask", "state", "full"], ["alice", "state", "thirsty"]], "state_t+1": [["flask", "state", "empty"], ["alice", "state", "satisfied"]]}
+{"state_t": [["mug", "state", "full"], ["bob", "state", "thirsty"]], "state_t+1": [["mug", "state", "empty"], ["bob", "state", "satisfied"]]}
 {"state_t": [["food", "state", "raw"], ["grill", "state", "on"]], "state_t+1": [["food", "state", "cooked"], ["grill", "state", "on"]]}
 {"state_t": [["food", "state", "raw"], ["campfire", "state", "on"]], "state_t+1": [["food", "state", "cooked"], ["campfire", "state", "on"]]}
 {"state_t": [["food", "state", "cooked"], ["grill", "state", "on"]], "state_t+1": [["food", "state", "burnt"], ["grill", "state", "on"]]}
@@ -101,21 +101,21 @@
 {"state_t": [["rock", "position", "low"], ["rock", "support", "surface"]], "state_t+1": [["rock", "position", "low"], ["rock", "support", "surface"]]}
 {"state_t": [["pan", "state", "full"], ["stove", "state", "on"]], "state_t+1": [["pan", "state", "boiling"], ["stove", "state", "on"]]}
 {"state_t": [["pan", "state", "boiling"], ["stove", "state", "off"]], "state_t+1": [["pan", "state", "cooling"], ["stove", "state", "off"]]}
-{"state_t": [["person_c", "state", "lonely"], ["person_a", "proximity", "nearby"]], "state_t+1": [["person_c", "state", "social"], ["person_a", "proximity", "nearby"]]}
-{"state_t": [["person_c", "state", "sad"], ["person_a", "state", "friendly"]], "state_t+1": [["person_c", "state", "comforted"], ["person_a", "state", "caring"]]}
-{"state_t": [["person_a", "state", "angry"], ["person_c", "proximity", "nearby"]], "state_t+1": [["person_a", "state", "angry"], ["person_c", "state", "uncomfortable"]]}
-{"state_t": [["person_b", "state", "bored"], ["person_c", "proximity", "far"]], "state_t+1": [["person_b", "state", "lonely"], ["person_c", "proximity", "far"]]}
+{"state_t": [["carol", "state", "lonely"], ["alice", "proximity", "nearby"]], "state_t+1": [["carol", "state", "social"], ["alice", "proximity", "nearby"]]}
+{"state_t": [["carol", "state", "sad"], ["alice", "state", "friendly"]], "state_t+1": [["carol", "state", "comforted"], ["alice", "state", "caring"]]}
+{"state_t": [["alice", "state", "angry"], ["carol", "proximity", "nearby"]], "state_t+1": [["alice", "state", "angry"], ["carol", "state", "uncomfortable"]]}
+{"state_t": [["bob", "state", "bored"], ["carol", "proximity", "far"]], "state_t+1": [["bob", "state", "lonely"], ["carol", "proximity", "far"]]}
 {"state_t": [["road", "state", "dry"], ["sky", "state", "raining"]], "state_t+1": [["road", "state", "wet"], ["sky", "state", "raining"]]}
 {"state_t": [["garden", "state", "dry"], ["sky", "state", "raining"]], "state_t+1": [["garden", "state", "wet"], ["sky", "state", "raining"]]}
 {"state_t": [["road", "state", "wet"], ["temperature", "state", "warm"]], "state_t+1": [["road", "state", "dry"], ["temperature", "state", "warm"]]}
-{"state_t": [["button", "state", "off"], ["person_a", "action", "press"]], "state_t+1": [["button", "state", "on"], ["person_a", "action", "idle"]]}
-{"state_t": [["button", "state", "on"], ["person_a", "action", "press"]], "state_t+1": [["button", "state", "off"], ["person_a", "action", "idle"]]}
-{"state_t": [["mug", "state", "full"], ["person_a", "state", "thirsty"], ["sky", "state", "clear"]], "state_t+1": [["mug", "state", "empty"], ["person_a", "state", "satisfied"], ["sky", "state", "clear"]]}
+{"state_t": [["button", "state", "off"], ["alice", "action", "press"]], "state_t+1": [["button", "state", "on"], ["alice", "action", "idle"]]}
+{"state_t": [["button", "state", "on"], ["alice", "action", "press"]], "state_t+1": [["button", "state", "off"], ["alice", "action", "idle"]]}
+{"state_t": [["mug", "state", "full"], ["alice", "state", "thirsty"], ["sky", "state", "clear"]], "state_t+1": [["mug", "state", "empty"], ["alice", "state", "satisfied"], ["sky", "state", "clear"]]}
 {"state_t": [["food", "state", "raw"], ["grill", "state", "on"], ["wind", "state", "calm"]], "state_t+1": [["food", "state", "cooked"], ["grill", "state", "on"], ["wind", "state", "calm"]]}
-{"state_t": [["rock", "position", "high"], ["rock", "support", "unsupported"], ["person_a", "state", "happy"]], "state_t+1": [["rock", "position", "low"], ["rock", "support", "unsupported"], ["person_a", "state", "happy"]]}
-{"state_t": [["person_c", "state", "lonely"], ["person_a", "proximity", "nearby"], ["sky", "state", "raining"]], "state_t+1": [["person_c", "state", "social"], ["person_a", "proximity", "nearby"], ["sky", "state", "raining"]]}
-{"state_t": [["mug", "state", "empty"], ["person_a", "state", "satisfied"]], "state_t+1": [["mug", "state", "empty"], ["person_a", "state", "satisfied"]]}
+{"state_t": [["rock", "position", "high"], ["rock", "support", "unsupported"], ["alice", "state", "happy"]], "state_t+1": [["rock", "position", "low"], ["rock", "support", "unsupported"], ["alice", "state", "happy"]]}
+{"state_t": [["carol", "state", "lonely"], ["alice", "proximity", "nearby"], ["sky", "state", "raining"]], "state_t+1": [["carol", "state", "social"], ["alice", "proximity", "nearby"], ["sky", "state", "raining"]]}
+{"state_t": [["mug", "state", "empty"], ["alice", "state", "satisfied"]], "state_t+1": [["mug", "state", "empty"], ["alice", "state", "satisfied"]]}
 {"state_t": [["grill", "state", "off"], ["food", "state", "raw"]], "state_t+1": [["grill", "state", "off"], ["food", "state", "raw"]]}
 {"state_t": [["rock", "position", "low"], ["rock", "support", "surface"], ["ground", "state", "flat"]], "state_t+1": [["rock", "position", "low"], ["rock", "support", "surface"], ["ground", "state", "flat"]]}
-{"state_t": [["bottle", "state", "full"], ["person_a", "action", "drop"]], "state_t+1": [["bottle", "state", "broken"], ["water", "state", "spilled"], ["person_a", "action", "idle"]]}
-{"state_t": [["button", "state", "off"], ["person_a", "action", "press"], ["light", "state", "off"]], "state_t+1": [["button", "state", "on"], ["light", "state", "on"]]}
+{"state_t": [["bottle", "state", "full"], ["alice", "action", "drop"]], "state_t+1": [["bottle", "state", "broken"], ["water", "state", "spilled"], ["alice", "action", "idle"]]}
+{"state_t": [["button", "state", "off"], ["alice", "action", "press"], ["light", "state", "off"]], "state_t+1": [["button", "state", "on"], ["light", "state", "on"]]}

@@ -92,7 +92,7 @@ def main():
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True, collate_fn=collate_fn)
 
     test_sets = {}
-    for name in ["test_comp", "test_seen", "propara_dev", "openpi_dev"]:
+    for name in ["test_comp", "test_seen", "test_context", "propara_dev", "openpi_dev"]:
         p = data_dir / f"{name}.jsonl"
         if p.exists():
             test_sets[name] = TripleTransitionDataset(p, vocab, max_triples=8)
@@ -105,9 +105,9 @@ def main():
 
     # --- Load transformer (already trained) ---
     print("\n=== Loading Transformer ===")
-    run_dir = Path("results/06_expanded_tests")
+    run_dir = Path("results/08_context_dependent")
     if not run_dir.exists():
-        run_dir = Path("results/05_three_domains")
+        run_dir = Path("results/06_expanded_tests")
     t_config = ModelConfig.load(run_dir / "config.json")
     transformer = TripleWorldModel(t_config).to(device)
     ckpt = run_dir / "model_best.pt"

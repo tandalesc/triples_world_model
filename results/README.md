@@ -9,8 +9,9 @@ results/
   03_glove_control_random_init/  Random embed control for GloVe A/B test
   04_glove_pretrained/       GloVe 300d pretrained embeddings
   05_three_domains/          HW + ProPara + OpenPI (1288 train)
-  06_expanded_tests/         Same model, harder test sets (55+26) [CANONICAL]
+  06_expanded_tests/         Same model, harder test sets (55+26)
   07_ablation_no_propara/    Ablation: removed ProPara from training
+  08_context_dependent/      Context-dependent attention test [CANONICAL]
   comparisons/               Cross-model comparisons (LLM, MLP, charts)
 ```
 
@@ -28,36 +29,53 @@ Each run directory contains: `config.json`, `train_log.jsonl`, `vocab.json`,
 | 5 | + OpenPI | 0.836 | 0.877 | +429 diverse attributes |
 | 6 | Expanded tests | 0.741 | 0.738 | 55+26 harder cross-domain tests |
 | 7 | No ProPara ablation | 0.717 | 0.709 | ProPara removal hurts (-2.4%) |
+| 8 | Context-dependent | 0.740 | 0.773 | +83 cross-entity examples, alice/bob/carol |
 
-## Final 4-Way Comparison (run 06)
+## The Attention Test (run 08)
 
-### Semantic F1 (Embedding Gemma, threshold=0.85)
-| Model | Comp Gen (55) | Seen (26) | OpenPI Dev (4) |
+The key experiment: transitions where the same triple's outcome depends on
+other triples in the state. The MLP processes each position independently
+and cannot learn these; the transformer attends across positions.
+
+### Context-Dependent Test (30 examples)
+| Model | Exact F1 | Exact Match | Delta F1 |
 |-------|:---:|:---:|:---:|
-| Copy baseline | 0.290 | 0.290 | 0.290 |
-| Qwen3-VL 8B 5-shot | 0.728 | 0.685 | 0.833 |
-| MLP + GloVe | 0.779 | 0.753 | 0.917 |
-| **TWM (ours)** | **0.818** | **0.856** | **0.917** |
+| Copy baseline | 0.29 | — | — |
+| Qwen3-VL 8B (5-shot) | 0.59 | 0.20 | — |
+| MLP + GloVe | 0.76 | 0.50 | 0.73 |
+| **TWM (ours)** | **0.99** | **0.97** | **0.98** |
 
-### Exact F1
-| Model | Comp Gen (55) | Seen (26) | OpenPI Dev (4) |
+On standard tests TWM leads MLP by 4-8%. On context-dependent tests: **+23% F1**.
+
+The MLP fails specifically on "no-change" cases where it must check other
+entities to know nothing happens:
+- `flask full + nobody thirsty` → MLP empties the flask
+- `door closed + nobody pulling` → MLP opens the door
+- `bob lonely + everyone far` → MLP makes bob social
+- `carol tired + bed occupied` → MLP rests carol
+
+TWM wins 15/30 examples the MLP gets wrong. MLP wins 0.
+
+### Full 4-Way Comparison (Exact F1)
+| Model | Context (30) | Comp Gen (55) | Seen (26) |
 |-------|:---:|:---:|:---:|
-| Copy baseline | 0.290 | 0.290 | 0.290 |
-| Qwen3-VL 8B 5-shot | 0.557 | 0.565 | 0.583 |
-| MLP + GloVe | 0.712 | 0.605 | 0.667 |
-| **TWM (ours)** | **0.741** | **0.738** | **0.833** |
+| Copy baseline | 0.29 | 0.29 | 0.29 |
+| Qwen3-VL 8B 5-shot | 0.59 | 0.56 | 0.57 |
+| MLP + GloVe | 0.76 | 0.70 | 0.64 |
+| **TWM (ours)** | **0.99** | **0.74** | **0.77** |
 
 ### Key Findings
-1. **TWM beats 8B LLM** on all splits, both metrics. 3M params vs 8B.
-2. **Attention matters**: TWM > MLP by +3-13% exact F1. Not just GloVe.
+1. **Attention is essential for cross-entity reasoning**: +23% F1 on context-dependent tests.
+2. **TWM beats 8B LLM** on all splits. 3M params vs 8B.
 3. **Compositional generalization confirmed**: 74% exact F1 on novel combos.
-4. **Multi-domain training helps**: 3 domains > 2 > 1.
-5. **GloVe helps modestly**: +2-3% F1, bigger gains in token accuracy.
+4. **Entity embeddings matter**: alice/bob/carol (GloVe sim 0.28) vs person_a/person_b (sim 0.62).
+5. **Multi-domain training helps**: 3 domains > 2 > 1.
 
 ## comparisons/
 
 - `llm_bench_{split}_5shot.json` — Per-example Qwen3-VL 8B results
 - `semantic_comparison.json` — TWM vs LLM semantic eval summary
+- `context_dependent_comparison.png` — Context-dependent attention test chart
 - `fair_comparison.png` — Semantic F1 bar chart (TWM vs LLM)
 - `full_comparison.png` — 4-way comparison bar chart
 - `mlp_vs_transformer.png` — MLP baseline comparison

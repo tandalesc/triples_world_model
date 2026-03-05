@@ -39,6 +39,7 @@ def main():
         data / "train.jsonl",
         data / "propara_train.jsonl",
         data / "openpi_train.jsonl",
+        data / "context_dependent_train.jsonl",
     )
     print(f"  TOTAL: {n}\n")
 
@@ -46,8 +47,11 @@ def main():
     # Handwritten test_comp/test_seen test compositional generalization
     # ProPara dev/test have different processes
     print("Copying test sets:")
-    for name in ["test_comp.jsonl", "test_seen.jsonl"]:
-        src = data / name
+    for src_name, dst_name in [("test_comp_v2.jsonl", "test_comp.jsonl"),
+                                ("test_seen_v2.jsonl", "test_seen.jsonl"),
+                                ("test_context.jsonl", "test_context.jsonl")]:
+        src = data / src_name
+        name = dst_name
         dst = combined / name
         if src.exists():
             with open(src) as f:
