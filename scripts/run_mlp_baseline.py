@@ -105,9 +105,9 @@ def main():
 
     # --- Load transformer (already trained) ---
     print("\n=== Loading Transformer ===")
-    run_dir = Path("results/run_v3_expanded")
+    run_dir = Path("results/06_expanded_tests")
     if not run_dir.exists():
-        run_dir = Path("results/run_v3_pretrained")
+        run_dir = Path("results/05_three_domains")
     t_config = ModelConfig.load(run_dir / "config.json")
     transformer = TripleWorldModel(t_config).to(device)
     ckpt = run_dir / "model_best.pt"

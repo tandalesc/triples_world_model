@@ -121,7 +121,7 @@ def main():
     vocab = Vocabulary.load(data_dir / "vocab.json")
 
     # Load TWM
-    run_dir = Path("results/run_v3_expanded")
+    run_dir = Path("results/06_expanded_tests")
     t_config = ModelConfig.load(run_dir / "config.json")
     twm = TripleWorldModel(t_config).to(device)
     ckpt = run_dir / "model_best.pt"
@@ -132,7 +132,7 @@ def main():
     # Load LLM results
     llm_results = {}
     for split in ["test_comp", "test_seen", "openpi_dev"]:
-        p = Path(f"results/llm_bench_{split}_5shot.json")
+        p = Path(f"results/comparisons/llm_bench_{split}_5shot.json")
         if p.exists():
             with open(p) as f:
                 llm_results[split] = json.load(f)
@@ -175,9 +175,9 @@ def main():
                 "sem_exact": llm_results[split]["sem_exact"],
             }
 
-    with open("results/semantic_comparison.json", "w") as f:
+    with open("results/comparisons/semantic_comparison.json", "w") as f:
         json.dump(all_results, f, indent=2)
-    print("Saved results/semantic_comparison.json")
+    print("Saved results/comparisons/semantic_comparison.json")
 
 
 if __name__ == "__main__":
