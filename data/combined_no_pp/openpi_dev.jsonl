@@ -1,0 +1,4 @@
+{"state_t": [["ball", "action", "unused"]], "state_t+1": [["ball", "action", "used"]]}
+{"state_t": [["area", "state", "considered"], ["location", "state", "observed"], ["area", "knowledge", "unselected"]], "state_t+1": [["area", "state", "selected"], ["location", "state", "chosen"], ["area", "knowledge", "selected"]]}
+{"state_t": [["house", "cleanness", "dirty"]], "state_t+1": [["house", "cleanness", "clean"]]}
+{"state_t": [["task", "completion", "incomplete"]], "state_t+1": [["task", "completion", "finished"]]}

@@ -8,6 +8,8 @@ dependencies = [
     "numpy>=1.24",
     "tqdm",
     "matplotlib",
+    "gensim>=4.4.0",
+    "requests>=2.32.5",
 ]
 
 [build-system]

@@ -1,0 +1,44 @@
+{
+  "split": "openpi_dev",
+  "few_shot": 5,
+  "model": "ramblerun/Multimodal-AI",
+  "n_examples": 4,
+  "exact_f1": 0.5833333333333334,
+  "exact_match": 0.5,
+  "sem_f1": 0.8333333333333334,
+  "sem_exact": 0.75,
+  "per_example": [
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.3333333333333333,
+      "exact_match": 0,
+      "sem_precision": 0.3333333333333333,
+      "sem_recall": 0.3333333333333333,
+      "sem_f1": 0.3333333333333333,
+      "sem_exact": 0
+    },
+    {
+      "exact_f1": 1.0,
+      "exact_match": 1,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    },
+    {
+      "exact_f1": 0.0,
+      "exact_match": 0,
+      "sem_precision": 1.0,
+      "sem_recall": 1.0,
+      "sem_f1": 1.0,
+      "sem_exact": 1
+    }
+  ]
+}

@@ -7,3 +7,13 @@ build/
 
 # Model checkpoints are large — keep in results/ but don't track .pt files
 results/**/*.pt
+
+# Pretrained embeddings
+data/combined/pretrained_embeds.pt
+
+# Raw downloaded datasets (large)
+data/openpi_raw/
+data/propara_raw/
+
+# OS
+.DS_Store

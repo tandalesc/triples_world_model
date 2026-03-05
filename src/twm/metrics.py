@@ -120,6 +120,82 @@ def compute_metrics(
     }
 
 
+def compute_delta_metrics(
+    model: TripleWorldModel,
+    dataset: TripleTransitionDataset,
+    vocab: Vocabulary,
+    device: torch.device,
+) -> dict[str, float]:
+    """Compute metrics on CHANGED triples only.
+
+    Strips out triples identical between input and output, then measures
+    accuracy on the remainder. This isolates the model's ability to predict
+    actual state changes vs just copying.
+    """
+    was_training = model.training
+    model.train(False)
+
+    sum_precision = 0.0
+    sum_recall = 0.0
+    sum_f1 = 0.0
+    total_exact = 0
+    n = 0
+    n_with_changes = 0
+
+    with torch.no_grad():
+        for i in range(len(dataset)):
+            ex = dataset[i]
+            input_triples_raw, output_triples_raw = dataset.examples[i]
+
+            # Find which triples changed
+            input_set = set(tuple(t) for t in input_triples_raw)
+            output_set = set(tuple(t) for t in output_triples_raw)
+            persisted = input_set & output_set
+
+            # Target delta: triples in output that weren't in input
+            tgt_delta = output_set - persisted
+            # Also count triples that disappeared (in input but not output)
+            disappeared = input_set - output_set
+
+            if not tgt_delta and not disappeared:
+                continue  # no changes in this example
+
+            n_with_changes += 1
+
+            # Get model prediction
+            pred_ids = model.predict(ex["input_ids"].unsqueeze(0).to(device))[0].cpu().tolist()
+            pred_triples = vocab.decode_triples(pred_ids)
+            pred_set = set(tuple(t) for t in pred_triples)
+
+            # Predicted delta: triples model outputs that weren't in input
+            pred_delta = pred_set - persisted
+
+            correct = len(pred_delta & tgt_delta)
+            prec = correct / max(len(pred_delta), 1)
+            rec = correct / max(len(tgt_delta), 1)
+            f1 = 2 * prec * rec / max(prec + rec, 1e-8)
+
+            # Also check: did model correctly NOT output disappeared triples?
+            false_persist = len(pred_set & disappeared)
+
+            sum_precision += prec
+            sum_recall += rec
+            sum_f1 += f1
+            total_exact += int(pred_delta == tgt_delta and false_persist == 0)
+            n += 1
+
+    if was_training:
+        model.train(True)
+
+    return {
+        "delta_precision": sum_precision / max(n, 1),
+        "delta_recall": sum_recall / max(n, 1),
+        "delta_f1": sum_f1 / max(n, 1),
+        "delta_exact": total_exact / max(n, 1),
+        "n_with_changes": n_with_changes,
+    }
+
+
 def copy_baseline(dataset: TripleTransitionDataset) -> dict[str, float]:
     """Compute metrics for the trivial baseline: predict output = input."""
     sum_f1 = 0.0

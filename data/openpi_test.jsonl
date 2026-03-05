@@ -1,0 +1,1 @@
+{"state_t": [["paste", "location", "in_bowl"], ["skin", "cleanness", "clean"], ["cloth", "cleanness", "clean"]], "state_t+1": [["paste", "location", "on_skin"], ["skin", "cleanness", "dirty"], ["cloth", "cleanness", "dirty"]]}

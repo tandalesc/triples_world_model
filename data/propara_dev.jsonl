@@ -1,0 +1,14 @@
+{"state_t": [["steam", "location", "turbine"]], "state_t+1": [["steam", "location", "turbine"], ["electricity", "location", "generator"]]}
+{"state_t": [["waste", "location", "urine"], ["urine", "location", "kidney"]], "state_t+1": [["waste", "location", "bladder"], ["urine", "location", "bladder"]]}
+{"state_t": [["blood", "location", "renal_artery"], ["waste", "location", "blood"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "blood"]]}
+{"state_t": [["fuel", "location", "combustion_chamber"], ["air", "location", "cylinder"]], "state_t+1": [["fuel", "location", "combustion_chamber"], ["air", "location", "cylinder"], ["spark", "location", "cylinder"], ["pressure", "location", "cylinder"]]}
+{"state_t": [["fuel", "location", "combustion_chamber"], ["air", "location", "cylinder"], ["spark", "location", "cylinder"], ["pressure", "location", "cylinder"]], "state_t+1": [["fuel", "location", "combustion_chamber"], ["air", "location", "cylinder"], ["pressure", "location", "cylinder"]]}
+{"state_t": [["carbon_dioxide", "location", "air"], ["rain", "location", "air"], ["limestone", "location", "soil"]], "state_t+1": [["rain", "location", "air"], ["limestone", "location", "soil"]]}
+{"state_t": [["rain", "location", "air"], ["limestone", "location", "soil"]], "state_t+1": [["acid", "location", "soil"], ["limestone", "location", "soil"]]}
+{"state_t": [["acid", "location", "soil"], ["limestone", "location", "soil"]], "state_t+1": [["acid", "location", "soil"]]}
+{"state_t": [["rainwater", "location", "air"], ["carbon_dioxide", "location", "air"], ["water", "location", "air"], ["limestone", "location", "soil"]], "state_t+1": [["rainwater", "location", "air"], ["carbon_dioxide", "location", "rainwater"], ["water", "location", "air"], ["limestone", "location", "soil"]]}
+{"state_t": [["rainwater", "location", "air"], ["carbon_dioxide", "location", "rainwater"], ["water", "location", "air"], ["limestone", "location", "soil"]], "state_t+1": [["rainwater", "location", "soil"], ["carbon_dioxide", "location", "rainwater"], ["water", "location", "soil"], ["limestone", "location", "soil"]]}
+{"state_t": [["food", "location", "mouth"]], "state_t+1": [["food", "location", "stomach"]]}
+{"state_t": [["sugar", "location", "blood"]], "state_t+1": [["sugar", "location", "body"]]}
+{"state_t": [["sugar", "location", "body"]], "state_t+1": [["energy", "location", "muscle"]]}
+{"state_t": [["blood", "location", "kidney"], ["kidney", "location", "body"]], "state_t+1": [["blood", "location", "kidney"], ["kidney", "location", "body"], ["urine", "location", "kidney"]]}

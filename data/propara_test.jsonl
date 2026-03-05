@@ -1,0 +1,17 @@
+{"state_t": [["plant", "location", "rock"], ["bones", "location", "rock"]], "state_t+1": [["plant", "location", "rock"]]}
+{"state_t": [["water", "location", "house"]], "state_t+1": [["water", "location", "ground"]]}
+{"state_t": [["water", "location", "ground"]], "state_t+1": [["water", "location", "stream"]]}
+{"state_t": [["blood", "location", "heart"], ["carbon_dioxide", "location", "blood"], ["oxygen", "location", "lung"]], "state_t+1": [["blood", "location", "lung"], ["carbon_dioxide", "location", "blood"], ["oxygen", "location", "lung"]]}
+{"state_t": [["blood", "location", "lung"], ["carbon_dioxide", "location", "blood"], ["oxygen", "location", "lung"]], "state_t+1": [["blood", "location", "lung"], ["oxygen", "location", "lung"]]}
+{"state_t": [["blood", "location", "lung"], ["oxygen", "location", "lung"]], "state_t+1": [["blood", "location", "lung"], ["oxygen", "location", "blood"]]}
+{"state_t": [["blood", "location", "lung"], ["oxygen", "location", "blood"]], "state_t+1": [["blood", "location", "heart"], ["oxygen", "location", "blood"]]}
+{"state_t": [["blood", "location", "heart"], ["oxygen", "location", "blood"]], "state_t+1": [["blood", "location", "body"], ["oxygen", "location", "blood"]]}
+{"state_t": [["fossil_fuel", "location", "surface"], ["energy", "location", "fossil_fuel"]], "state_t+1": [["energy", "location", "fossil_fuel"]]}
+{"state_t": [["seed", "location", "tree"]], "state_t+1": [["seed", "location", "soil"]]}
+{"state_t": [["seed", "location", "soil"]], "state_t+1": [["sprouts", "location", "soil"]]}
+{"state_t": [["sprouts", "location", "soil"]], "state_t+1": [["seedling", "location", "soil"]]}
+{"state_t": [["fruit", "location", "tree"]], "state_t+1": [["fruit", "location", "tree"], ["flowers", "location", "tree"]]}
+{"state_t": [["flower", "location", "tree"]], "state_t+1": [["fruit", "location", "tree"]]}
+{"state_t": [["vapor", "location", "air"]], "state_t+1": [["clouds", "location", "air"]]}
+{"state_t": [["water_droplets", "location", "air"], ["cloud", "location", "air"]], "state_t+1": [["water_droplets", "location", "cloud"], ["cloud", "location", "air"]]}
+{"state_t": [["sediment", "location", "remains"]], "state_t+1": [["rock", "location", "remains"]]}

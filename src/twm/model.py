@@ -17,6 +17,7 @@ class ModelConfig:
     d_ff: int = 1024
     max_triples: int = 8
     dropout: float = 0.1
+    pretrained_embed_dim: int | None = None  # set when using pretrained embeddings
 
     @property
     def max_positions(self) -> int:
@@ -33,11 +34,24 @@ class ModelConfig:
 
 
 class TripleWorldModel(nn.Module):
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, pretrained_embeds: torch.Tensor | None = None):
         super().__init__()
         self.config = config
 
-        self.token_emb = nn.Embedding(config.vocab_size, config.d_model, padding_idx=0)
+        embed_dim = config.pretrained_embed_dim or config.d_model
+        if pretrained_embeds is not None:
+            embed_dim = pretrained_embeds.shape[1]
+            config.pretrained_embed_dim = embed_dim
+
+        self.token_emb = nn.Embedding(config.vocab_size, embed_dim, padding_idx=0)
+        if pretrained_embeds is not None:
+            self.token_emb.weight.data.copy_(pretrained_embeds)
+
+        if embed_dim != config.d_model:
+            self.embed_proj = nn.Linear(embed_dim, config.d_model, bias=False)
+        else:
+            self.embed_proj = nn.Identity()
+
         self.triple_pos_emb = nn.Embedding(config.max_triples, config.d_model)
         self.role_emb = nn.Embedding(3, config.d_model)  # entity=0, relation=1, value=2
 
@@ -71,7 +85,7 @@ class TripleWorldModel(nn.Module):
             logits: (B, max_triples * 3, vocab_size)
         """
         pos_enc = self._build_position_encoding(input_ids.device)
-        input_emb = self.token_emb(input_ids)
+        input_emb = self.embed_proj(self.token_emb(input_ids))
         x = input_emb + pos_enc
 
         # Padding mask: pad positions CAN attend to non-pad (useful representations),

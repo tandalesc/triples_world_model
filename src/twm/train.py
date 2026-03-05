@@ -71,8 +71,13 @@ def train(args):
         max_triples=args.max_triples,
         dropout=args.dropout,
     )
-    config.save(out_dir / "config.json")
-    model = TripleWorldModel(config).to(device)
+    pretrained_embeds = None
+    if args.pretrained_embeds:
+        pretrained_embeds = torch.load(args.pretrained_embeds, weights_only=True)
+        print(f"Pretrained embeddings: {pretrained_embeds.shape}")
+
+    model = TripleWorldModel(config, pretrained_embeds=pretrained_embeds).to(device)
+    config.save(out_dir / "config.json")  # save after init so pretrained_embed_dim is set
     print(f"Parameters: {model.param_count():,}")
 
     # --- data ---
@@ -84,7 +89,7 @@ def train(args):
     )
 
     test_datasets = {}
-    for name in ["train", "test_comp", "test_seen"]:
+    for name in ["train", "test_comp", "test_seen", "propara_dev", "openpi_dev"]:
         p = data_dir / f"{name}.jsonl"
         if p.exists():
             test_datasets[name] = TripleTransitionDataset(
@@ -152,13 +157,13 @@ def train(args):
             log_f.flush()
 
             train_f1 = row.get("train/f1", 0.0)
-            status = (
-                f"  epoch {epoch:4d} | loss {avg_loss:.4f} | "
-                f"train_f1 {row.get('train/f1', 0):.3f} | "
-                f"comp_f1 {row.get('test_comp/f1', 0):.3f} | "
-                f"seen_f1 {row.get('test_seen/f1', 0):.3f}"
-            )
-            print(status)
+            parts = [f"  epoch {epoch:4d} | loss {avg_loss:.4f}"]
+            for label in ["train", "test_comp", "test_seen", "propara_dev", "openpi_dev"]:
+                key = f"{label}/f1"
+                if key in row:
+                    short = label.replace("test_", "").replace("propara_", "pp_")
+                    parts.append(f"{short}_f1 {row[key]:.3f}")
+            print(" | ".join(parts))
 
             # Save best model
             if train_f1 > best_train_acc:
@@ -209,6 +214,8 @@ def main():
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--pad-weight", type=float, default=0.1)
     parser.add_argument("--log-every", type=int, default=25)
+    parser.add_argument("--pretrained-embeds", type=str, default=None,
+                        help="Path to pretrained embedding matrix (.pt)")
 
     args = parser.parse_args()
     train(args)

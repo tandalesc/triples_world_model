@@ -1,0 +1,738 @@
+{"state_t": [["waves", "location", "ocean"], ["rocks", "location", "beach"]], "state_t+1": [["waves", "location", "beach"], ["rocks", "location", "beach"]]}
+{"state_t": [["waves", "location", "beach"], ["rocks", "location", "beach"]], "state_t+1": [["waves", "location", "beach"], ["rocks", "location", "beach"], ["tiny_parts_of_rocks", "location", "beach"]]}
+{"state_t": [["waves", "location", "beach"], ["rocks", "location", "beach"], ["tiny_parts_of_rocks", "location", "beach"]], "state_t+1": [["waves", "location", "beach"], ["rocks", "location", "beach"], ["tiny_parts_of_rocks", "location", "wave"]]}
+{"state_t": [["waves", "location", "beach"], ["rocks", "location", "beach"], ["tiny_parts_of_rocks", "location", "wave"]], "state_t+1": [["waves", "location", "ocean"], ["rocks", "location", "beach"], ["tiny_parts_of_rocks", "location", "ocean"]]}
+{"state_t": [["droplets", "location", "cloud"], ["snow", "location", "cloud"]], "state_t+1": [["water", "location", "ground"]]}
+{"state_t": [["water", "location", "river"]], "state_t+1": [["water", "location", "pond__lake__or_ocean"]]}
+{"state_t": [["water", "location", "pond__lake__or_ocean"]], "state_t+1": [["water", "location", "atmosphere"]]}
+{"state_t": [["water_vapor", "location", "cloud"]], "state_t+1": [["droplets", "location", "cloud"]]}
+{"state_t": [["rain", "location", "ground"], ["snow", "location", "ground"]], "state_t+1": [["water", "location", "ground"]]}
+{"state_t": [["water", "location", "sky"], ["clouds", "location", "sky"]], "state_t+1": [["water", "location", "earth"], ["clouds", "location", "sky"], ["rain", "location", "earth"], ["snow", "location", "earth"]]}
+{"state_t": [["water", "location", "area"]], "state_t+1": [["stream", "location", "rocky_area"]]}
+{"state_t": [["stream", "location", "rocky_area"]], "state_t+1": [["stream", "location", "lower_elevation"]]}
+{"state_t": [["carbon_dioxide", "location", "rain"], ["limestone", "location", "soil"]], "state_t+1": [["carbon_dioxide", "location", "soil"], ["limestone", "location", "soil"]]}
+{"state_t": [["carbon_dioxide", "location", "soil"], ["limestone", "location", "soil"]], "state_t+1": [["acid", "location", "soil"], ["limestone", "location", "soil"]]}
+{"state_t": [["acid", "location", "soil"], ["limestone", "location", "soil"]], "state_t+1": [["acid", "location", "limestone"], ["limestone", "location", "soil"]]}
+{"state_t": [["magma", "location", "surface_of_the_volcano"]], "state_t+1": [["magma", "location", "volcano"]]}
+{"state_t": [["magma", "location", "surface"], ["lava", "location", "surface"]], "state_t+1": [["igneous_rock", "location", "surface"]]}
+{"state_t": [["cracks", "location", "beneath_the_surface"]], "state_t+1": [["cracks", "location", "beneath_the_surface"], ["pressure", "location", "rock"]]}
+{"state_t": [["cracks", "location", "beneath_the_surface"], ["pressure", "location", "rock"]], "state_t+1": [["cracks", "location", "beneath_the_surface"], ["energy", "location", "earth"]]}
+{"state_t": [["steam", "location", "sky"], ["air", "location", "sky"]], "state_t+1": [["clouds", "location", "sky"], ["air", "location", "sky"]]}
+{"state_t": [["clouds", "location", "sky"], ["air", "location", "sky"]], "state_t+1": [["clouds", "location", "sky"], ["air", "location", "sky"], ["droplets", "location", "cloud"]]}
+{"state_t": [["clouds", "location", "sky"], ["air", "location", "sky"], ["droplets", "location", "cloud"]], "state_t+1": [["clouds", "location", "sky"], ["air", "location", "sky"], ["droplets", "location", "earth"]]}
+{"state_t": [["droplets", "location", "sky"]], "state_t+1": [["droplets", "location", "cloud"]]}
+{"state_t": [["magma", "location", "surface_of_the_earth"]], "state_t+1": [["crystals", "location", "surface_of_the_earth"]]}
+{"state_t": [["rocks", "location", "side_of_the_fault_line"]], "state_t+1": [["fault_lines", "location", "underground"], ["rocks", "location", "side_of_the_fault_line"]]}
+{"state_t": [["fault_lines", "location", "underground"], ["rocks", "location", "side_of_the_fault_line"]], "state_t+1": [["fault_lines", "location", "underground"], ["pressure", "location", "rock"], ["rocks", "location", "side_of_the_fault_line"]]}
+{"state_t": [["fault_lines", "location", "underground"], ["pressure", "location", "rock"], ["rocks", "location", "side_of_the_fault_line"]], "state_t+1": [["fault_lines", "location", "underground"], ["rocks", "location", "side_of_the_fault_line"]]}
+{"state_t": [["ice_crystals", "location", "air"]], "state_t+1": [["snow_flakes", "location", "air"]]}
+{"state_t": [["snow_flakes", "location", "air"]], "state_t+1": [["snow_flakes", "location", "ground"]]}
+{"state_t": [["ice_crystals", "location", "cloud"]], "state_t+1": [["snowflakes", "location", "cloud"]]}
+{"state_t": [["water", "location", "area_of_high_elevation"]], "state_t+1": [["stream", "location", "area_of_high_elevation"]]}
+{"state_t": [["stream", "location", "area_of_high_elevation"]], "state_t+1": [["stream", "location", "lower_elevation"]]}
+{"state_t": [["stream", "location", "path"]], "state_t+1": [["stream", "location", "soil"]]}
+{"state_t": [["sediment", "location", "rock"]], "state_t+1": [["sediment", "location", "wind_and_water"]]}
+{"state_t": [["sediment", "location", "wind_and_water"]], "state_t+1": [["sediment", "location", "area"]]}
+{"state_t": [["sediment", "location", "area"]], "state_t+1": [["sediment", "location", "spot"]]}
+{"state_t": [["sediment", "location", "spot"]], "state_t+1": [["sediment", "location", "top_of_other_sediment"]]}
+{"state_t": [["sediment", "location", "top_of_other_sediment"]], "state_t+1": [["sediment", "location", "near_the_bottom"]]}
+{"state_t": [["sediment", "location", "near_the_bottom"]], "state_t+1": [["sedimentary_rock", "location", "bottom"]]}
+{"state_t": [["tectonic_plates", "location", "beneath_the_earth"], ["rocks", "location", "around_the_crack"]], "state_t+1": [["tectonic_plates", "location", "beneath_the_earth"], ["rocks", "location", "earth"]]}
+{"state_t": [["tectonic_plates", "location", "beneath_the_earth"], ["rocks", "location", "earth"]], "state_t+1": [["tectonic_plates", "location", "beneath_the_earth"]]}
+{"state_t": [["tectonic_plates", "location", "beneath_the_earth"]], "state_t+1": [["tectonic_plates", "location", "beneath_the_earth"], ["mountain", "location", "volcano"]]}
+{"state_t": [["carbon_dioxide", "location", "stomate"]], "state_t+1": [["carbon_dioxide", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["sunlight", "location", "sun"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["sunlight", "location", "plant"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["sunlight", "location", "plant"]], "state_t+1": [["atp", "location", "plant"], ["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"]]}
+{"state_t": [["atp", "location", "plant"], ["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"]], "state_t+1": [["water", "location", "leaf"], ["sugars", "location", "leaf"]]}
+{"state_t": [["water", "location", "leaf"], ["sugars", "location", "leaf"]], "state_t+1": [["water", "location", "leaf"], ["oxygen", "location", "leaf"], ["sugars", "location", "leaf"]]}
+{"state_t": [["light", "location", "sun"], ["water", "location", "soil"], ["minerals", "location", "soil"]], "state_t+1": [["light", "location", "leaf"], ["water", "location", "soil"], ["minerals", "location", "soil"]]}
+{"state_t": [["light", "location", "leaf"], ["water", "location", "soil"], ["minerals", "location", "soil"]], "state_t+1": [["light", "location", "leaf"], ["water", "location", "root"], ["minerals", "location", "root"]]}
+{"state_t": [["light", "location", "leaf"], ["water", "location", "root"], ["minerals", "location", "root"]], "state_t+1": [["light", "location", "leaf"], ["water", "location", "leaf"], ["minerals", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["light", "location", "leaf"], ["water", "location", "leaf"], ["minerals", "location", "leaf"]], "state_t+1": [["mixture", "location", "leaf"]]}
+{"state_t": [["oxygen", "location", "windpipe"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["oxygen", "location", "lung"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["oxygen", "location", "lung"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "environment"]]}
+{"state_t": [["bats", "location", "area"]], "state_t+1": [["bats", "location", "area"], ["sounds", "location", "area"]]}
+{"state_t": [["bats", "location", "area"], ["sounds", "location", "area"]], "state_t+1": [["bats", "location", "area"], ["sounds", "location", "object"]]}
+{"state_t": [["bats", "location", "area"], ["sounds", "location", "object"]], "state_t+1": [["bats", "location", "area"], ["sounds", "location", "bat"]]}
+{"state_t": [["air", "location", "nose_or_mouth"]], "state_t+1": [["air", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "alveolus"]], "state_t+1": [["oxygen", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "blood"], ["oxygenrich_blood_oxygen_rich_blood", "location", "heart"]], "state_t+1": [["oxygen", "location", "body"], ["oxygenrich_blood_oxygen_rich_blood", "location", "body"]]}
+{"state_t": [["oxygenrich_blood_oxygen_rich_blood", "location", "body"]], "state_t+1": [["carbon_dioxide_rich_blood", "location", "body"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["carbon_dioxide_rich_blood", "location", "body"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["carbon_dioxide_rich_blood", "location", "lung"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "lung"]], "state_t+1": [["oxygen", "location", "bloodstream"]]}
+{"state_t": [["carbon_dioxide", "location", "cell"]], "state_t+1": [["carbon_dioxide", "location", "bloodstream"]]}
+{"state_t": [["carbon_dioxide", "location", "bloodstream"]], "state_t+1": [["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["carbon_dioxide", "location", "lung"]], "state_t+1": [["carbon_dioxide", "location", "nose_and_mouth"]]}
+{"state_t": [["aluminum_cans", "location", "recycle_bin"]], "state_t+1": [["aluminum_cans", "location", "recycle_facility"]]}
+{"state_t": [["aluminum_can", "location", "recycle_bin"]], "state_t+1": [["aluminum_can", "location", "facility"]]}
+{"state_t": [["aluminum_can", "location", "facility"]], "state_t+1": [["molten_metal", "location", "facility"]]}
+{"state_t": [["molten_metal", "location", "facility"]], "state_t+1": [["molten_metal", "location", "mold"]]}
+{"state_t": [["aluminium_cans_aluminium", "location", "recycle_bin"]], "state_t+1": [["aluminium_cans_aluminium", "location", "treatment_plant"]]}
+{"state_t": [["aluminium_cans_aluminium", "location", "treatment_plant"]], "state_t+1": [["molten_aluminium", "location", "treatment_plant"]]}
+{"state_t": [["molten_aluminium", "location", "treatment_plant"]], "state_t+1": [["ingots", "location", "treatment_plant"]]}
+{"state_t": [["food", "location", "esophagus"]], "state_t+1": [["food", "location", "stomach"]]}
+{"state_t": [["food", "location", "stomach"]], "state_t+1": [["thick_liquid", "location", "stomach"]]}
+{"state_t": [["thick_liquid", "location", "stomach"]], "state_t+1": [["thick_liquid", "location", "small_intestine"]]}
+{"state_t": [["water", "location", "air"], ["warmth", "location", "air"], ["mold_spores", "location", "dust_particle"]], "state_t+1": [["water", "location", "bread"], ["warmth", "location", "air"], ["mold_spores", "location", "dust_particle"]]}
+{"state_t": [["water", "location", "bread"], ["warmth", "location", "air"], ["mold_spores", "location", "dust_particle"]], "state_t+1": [["water", "location", "bread"], ["warmth", "location", "bread"], ["mold_spores", "location", "dust_particle"]]}
+{"state_t": [["water", "location", "bread"], ["warmth", "location", "bread"], ["mold_spores", "location", "dust_particle"]], "state_t+1": [["water", "location", "bread"], ["warmth", "location", "bread"], ["mold_spores", "location", "bread"]]}
+{"state_t": [["signal", "location", "muscle_fiber"]], "state_t+1": [["signal", "location", "muscle_fiber"], ["energy", "location", "muscle"]]}
+{"state_t": [["electrical_signals", "location", "brain"], ["filaments", "location", "muscle"]], "state_t+1": [["electrical_signals", "location", "muscle"], ["filaments", "location", "muscle"]]}
+{"state_t": [["water_droplets", "location", "cloud"], ["ice_particles", "location", "cloud"]], "state_t+1": [["bigger_drops", "location", "cloud"], ["ice_particles", "location", "cloud"]]}
+{"state_t": [["bigger_drops", "location", "cloud"], ["ice_particles", "location", "cloud"]], "state_t+1": [["bigger_drops", "location", "ground"], ["ice_particles", "location", "cloud"]]}
+{"state_t": [["bigger_drops", "location", "ground"], ["ice_particles", "location", "cloud"]], "state_t+1": [["bigger_drops", "location", "ground"], ["ice_particles", "location", "air"]]}
+{"state_t": [["dust_and_impurities", "location", "air"]], "state_t+1": [["water_vapor", "location", "air"], ["dust_and_impurities", "location", "air"]]}
+{"state_t": [["water_vapor", "location", "air"], ["dust_and_impurities", "location", "air"]], "state_t+1": [["water_vapor", "location", "cloud"], ["clouds", "location", "sky"], ["dust_and_impurities", "location", "cloud"]]}
+{"state_t": [["water_vapor", "location", "cloud"], ["clouds", "location", "sky"], ["dust_and_impurities", "location", "cloud"]], "state_t+1": [["water_vapor", "location", "rain"], ["clouds", "location", "sky"], ["dust_and_impurities", "location", "cloud"]]}
+{"state_t": [["fruit", "location", "plant"]], "state_t+1": [["fruit", "location", "animal"]]}
+{"state_t": [["seeds", "location", "animal"]], "state_t+1": [["seeds", "location", "ground"]]}
+{"state_t": [["seeds", "location", "animal"], ["waste", "location", "animal"]], "state_t+1": [["seeds", "location", "waste"], ["waste", "location", "animal"]]}
+{"state_t": [["seeds", "location", "waste"], ["waste", "location", "animal"]], "state_t+1": [["seeds", "location", "ground"], ["waste", "location", "ground"]]}
+{"state_t": [["tiny_pieces_of_dust", "location", "air"]], "state_t+1": [["vapor", "location", "air"], ["tiny_pieces_of_dust", "location", "air"]]}
+{"state_t": [["vapor", "location", "air"], ["tiny_pieces_of_dust", "location", "air"]], "state_t+1": [["tiny_pieces_of_dust", "location", "air"], ["droplet", "location", "air"]]}
+{"state_t": [["tiny_pieces_of_dust", "location", "air"], ["droplet", "location", "air"]], "state_t+1": [["tiny_pieces_of_dust", "location", "air"], ["cloud", "location", "air"]]}
+{"state_t": [["dam", "location", "area_prone_to_flooding"], ["floodgates", "location", "dam"]], "state_t+1": [["dam", "location", "area_prone_to_flooding"], ["rain", "location", "area_prone_to_flooding"], ["floodgates", "location", "dam"]]}
+{"state_t": [["dam", "location", "area_prone_to_flooding"], ["rain", "location", "area_prone_to_flooding"], ["water", "location", "behind_the_dam"], ["floodgates", "location", "dam"]], "state_t+1": [["dam", "location", "area_prone_to_flooding"], ["water", "location", "behind_the_dam"], ["floodgates", "location", "dam"]]}
+{"state_t": [["dam", "location", "area_prone_to_flooding"], ["water", "location", "behind_the_dam"], ["floodgates", "location", "dam"]], "state_t+1": [["dam", "location", "area_prone_to_flooding"], ["water", "location", "river"], ["floodgates", "location", "dam"]]}
+{"state_t": [["highpitched_tone", "location", "object"]], "state_t+1": [["highpitched_tone", "location", "bat"]]}
+{"state_t": [["seedlings", "location", "plant"]], "state_t+1": [["seedlings", "location", "animal"]]}
+{"state_t": [["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["oxygen", "location", "nose_or_mouth"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["air", "location", "nose_or_mouth"], ["oxygen", "location", "nose_or_mouth"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["air", "location", "windpipe"], ["oxygen", "location", "windpipe"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["air", "location", "windpipe"], ["oxygen", "location", "windpipe"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "air_sac"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "air_sac"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["carbon_dioxide", "location", "blood_stream"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["carbon_dioxide", "location", "blood_stream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "blood_stream"], ["carbon_dioxide", "location", "air_sac"]]}
+{"state_t": [["air", "location", "nose_and_mouth"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "bloodstream"], ["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["current", "location", "wire"]], "state_t+1": [["current", "location", "wire"], ["magnetic_field", "location", "wire"]]}
+{"state_t": [["current", "location", "wire"], ["magnetic_field", "location", "wire"], ["particles", "location", "central_metal_part"]], "state_t+1": [["current", "location", "wire"], ["magnetic_field", "location", "wire"], ["particles", "location", "central_metal_part"], ["magnetism", "location", "piece_of_metal"]]}
+{"state_t": [["current", "location", "wire"], ["magnetic_field", "location", "wire"], ["particles", "location", "central_metal_part"], ["magnetism", "location", "piece_of_metal"]], "state_t+1": [["current", "location", "wire"], ["magnetic_field", "location", "wire"], ["particles", "location", "central_metal_part"]]}
+{"state_t": [["water", "location", "ice_cube_tray"], ["ice_cubes", "location", "ice_cube_tray"]], "state_t+1": [["water", "location", "drink"], ["ice_cubes", "location", "drink"]]}
+{"state_t": [["oxygen", "location", "nose_or_mouth"]], "state_t+1": [["oxygen", "location", "body"]]}
+{"state_t": [["oxygen", "location", "body"]], "state_t+1": [["glucose", "location", "body"]]}
+{"state_t": [["glucose", "location", "body"]], "state_t+1": [["carbon_dioxide", "location", "body"]]}
+{"state_t": [["carbon_dioxide", "location", "body"]], "state_t+1": [["carbon_dioxide", "location", "nose_or_mouth"]]}
+{"state_t": [["bacteria", "location", "cell"], ["cells", "location", "someone"]], "state_t+1": [["bacteria", "location", "cell"], ["cells", "location", "someone"], ["toxins", "location", "bacterium"]]}
+{"state_t": [["bacteria", "location", "cell"], ["cells", "location", "someone"], ["toxins", "location", "bacterium"]], "state_t+1": [["bacteria", "location", "cell"], ["cells", "location", "someone"], ["toxins", "location", "cell"]]}
+{"state_t": [["bacteria", "location", "body"], ["resources", "location", "cell"]], "state_t+1": [["bacteria", "location", "body"], ["resources", "location", "bacterium"]]}
+{"state_t": [["bacteria", "location", "body"], ["resources", "location", "bacterium"]], "state_t+1": [["bacteria", "location", "body"], ["resources", "location", "bacterium"], ["toxins", "location", "body"]]}
+{"state_t": [["non_dominate_foot", "location", "skateboard"], ["other_foot", "location", "ground"], ["skateboard", "location", "ground"]], "state_t+1": [["non_dominate_foot", "location", "skateboard"], ["other_foot", "location", "skateboard"], ["skateboard", "location", "ground"]]}
+{"state_t": [["particles", "location", "environment"], ["rock", "location", "environment"], ["small_pieces_of_the_rock", "location", "rock"]], "state_t+1": [["particles", "location", "environment"], ["rock", "location", "environment"], ["small_pieces_of_the_rock", "location", "environment"]]}
+{"state_t": [["particles", "location", "environment"], ["rock", "location", "environment"], ["small_pieces_of_the_rock", "location", "environment"]], "state_t+1": [["particles", "location", "rock"], ["rock", "location", "environment"], ["small_pieces_of_the_rock", "location", "environment"]]}
+{"state_t": [["fertilizer", "location", "soil"]], "state_t+1": [["crops", "location", "field"], ["fertilizer", "location", "soil"]]}
+{"state_t": [["crops", "location", "field"], ["fertilizer", "location", "soil"]], "state_t+1": [["fertilizer", "location", "soil"]]}
+{"state_t": [["light_energy", "location", "sunlight"]], "state_t+1": [["light_energy", "location", "plant"]]}
+{"state_t": [["light_energy", "location", "plant"], ["carbon_dioxide", "location", "plant"], ["water", "location", "plant"], ["minerals", "location", "plant"]], "state_t+1": [["sugars", "location", "plant"]]}
+{"state_t": [["sugars", "location", "plant"]], "state_t+1": [["oxygen_and_water", "location", "plant"], ["excess_water_and_oxygen", "location", "plant"]]}
+{"state_t": [["oxygen_and_water", "location", "plant"], ["excess_water_and_oxygen", "location", "plant"]], "state_t+1": [["oxygen_and_water", "location", "stoma"], ["excess_water_and_oxygen", "location", "stoma"]]}
+{"state_t": [["acid_rain", "location", "soil"], ["chemicals", "location", "acid_rain"]], "state_t+1": [["acid_rain", "location", "soil"], ["chemicals", "location", "soil"]]}
+{"state_t": [["acid_rain", "location", "soil"], ["chemicals", "location", "soil"], ["fish", "location", "river_and_stream"]], "state_t+1": [["acid_rain", "location", "river_and_stream"], ["chemicals", "location", "river_and_stream"], ["fish", "location", "river_and_stream"]]}
+{"state_t": [["acid_rain", "location", "river_and_stream"], ["chemicals", "location", "river_and_stream"], ["fish", "location", "river_and_stream"]], "state_t+1": [["acid_rain", "location", "river_and_stream"], ["chemicals", "location", "river_and_stream"]]}
+{"state_t": [["aluminum", "location", "soil"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "soil"], ["aluminum", "location", "soil"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]]}
+{"state_t": [["water", "location", "soil"], ["aluminum", "location", "soil"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "soil"], ["aluminum", "location", "water"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]]}
+{"state_t": [["water", "location", "soil"], ["aluminum", "location", "water"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]]}
+{"state_t": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["fish_and_their_eggs", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]]}
+{"state_t": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["frogs_and_plants", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]]}
+{"state_t": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"], ["insects_and_other_wildlife", "location", "lakes__stream"]], "state_t+1": [["water", "location", "lakes__stream"], ["aluminum", "location", "lakes__stream"]]}
+{"state_t": [["acid_rain", "location", "water"], ["fish", "location", "water"]], "state_t+1": [["acid_rain", "location", "soil"]]}
+{"state_t": [["acid_rain", "location", "soil"]], "state_t+1": [["acid_rain", "location", "leaf"]]}
+{"state_t": [["air", "location", "body"], ["oxygen", "location", "air"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "hemoglobin"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "hemoglobin"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "blood"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "body"], ["hemoglobin", "location", "blood"], ["red_blood_cells", "location", "blood"], ["blood", "location", "body"]]}
+{"state_t": [["virus", "location", "cell_surface"], ["virus_rna", "location", "virus"]], "state_t+1": [["virus", "location", "cell"], ["virus_rna", "location", "virus"]]}
+{"state_t": [["virus", "location", "cell"], ["virus_rna", "location", "virus"]], "state_t+1": [["virus", "location", "cell"], ["virus_rna", "location", "cell"]]}
+{"state_t": [["bacteria", "location", "body"], ["cells", "location", "body"]], "state_t+1": [["bacteria", "location", "bloodstream"], ["cells", "location", "body"]]}
+{"state_t": [["bacteria", "location", "bloodstream"], ["cells", "location", "body"]], "state_t+1": [["bacteria", "location", "cell"], ["cells", "location", "body"]]}
+{"state_t": [["bacteria", "location", "cell"], ["cells", "location", "body"]], "state_t+1": [["bacteria", "location", "cell"]]}
+{"state_t": [["heat", "location", "boiler"], ["water", "location", "boiler"], ["propeller_blades", "location", "turbine"], ["coils", "location", "generator"]], "state_t+1": [["stream", "location", "boiler"], ["propeller_blades", "location", "turbine"], ["coils", "location", "generator"]]}
+{"state_t": [["stream", "location", "boiler"], ["propeller_blades", "location", "turbine"], ["coils", "location", "generator"]], "state_t+1": [["stream", "location", "turbine"], ["propeller_blades", "location", "turbine"], ["coils", "location", "generator"]]}
+{"state_t": [["coal_powder", "location", "firebox"], ["water", "location", "boiler"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"]], "state_t+1": [["coal_powder", "location", "firebox"], ["steam", "location", "boiler"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"]]}
+{"state_t": [["coal_powder", "location", "firebox"], ["steam", "location", "boiler"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"]], "state_t+1": [["coal_powder", "location", "firebox"], ["steam", "location", "turbine"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"]]}
+{"state_t": [["coal_powder", "location", "firebox"], ["steam", "location", "turbine"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"]], "state_t+1": [["coal_powder", "location", "firebox"], ["steam", "location", "turbine"], ["turbine_shaft", "location", "generator"], ["magnets", "location", "generator"], ["electricity", "location", "generator"]]}
+{"state_t": [["coal", "location", "heater"], ["water", "location", "boiler"]], "state_t+1": [["coal", "location", "heater"], ["heat", "location", "heater"], ["water", "location", "boiler"]]}
+{"state_t": [["coal", "location", "heater"], ["heat", "location", "heater"], ["water", "location", "boiler"]], "state_t+1": [["coal", "location", "heater"], ["heat", "location", "boiler"], ["water", "location", "boiler"]]}
+{"state_t": [["coal", "location", "heater"], ["heat", "location", "boiler"], ["water", "location", "boiler"]], "state_t+1": [["coal", "location", "heater"], ["steam", "location", "boiler"]]}
+{"state_t": [["coal", "location", "heater"], ["steam", "location", "boiler"]], "state_t+1": [["coal", "location", "heater"], ["steam", "location", "generator"]]}
+{"state_t": [["coal", "location", "heater"], ["steam", "location", "generator"]], "state_t+1": [["coal", "location", "heater"], ["steam", "location", "generator"], ["electricity", "location", "generator"]]}
+{"state_t": [["rotor", "location", "core"]], "state_t+1": [["rotor", "location", "core"], ["electricity", "location", "rotor"]]}
+{"state_t": [["sound_waves", "location", "ear_drum"]], "state_t+1": [["vibrations", "location", "ear_drum"]]}
+{"state_t": [["vibrations", "location", "ear_drum"]], "state_t+1": [["vibrations", "location", "middle_ear"]]}
+{"state_t": [["vibrations", "location", "middle_ear"]], "state_t+1": [["vibrations", "location", "inner_ear"]]}
+{"state_t": [["vibrations", "location", "inner_ear"]], "state_t+1": [["vibrations", "location", "cochlea"]]}
+{"state_t": [["vibrations", "location", "cochlea"]], "state_t+1": [["nerve_signals", "location", "cochlea"]]}
+{"state_t": [["nerve_signals", "location", "cochlea"]], "state_t+1": [["nerve_signals", "location", "brain"]]}
+{"state_t": [["blood_clot", "location", "break"], ["cells", "location", "soft_callous"], ["callous", "location", "break"]], "state_t+1": [["blood_clot", "location", "break"], ["cells", "location", "callous"], ["callous", "location", "break"]]}
+{"state_t": [["blood_clot", "location", "break"], ["callous", "location", "break"]], "state_t+1": [["blood_clot", "location", "break"]]}
+{"state_t": [["water", "location", "boiler"]], "state_t+1": [["steam", "location", "boiler"]]}
+{"state_t": [["steam", "location", "cool_tower"]], "state_t+1": [["steam", "location", "turbine"]]}
+{"state_t": [["coal", "location", "mountain"]], "state_t+1": [["coal", "location", "mine"], ["mine", "location", "mountain"]]}
+{"state_t": [["coal", "location", "mine"], ["mine", "location", "mountain"], ["miners", "location", "mine"]], "state_t+1": [["coal", "location", "cart"], ["mine", "location", "mountain"], ["miners", "location", "mine"]]}
+{"state_t": [["coal", "location", "cart"], ["mine", "location", "mountain"]], "state_t+1": [["coal", "location", "cart_or_on_a_conveyor_belt"], ["mine", "location", "mountain"]]}
+{"state_t": [["coal", "location", "cart_or_on_a_conveyor_belt"], ["mine", "location", "mountain"]], "state_t+1": [["coal", "location", "surface"], ["mine", "location", "mountain"]]}
+{"state_t": [["coal", "location", "surface"], ["mine", "location", "mountain"]], "state_t+1": [["coal", "location", "truck"], ["mine", "location", "mountain"]]}
+{"state_t": [["coal", "location", "truck"], ["mine", "location", "mountain"]], "state_t+1": [["coal", "location", "power_station"], ["mine", "location", "mountain"]]}
+{"state_t": [["crude_oil", "location", "ground"]], "state_t+1": [["crude_oil", "location", "pump"]]}
+{"state_t": [["crude_oil", "location", "pump"]], "state_t+1": [["crude_oil", "location", "tanker_truck"]]}
+{"state_t": [["crude_oil", "location", "tanker_truck"]], "state_t+1": [["crude_oil", "location", "oil_refinery"]]}
+{"state_t": [["crude_oil", "location", "oil_refinery"]], "state_t+1": [["bottled_oil", "location", "oil_refinery"]]}
+{"state_t": [["bottled_oil", "location", "oil_refinery"]], "state_t+1": [["bottled_oil", "location", "gas_station"]]}
+{"state_t": [["more_useful_product", "location", "refinery"]], "state_t+1": [["more_useful_product", "location", "tank_truck"]]}
+{"state_t": [["more_useful_product", "location", "tank_truck"]], "state_t+1": [["more_useful_product", "location", "gas_station"]]}
+{"state_t": [["seed", "location", "hole"], ["hole", "location", "dirt"], ["water", "location", "hole"]], "state_t+1": [["seed", "location", "dirt"], ["water", "location", "hole"]]}
+{"state_t": [["seed", "location", "dirt"], ["water", "location", "hole"]], "state_t+1": [["water", "location", "hole"]]}
+{"state_t": [["vegetable_seeds", "location", "ground"]], "state_t+1": [["vegetable_seeds", "location", "ground"], ["sprouts", "location", "area"]]}
+{"state_t": [["vegetable_seeds", "location", "ground"], ["sprouts", "location", "area"], ["plants", "location", "ground"]], "state_t+1": [["vegetable_seeds", "location", "ground"], ["sprouts", "location", "area"], ["plants", "location", "area"]]}
+{"state_t": [["vegetable_seeds", "location", "ground"], ["sprouts", "location", "area"], ["plants", "location", "area"]], "state_t+1": [["vegetable_seeds", "location", "ground"], ["sprouts", "location", "ground"], ["plants", "location", "area"]]}
+{"state_t": [["sweat", "location", "body"], ["heat_from_the_body", "location", "body"]], "state_t+1": [["sweat", "location", "air"], ["molecules", "location", "air"], ["heat_from_the_body", "location", "body"]]}
+{"state_t": [["sweat", "location", "air"], ["molecules", "location", "air"], ["heat_from_the_body", "location", "body"]], "state_t+1": [["molecules", "location", "air"], ["gas", "location", "air"], ["heat_from_the_body", "location", "body"]]}
+{"state_t": [["molecules", "location", "air"], ["gas", "location", "air"], ["heat_from_the_body", "location", "body"]], "state_t+1": [["molecules", "location", "air"], ["gas", "location", "air"], ["heat_from_the_body", "location", "air"]]}
+{"state_t": [["bee", "location", "flower"], ["pollen", "location", "flower"], ["pistil", "location", "another_flower"]], "state_t+1": [["bee", "location", "flower"], ["pollen", "location", "bee"], ["pistil", "location", "another_flower"]]}
+{"state_t": [["bee", "location", "flower"], ["pollen", "location", "bee"], ["pistil", "location", "another_flower"]], "state_t+1": [["bee", "location", "another_flower"], ["pollen", "location", "bee"], ["pistil", "location", "another_flower"]]}
+{"state_t": [["bee", "location", "another_flower"], ["pollen", "location", "bee"], ["pistil", "location", "another_flower"]], "state_t+1": [["bee", "location", "another_flower"], ["pollen", "location", "another_flower"], ["pistil", "location", "another_flower"]]}
+{"state_t": [["bees", "location", "flower"], ["nectar", "location", "flower"], ["pollen", "location", "stamen"], ["pollen_sacs", "location", "stamen"], ["stigma", "location", "flower"]], "state_t+1": [["bees", "location", "flower"], ["nectar", "location", "bee"], ["pollen", "location", "bee"], ["pollen_sacs", "location", "bee_leg"], ["stigma", "location", "flower"]]}
+{"state_t": [["bees", "location", "flower"], ["nectar", "location", "bee"], ["pollen", "location", "bee"], ["pollen_sacs", "location", "bee_leg"], ["stigma", "location", "flower"]], "state_t+1": [["bees", "location", "flower"], ["nectar", "location", "bee"], ["pollen", "location", "stigma"], ["pollen_sacs", "location", "stigma"], ["stigma", "location", "flower"]]}
+{"state_t": [["sedimentary_rock", "location", "river_and_ocean"]], "state_t+1": [["metamorphic_rock", "location", "underground"]]}
+{"state_t": [["metamorphic_rock", "location", "underground"]], "state_t+1": [["magma", "location", "underground"]]}
+{"state_t": [["magma", "location", "underground"]], "state_t+1": [["lava", "location", "volcano"]]}
+{"state_t": [["crystals", "location", "igneous_rock"]], "state_t+1": [["crystals", "location", "sediment"]]}
+{"state_t": [["crystals", "location", "sediment"]], "state_t+1": [["crystals", "location", "sedimentary_rock"]]}
+{"state_t": [["crystals", "location", "sedimentary_rock"]], "state_t+1": [["crystals", "location", "metamorphic_rock"]]}
+{"state_t": [["elements_in_clouds", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]], "state_t+1": [["chemical_compounds", "location", "human_industry"], ["elements_in_clouds", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]]}
+{"state_t": [["chemical_compounds", "location", "human_industry"], ["elements_in_clouds", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]], "state_t+1": [["chemical_compounds", "location", "air"], ["elements_in_clouds", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]]}
+{"state_t": [["chemical_compounds", "location", "air"], ["elements_in_clouds", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]], "state_t+1": [["affected_rain", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]]}
+{"state_t": [["affected_rain", "location", "cloud"], ["natural_and_manmade_objects", "location", "earth"]], "state_t+1": [["affected_rain", "location", "earth"], ["natural_and_manmade_objects", "location", "earth"]]}
+{"state_t": [["water", "location", "high_atmosphere"], ["oxygen", "location", "high_atmosphere"]], "state_t+1": [["sulfur_dioxide", "location", "air"], ["nitrogen", "location", "air"], ["water", "location", "high_atmosphere"], ["oxygen", "location", "high_atmosphere"]]}
+{"state_t": [["sulfur_dioxide", "location", "air"], ["nitrogen", "location", "air"], ["water", "location", "high_atmosphere"], ["oxygen", "location", "high_atmosphere"]], "state_t+1": [["sulfur_dioxide", "location", "high_atmosphere"], ["nitrogen", "location", "high_atmosphere"], ["water", "location", "high_atmosphere"], ["oxygen", "location", "high_atmosphere"]]}
+{"state_t": [["salt_water", "location", "factory_or_plant"]], "state_t+1": [["water", "location", "factory_or_plant"]]}
+{"state_t": [["salt_water", "location", "container"]], "state_t+1": [["gas", "location", "container"], ["gaseous_water", "location", "container"]]}
+{"state_t": [["gas", "location", "container"], ["gaseous_water", "location", "container"]], "state_t+1": [["gas", "location", "container"], ["gaseous_water", "location", "container"], ["salt_particles", "location", "container"]]}
+{"state_t": [["gas", "location", "container"], ["gaseous_water", "location", "container"], ["salt_particles", "location", "container"]], "state_t+1": [["gas", "location", "second_container"], ["gaseous_water", "location", "another_container"], ["salt_particles", "location", "container"]]}
+{"state_t": [["gaseous_water", "location", "another_container"], ["salt_particles", "location", "container"]], "state_t+1": [["gaseous_water", "location", "another_container"], ["salt_particles", "location", "first_container"]]}
+{"state_t": [["gaseous_water", "location", "another_container"], ["salt_particles", "location", "first_container"]], "state_t+1": [["gaseous_water", "location", "another_container"], ["fresh_water", "location", "second_container"]]}
+{"state_t": [["bones", "location", "soil"], ["minerals", "location", "soil"]], "state_t+1": [["bones", "location", "soil"], ["minerals", "location", "fossil"], ["fossil", "location", "soil"]]}
+{"state_t": [["trees", "location", "earth"]], "state_t+1": [["carbon_dioxide", "location", "fossil_fuel"], ["trees", "location", "earth"]]}
+{"state_t": [["carbon_dioxide", "location", "fossil_fuel"], ["trees", "location", "earth"]], "state_t+1": [["carbon_dioxide", "location", "atmosphere"], ["trees", "location", "earth"]]}
+{"state_t": [["carbon_dioxide", "location", "atmosphere"], ["trees", "location", "earth"]], "state_t+1": [["carbon_dioxide", "location", "atmosphere"]]}
+{"state_t": [["solar_radiation", "location", "land_and_ocean"], ["heat", "location", "earth"]], "state_t+1": [["solar_radiation", "location", "atmosphere"], ["heat", "location", "atmosphere"]]}
+{"state_t": [["solar_radiation", "location", "atmosphere"], ["heat", "location", "atmosphere"]], "state_t+1": [["solar_radiation", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gases", "location", "atmosphere"]]}
+{"state_t": [["solar_radiation", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gases", "location", "atmosphere"]], "state_t+1": [["solar_radiation", "location", "land_and_ocean"], ["heat", "location", "atmosphere"], ["greenhouse_gases", "location", "atmosphere"]]}
+{"state_t": [["sunlight", "location", "plant"], ["water", "location", "environment"], ["carbon_dioxide", "location", "environment"]], "state_t+1": [["sunlight", "location", "plant"], ["water", "location", "plant"], ["carbon_dioxide", "location", "plant"]]}
+{"state_t": [["sunlight", "location", "plant"], ["water", "location", "plant"], ["carbon_dioxide", "location", "plant"]], "state_t+1": [["glucose", "location", "plant"]]}
+{"state_t": [["food", "location", "mouth"]], "state_t+1": [["food", "location", "mouth"], ["saliva", "location", "mouth"]]}
+{"state_t": [["food", "location", "stomach"], ["saliva", "location", "mouth"]], "state_t+1": [["food", "location", "stomach"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"]]}
+{"state_t": [["food", "location", "stomach"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"]], "state_t+1": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"]]}
+{"state_t": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"]], "state_t+1": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"], ["enzymes", "location", "small_intestine"]]}
+{"state_t": [["food", "location", "esophagus"], ["saliva", "location", "mouth"]], "state_t+1": [["food", "location", "stomach"], ["saliva", "location", "mouth"]]}
+{"state_t": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"]], "state_t+1": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"], ["nutrients", "location", "blood_stream"]]}
+{"state_t": [["food", "location", "small_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"], ["nutrients", "location", "blood_stream"]], "state_t+1": [["food", "location", "large_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"], ["nutrients", "location", "blood_stream"]]}
+{"state_t": [["food", "location", "large_intestine"], ["saliva", "location", "mouth"], ["acid", "location", "stomach"], ["nutrients", "location", "blood_stream"]], "state_t+1": [["saliva", "location", "mouth"], ["acid", "location", "stomach"], ["nutrients", "location", "blood_stream"], ["waste", "location", "large_intestine"]]}
+{"state_t": [["brain", "location", "body"], ["blood_vessels", "location", "body"], ["sweat_glands", "location", "body"]], "state_t+1": [["brain", "location", "body"], ["blood_vessels", "location", "body"], ["sweat_glands", "location", "body"], ["moisture", "location", "pore"]]}
+{"state_t": [["brain", "location", "body"], ["blood_vessels", "location", "body"], ["sweat_glands", "location", "body"], ["moisture", "location", "pore"]], "state_t+1": [["brain", "location", "body"], ["blood_vessels", "location", "body"], ["sweat_glands", "location", "body"]]}
+{"state_t": [["tadpoles", "location", "egg"], ["eggs", "location", "water"]], "state_t+1": [["tadpoles", "location", "water"]]}
+{"state_t": [["eggs", "location", "adult_frog"]], "state_t+1": [["eggs", "location", "water"]]}
+{"state_t": [["tadpoles", "location", "water"]], "state_t+1": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["tail", "location", "tadpole"]]}
+{"state_t": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["tail", "location", "tadpole"], ["food", "location", "tail"]], "state_t+1": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["tail", "location", "tadpole"], ["food", "location", "tail"], ["hind_legs", "location", "tadpole"]]}
+{"state_t": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["tail", "location", "tadpole"], ["hind_legs", "location", "tadpole"]], "state_t+1": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"]]}
+{"state_t": [["tadpoles", "location", "water"], ["external_gills", "location", "tadpole"], ["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"]], "state_t+1": [["external_gills", "location", "young_frog"], ["hind_legs", "location", "young_frog"], ["front_legs", "location", "young_frog"], ["young_frog", "location", "young_frog"]]}
+{"state_t": [["external_gills", "location", "young_frog"], ["hind_legs", "location", "young_frog"], ["front_legs", "location", "young_frog"]], "state_t+1": [["external_gills", "location", "adult_frog"], ["hind_legs", "location", "young_frog"], ["front_legs", "location", "young_frog"]]}
+{"state_t": [["tail", "location", "tadpole"], ["mouth", "location", "tadpole"]], "state_t+1": [["hind_legs", "location", "tadpole"], ["tail", "location", "tadpole"], ["mouth", "location", "tadpole"]]}
+{"state_t": [["hind_legs", "location", "tadpole"], ["tail", "location", "tadpole"], ["mouth", "location", "tadpole"]], "state_t+1": [["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"], ["tail", "location", "tadpole"], ["mouth", "location", "tadpole"]]}
+{"state_t": [["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"], ["tail", "location", "tadpole"], ["mouth", "location", "tadpole"]], "state_t+1": [["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"], ["mouth", "location", "tadpole"]]}
+{"state_t": [["hind_legs", "location", "tadpole"], ["front_legs", "location", "tadpole"], ["mouth", "location", "tadpole"]], "state_t+1": [["hind_legs", "location", "frog"], ["front_legs", "location", "frog"], ["mouth", "location", "frog"], ["frog", "location", "land"]]}
+{"state_t": [["seed", "location", "environment"]], "state_t+1": [["plants", "location", "environment"]]}
+{"state_t": [["plants", "location", "environment"]], "state_t+1": [["plants", "location", "environment"], ["flowers", "location", "plant"]]}
+{"state_t": [["plants", "location", "environment"], ["flowers", "location", "plant"]], "state_t+1": [["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "flower"]]}
+{"state_t": [["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "flower"]], "state_t+1": [["seed", "location", "environment"], ["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["seed", "location", "environment"], ["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]], "state_t+1": [["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["plants", "location", "environment"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]], "state_t+1": [["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["seed", "location", "ground"]], "state_t+1": [["seedling", "location", "ground"]]}
+{"state_t": [["seedling", "location", "ground"]], "state_t+1": [["mature_plant", "location", "ground"]]}
+{"state_t": [["mature_plant", "location", "ground"]], "state_t+1": [["flower", "location", "ground"]]}
+{"state_t": [["flowers", "location", "plant"]], "state_t+1": [["flowers", "location", "plant"], ["fruit", "location", "flower"]]}
+{"state_t": [["flowers", "location", "plant"], ["fruit", "location", "flower"]], "state_t+1": [["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["blood", "location", "body"], ["waste", "location", "blood"], ["urine", "location", "body"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "blood"], ["urine", "location", "body"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "blood"], ["urine", "location", "body"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "kidney"], ["urine", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "kidney"], ["urine", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "urine"], ["urine", "location", "body"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "air"], ["bad_air", "location", "air"]], "state_t+1": [["air", "location", "lung"], ["bad_air", "location", "lung"]]}
+{"state_t": [["fluid", "location", "kidney"], ["waste", "location", "kidney"]], "state_t+1": [["fluid", "location", "bloodstream"], ["waste", "location", "kidney"]]}
+{"state_t": [["blood", "location", "renal_artery"], ["waste", "location", "blood"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "blood"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "blood"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "kidney"]], "state_t+1": [["blood", "location", "body"], ["waste", "location", "kidney"]]}
+{"state_t": [["blood", "location", "body"], ["waste", "location", "kidney"]], "state_t+1": [["blood", "location", "body"], ["waste", "location", "bladder"], ["urine", "location", "bladder"]]}
+{"state_t": [["toxins", "location", "blood"], ["vitamins_and_minerals", "location", "blood"], ["glycogen", "location", "liver"]], "state_t+1": [["vitamins_and_minerals", "location", "blood"], ["glycogen", "location", "liver"]]}
+{"state_t": [["blood", "location", "liver"], ["vitamins_and_minerals", "location", "blood"], ["glycogen", "location", "liver"]], "state_t+1": [["blood", "location", "liver"], ["glycogen", "location", "liver"]]}
+{"state_t": [["blood", "location", "liver"], ["glycogen", "location", "liver"]], "state_t+1": [["blood", "location", "liver"], ["bile", "location", "liver"], ["glycogen", "location", "liver"]]}
+{"state_t": [["blood", "location", "liver"], ["chemicals_and_proteins", "location", "liver"]], "state_t+1": [["blood", "location", "liver"], ["chemicals_and_proteins", "location", "liver"], ["energy", "location", "liver"]]}
+{"state_t": [["carbs", "location", "food"], ["food", "location", "body"], ["water", "location", "body"]], "state_t+1": [["carbs", "location", "food"], ["food", "location", "pancreas"], ["water", "location", "pancreas"]]}
+{"state_t": [["carbs", "location", "food"], ["food", "location", "pancreas"], ["water", "location", "pancreas"]], "state_t+1": [["food", "location", "pancreas"], ["water", "location", "pancreas"]]}
+{"state_t": [["food", "location", "body"], ["sugar", "location", "blood"]], "state_t+1": [["food", "location", "digestive_system"], ["digested_food", "location", "digestive_system"], ["sugar", "location", "blood"]]}
+{"state_t": [["food", "location", "digestive_system"], ["digested_food", "location", "digestive_system"], ["sugar", "location", "blood"]], "state_t+1": [["food", "location", "digestive_system"], ["digested_food", "location", "digestive_system"], ["enzymes", "location", "digestive_system"], ["sugar", "location", "blood"]]}
+{"state_t": [["food", "location", "digestive_system"], ["digested_food", "location", "digestive_system"], ["enzymes", "location", "digestive_system"], ["sugar", "location", "blood"]], "state_t+1": [["food", "location", "digestive_system"], ["digested_food", "location", "digestive_system"], ["enzymes", "location", "digestive_system"], ["sugar", "location", "blood"], ["one_hormone", "location", "body"]]}
+{"state_t": [["food", "location", "body"]], "state_t+1": [["sugars", "location", "body"]]}
+{"state_t": [["sugars", "location", "body"]], "state_t+1": [["blood_sugar", "location", "bloodstream"]]}
+{"state_t": [["blood_sugar", "location", "bloodstream"], ["glucagon", "location", "bloodstream"]], "state_t+1": [["blood_sugar", "location", "bloodstream"], ["glucagon", "location", "bloodstream"], ["insulin", "location", "bloodstream"]]}
+{"state_t": [["sugar", "location", "body"]], "state_t+1": [["sugar", "location", "bloodstream"]]}
+{"state_t": [["coal", "location", "boiler"], ["water", "location", "tank"]], "state_t+1": [["coal", "location", "boiler"], ["steam", "location", "tank"]]}
+{"state_t": [["coal", "location", "boiler"], ["steam", "location", "tank"]], "state_t+1": [["coal", "location", "boiler"], ["steam", "location", "piston"]]}
+{"state_t": [["coal", "location", "boiler"], ["steam", "location", "piston"]], "state_t+1": [["coal", "location", "boiler"], ["energy", "location", "piston"]]}
+{"state_t": [["coal", "location", "boiler"], ["energy", "location", "piston"]], "state_t+1": [["coal", "location", "boiler"]]}
+{"state_t": [["coal", "location", "firebox"]], "state_t+1": [["steam", "location", "boiler"]]}
+{"state_t": [["plane", "location", "airport"], ["passenger", "location", "airport"], ["luggage", "location", "airport"]], "state_t+1": [["plane", "location", "airport"], ["passenger", "location", "airport"], ["luggage", "location", "plane"]]}
+{"state_t": [["plane", "location", "airport"], ["passenger", "location", "airport"], ["luggage", "location", "plane"]], "state_t+1": [["plane", "location", "airport"], ["passenger", "location", "plane"], ["luggage", "location", "plane"]]}
+{"state_t": [["plane", "location", "airport"], ["passenger", "location", "plane"], ["luggage", "location", "plane"]], "state_t+1": [["plane", "location", "destination"], ["passenger", "location", "plane"], ["luggage", "location", "plane"]]}
+{"state_t": [["plane", "location", "destination"], ["passenger", "location", "plane"], ["luggage", "location", "plane"]], "state_t+1": [["plane", "location", "destination"], ["passenger", "location", "destination"], ["luggage", "location", "destination"]]}
+{"state_t": [["egg", "location", "leaf_or_plant"], ["blood", "location", "egg"]], "state_t+1": [["larva", "location", "leaf_or_plant"], ["blood", "location", "egg"]]}
+{"state_t": [["larva", "location", "leaf_or_plant"]], "state_t+1": [["larva", "location", "leaf"]]}
+{"state_t": [["chemicals", "location", "atmosphere"], ["vegetation", "location", "ground"]], "state_t+1": [["acid_rain", "location", "atmosphere"], ["vegetation", "location", "ground"]]}
+{"state_t": [["acid_rain", "location", "atmosphere"], ["vegetation", "location", "ground"]], "state_t+1": [["acid_rain", "location", "ground"], ["vegetation", "location", "ground"]]}
+{"state_t": [["acid_rain", "location", "ground"], ["vegetation", "location", "ground"]], "state_t+1": [["acid_rain", "location", "rock"], ["vegetation", "location", "ground"]]}
+{"state_t": [["acid_rain", "location", "rock"], ["vegetation", "location", "ground"]], "state_t+1": [["acid_rain", "location", "vegetation"]]}
+{"state_t": [["acid_rain", "location", "vegetation"]], "state_t+1": [["acid_rain", "location", "ground"]]}
+{"state_t": [["aluminum", "location", "acid_rain"], ["minerals", "location", "soil"], ["foliage", "location", "tree"]], "state_t+1": [["aluminum", "location", "stream_and_lake"], ["minerals", "location", "soil"], ["foliage", "location", "tree"]]}
+{"state_t": [["aluminum", "location", "stream_and_lake"], ["minerals", "location", "soil"], ["foliage", "location", "tree"]], "state_t+1": [["aluminum", "location", "stream_and_lake"], ["minerals", "location", "acid_rain"], ["foliage", "location", "tree"]]}
+{"state_t": [["waste", "location", "blood"]], "state_t+1": [["waste", "location", "kidney"]]}
+{"state_t": [["waste", "location", "kidney"]], "state_t+1": [["waste", "location", "kidney"], ["red_blood_cells", "location", "blood"]]}
+{"state_t": [["blood", "location", "body"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "renal_artery"], ["water", "location", "kidney"]]}
+{"state_t": [["waste_products", "location", "blood"], ["blood", "location", "renal_artery"], ["water", "location", "kidney"]], "state_t+1": [["waste_products", "location", "blood"], ["blood", "location", "kidney"], ["water", "location", "kidney"]]}
+{"state_t": [["waste_products", "location", "blood"], ["blood", "location", "kidney"], ["water", "location", "kidney"]], "state_t+1": [["waste_products", "location", "filter"], ["blood", "location", "kidney"], ["water", "location", "kidney"]]}
+{"state_t": [["waste_products", "location", "filter"], ["blood", "location", "kidney"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["urine", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["urine", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["urine", "location", "bladder"]]}
+{"state_t": [["blood", "location", "kidney"], ["urine", "location", "bladder"]], "state_t+1": [["blood", "location", "body"], ["urine", "location", "bladder"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["red_blood_cells", "location", "body"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "alveolus"], ["red_blood_cells", "location", "body"]]}
+{"state_t": [["air", "location", "alveolus"], ["oxygen", "location", "alveolus"], ["red_blood_cells", "location", "body"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "air"], ["red_blood_cells", "location", "body"]]}
+{"state_t": [["air", "location", "alveolus"], ["oxygen", "location", "air"], ["red_blood_cells", "location", "body"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "capillary_blood"], ["red_blood_cells", "location", "capillary_blood"]]}
+{"state_t": [["air", "location", "alveolus"], ["oxygen", "location", "capillary_blood"], ["red_blood_cells", "location", "capillary_blood"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "red_blood_cell"], ["red_blood_cells", "location", "capillary_blood"]]}
+{"state_t": [["air", "location", "alveolus"], ["oxygen", "location", "red_blood_cell"], ["red_blood_cells", "location", "capillary_blood"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "red_blood_cell"], ["red_blood_cells", "location", "body"]]}
+{"state_t": [["air", "location", "alveolus"], ["oxygen", "location", "red_blood_cell"], ["red_blood_cells", "location", "body"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "cell"], ["red_blood_cells", "location", "body"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "air"], ["red_blood_cells", "location", "bloodstream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["red_blood_cells", "location", "bloodstream"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["red_blood_cells", "location", "bloodstream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "bloodstream"], ["red_blood_cells", "location", "bloodstream"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "bloodstream"], ["red_blood_cells", "location", "bloodstream"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "cell"], ["red_blood_cells", "location", "bloodstream"]]}
+{"state_t": [["oxygen", "location", "lung"], ["erythrocytes", "location", "body"]], "state_t+1": [["oxygen", "location", "hemoglobin"], ["erythrocytes", "location", "body"]]}
+{"state_t": [["oxygen", "location", "hemoglobin"], ["erythrocytes", "location", "body"]], "state_t+1": [["oxygen", "location", "body"], ["erythrocytes", "location", "body"]]}
+{"state_t": [["blood", "location", "body"]], "state_t+1": [["blood", "location", "liver"]]}
+{"state_t": [["items_filtered", "location", "liver"]], "state_t+1": [["bile", "location", "liver"]]}
+{"state_t": [["bile", "location", "liver"], ["energy", "location", "liver"]], "state_t+1": [["bile", "location", "liver"], ["glycogen", "location", "liver"]]}
+{"state_t": [["glucose", "location", "blood"]], "state_t+1": [["juices", "location", "pancreas"], ["glucose", "location", "blood"]]}
+{"state_t": [["juices", "location", "pancreas"], ["glucose", "location", "blood"]], "state_t+1": [["juices", "location", "stomach"], ["glucose", "location", "blood"]]}
+{"state_t": [["juices", "location", "stomach"]], "state_t+1": [["juices", "location", "stomach"], ["insulin", "location", "blood"]]}
+{"state_t": [["food", "location", "small_intestine"]], "state_t+1": [["food", "location", "small_intestine"], ["hormones", "location", "small_intestine"]]}
+{"state_t": [["food", "location", "small_intestine"], ["hormones", "location", "small_intestine"]], "state_t+1": [["food", "location", "small_intestine"], ["hormones", "location", "pancreas"], ["enzymes", "location", "pancreas"]]}
+{"state_t": [["food", "location", "small_intestine"], ["hormones", "location", "pancreas"], ["enzymes", "location", "pancreas"]], "state_t+1": [["food", "location", "small_intestine"], ["hormones", "location", "pancreas"], ["enzymes", "location", "small_intestine"]]}
+{"state_t": [["digestive_juices", "location", "small_intestine"]], "state_t+1": [["digestive_juices", "location", "pancreas"]]}
+{"state_t": [["digestive_juices", "location", "pancreas"]], "state_t+1": [["digestive_juices", "location", "small_intestine"]]}
+{"state_t": [["insulin", "location", "bloodstream"]], "state_t+1": [["insulin", "location", "bloodstream"], ["glucagon", "location", "bloodstream"]]}
+{"state_t": [["egg", "location", "nest"]], "state_t+1": [["egg", "location", "nest"], ["baby_bird", "location", "egg"]]}
+{"state_t": [["egg", "location", "nest"], ["baby_bird", "location", "egg"]], "state_t+1": [["baby_bird", "location", "nest"]]}
+{"state_t": [["adult_bird", "location", "nest"]], "state_t+1": [["adult_bird", "location", "nest"], ["eggs", "location", "nest"]]}
+{"state_t": [["egg", "location", "nest"], ["bird", "location", "egg"]], "state_t+1": [["bird", "location", "nest"]]}
+{"state_t": [["tail", "location", "tadpole"]], "state_t+1": [["hind_leg", "location", "tadpole"], ["tail", "location", "tadpole"]]}
+{"state_t": [["hind_leg", "location", "tadpole"], ["tail", "location", "tadpole"]], "state_t+1": [["hind_leg", "location", "tadpole"]]}
+{"state_t": [["hind_leg", "location", "tadpole"]], "state_t+1": [["hind_leg", "location", "frog"]]}
+{"state_t": [["egg_clusters", "location", "water"]], "state_t+1": [["egg", "location", "water"], ["egg_clusters", "location", "water"]]}
+{"state_t": [["egg", "location", "water"]], "state_t+1": [["tadpole_with_gills", "location", "water"]]}
+{"state_t": [["tadpole_with_gills", "location", "water"]], "state_t+1": [["tadpole_with_gills", "location", "water"], ["leg", "location", "tadpole"]]}
+{"state_t": [["tadpole_with_gills", "location", "water"], ["leg", "location", "tadpole"]], "state_t+1": [["leg", "location", "froglet"], ["froglet", "location", "water"]]}
+{"state_t": [["leg", "location", "froglet"], ["froglet", "location", "water"]], "state_t+1": [["leg", "location", "frog"], ["frog", "location", "water"]]}
+{"state_t": [["limb", "location", "tadpole"]], "state_t+1": [["limb", "location", "frog"]]}
+{"state_t": [["sperm", "location", "uterus"], ["egg", "location", "uterus"]], "state_t+1": [["sperm", "location", "egg"], ["egg", "location", "uterus"]]}
+{"state_t": [["embryo", "location", "uterus"]], "state_t+1": [["fetus", "location", "uterus"]]}
+{"state_t": [["carbon_dioxide", "location", "atmosphere"], ["calcite", "location", "limestone"]], "state_t+1": [["solution_caves", "location", "limestone"], ["carbon_dioxide", "location", "atmosphere"], ["calcite", "location", "limestone"]]}
+{"state_t": [["solution_caves", "location", "limestone"], ["carbon_dioxide", "location", "atmosphere"], ["calcite", "location", "limestone"]], "state_t+1": [["solution_caves", "location", "limestone"], ["carbon_dioxide", "location", "rainwater"], ["calcite", "location", "limestone"]]}
+{"state_t": [["solution_caves", "location", "limestone"], ["carbon_dioxide", "location", "rainwater"], ["calcite", "location", "limestone"]], "state_t+1": [["solution_caves", "location", "limestone"], ["calcite", "location", "limestone"]]}
+{"state_t": [["remains", "location", "soft_soil_or_mud"]], "state_t+1": [["sediment", "location", "remains"], ["remains", "location", "soft_soil_or_mud"]]}
+{"state_t": [["sediment", "location", "remains"], ["remains", "location", "soft_soil_or_mud"]], "state_t+1": [["sediment", "location", "remains"], ["remains", "location", "mineral"]]}
+{"state_t": [["sediment", "location", "remains"], ["remains", "location", "mineral"]], "state_t+1": [["sediment", "location", "remains"], ["remains", "location", "soft_soil_or_mud"], ["fossil", "location", "soft_soil_or_mud"]]}
+{"state_t": [["soft_parts_of_the_plant", "location", "plant"], ["hard_parts_of_the_plant", "location", "plant"]], "state_t+1": [["soft_parts_of_the_plant", "location", "sediment"], ["hard_parts_of_the_plant", "location", "plant"]]}
+{"state_t": [["soft_parts_of_the_plant", "location", "sediment"], ["hard_parts_of_the_plant", "location", "plant"]], "state_t+1": [["soft_parts_of_the_plant", "location", "sediment"], ["minerals", "location", "sediment"]]}
+{"state_t": [["minerals", "location", "sediment"]], "state_t+1": [["minerals", "location", "rock"]]}
+{"state_t": [["water", "location", "sweat_gland"], ["chemicals", "location", "sweat_gland"]], "state_t+1": [["sweat", "location", "pore"]]}
+{"state_t": [["energy", "location", "sunlight"], ["carbon_dioxide", "location", "stomata"]], "state_t+1": [["energy", "location", "sunlight"], ["carbon_dioxide", "location", "leaf"]]}
+{"state_t": [["energy", "location", "sunlight"], ["water_molecules", "location", "root"], ["carbon_dioxide", "location", "leaf"]], "state_t+1": [["energy", "location", "chlorophyll"], ["water_molecules", "location", "root"], ["carbon_dioxide", "location", "leaf"]]}
+{"state_t": [["energy", "location", "chlorophyll"], ["water_molecules", "location", "root"], ["carbon_dioxide", "location", "leaf"]], "state_t+1": [["energy", "location", "chlorophyll"], ["hydrogen", "location", "leaf"], ["oxygen", "location", "leaf"], ["carbon_dioxide", "location", "leaf"]]}
+{"state_t": [["energy", "location", "chlorophyll"], ["hydrogen", "location", "leaf"], ["oxygen", "location", "leaf"], ["carbon_dioxide", "location", "leaf"]], "state_t+1": [["energy", "location", "chlorophyll"], ["hydrogen", "location", "leaf"], ["oxygen", "location", "atmosphere"], ["carbon_dioxide", "location", "leaf"]]}
+{"state_t": [["energy", "location", "chlorophyll"], ["hydrogen", "location", "leaf"], ["oxygen", "location", "atmosphere"], ["carbon_dioxide", "location", "leaf"]], "state_t+1": [["energy", "location", "chlorophyll"], ["oxygen", "location", "atmosphere"], ["glucose", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "air"], ["sun_energy", "location", "sun"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "sun"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "sun"], ["water", "location", "root"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "sun"], ["water", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "sun"], ["water", "location", "leaf"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "chlorophyll"], ["water", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["sun_energy", "location", "chlorophyll"], ["water", "location", "leaf"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["hydrogen", "location", "plant"], ["oxygen", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["hydrogen", "location", "plant"], ["oxygen", "location", "leaf"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["hydrogen", "location", "plant"], ["oxygen", "location", "atmosphere"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["hydrogen", "location", "plant"], ["oxygen", "location", "atmosphere"]], "state_t+1": [["oxygen", "location", "atmosphere"], ["glucose", "location", "plant"]]}
+{"state_t": [["seeds", "location", "ground"], ["weeds", "location", "earth"]], "state_t+1": [["seedlings", "location", "ground"], ["weeds", "location", "earth"]]}
+{"state_t": [["seedlings", "location", "ground"], ["weeds", "location", "earth"]], "state_t+1": [["plants", "location", "ground"], ["weeds", "location", "earth"]]}
+{"state_t": [["plants", "location", "ground"], ["weeds", "location", "earth"]], "state_t+1": [["plants", "location", "ground"]]}
+{"state_t": [["seeds", "location", "soil"]], "state_t+1": [["crops", "location", "soil"]]}
+{"state_t": [["ozone_layer", "location", "atmosphere"]], "state_t+1": [["ozone_layer", "location", "atmosphere"], ["acid_rain", "location", "atmosphere"]]}
+{"state_t": [["can", "location", "recycle_bin"]], "state_t+1": [["can", "location", "recycle_center"]]}
+{"state_t": [["molten_aluminum", "location", "treatment_plant"]], "state_t+1": [["molten_aluminum", "location", "treatment_plant"], ["ingots", "location", "treatment_plant"]]}
+{"state_t": [["molten_aluminum", "location", "treatment_plant"], ["ingots", "location", "treatment_plant"]], "state_t+1": [["molten_aluminum", "location", "treatment_plant"], ["ingots", "location", "mill"]]}
+{"state_t": [["carbon_dioxide", "location", "stomate"], ["oxygen", "location", "leaf"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["oxygen", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["oxygen", "location", "leaf"]], "state_t+1": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["energy", "location", "atp"], ["atp", "location", "leaf"], ["oxygen", "location", "leaf"]]}
+{"state_t": [["carbon_dioxide", "location", "leaf"], ["water", "location", "leaf"], ["energy", "location", "atp"], ["atp", "location", "leaf"], ["oxygen", "location", "leaf"]], "state_t+1": [["water", "location", "leaf"], ["atp", "location", "leaf"], ["sugar", "location", "leaf"], ["oxygen", "location", "leaf"]]}
+{"state_t": [["water", "location", "leaf"], ["atp", "location", "leaf"], ["sugar", "location", "leaf"], ["oxygen", "location", "leaf"]], "state_t+1": [["water", "location", "leaf"], ["atp", "location", "leaf"], ["sugar", "location", "leaf"], ["oxygen", "location", "stomata"]]}
+{"state_t": [["water", "location", "leaf"], ["atp", "location", "leaf"], ["sugar", "location", "leaf"]], "state_t+1": [["water", "location", "stomata"], ["atp", "location", "leaf"], ["sugar", "location", "leaf"], ["water_vapor", "location", "stomata"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "air"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "red_blood_cell"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "body"]]}
+{"state_t": [["air", "location", "mouth"], ["oxygen", "location", "mouth"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["water_at_a_surface", "location", "surface"], ["water_vapors", "location", "surface"]], "state_t+1": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "atmosphere"]]}
+{"state_t": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "atmosphere"]], "state_t+1": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "atmosphere"], ["tiny_particles_of_waterice", "location", "atmosphere"]]}
+{"state_t": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "atmosphere"], ["tiny_particles_of_waterice", "location", "atmosphere"]], "state_t+1": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "cloud"], ["clouds_or_fog", "location", "atmosphere"]]}
+{"state_t": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "cloud"], ["clouds_or_fog", "location", "atmosphere"]], "state_t+1": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "cloud"], ["clouds_or_fog", "location", "atmosphere"], ["rain", "location", "cloud"]]}
+{"state_t": [["water_at_a_surface", "location", "atmosphere"], ["water_vapors", "location", "cloud"], ["clouds_or_fog", "location", "atmosphere"], ["rain", "location", "cloud"]], "state_t+1": [["water_at_a_surface", "location", "surface_water"], ["water_vapors", "location", "surface_water"], ["clouds_or_fog", "location", "atmosphere"], ["rain", "location", "surface_water"]]}
+{"state_t": [["water", "location", "body_of_water"]], "state_t+1": [["water", "location", "earth"]]}
+{"state_t": [["water", "location", "lake_or_ocean"]], "state_t+1": [["water", "location", "lake_or_ocean"], ["water_vapor", "location", "atmosphere"]]}
+{"state_t": [["water", "location", "lake_or_ocean"], ["water_vapor", "location", "atmosphere"]], "state_t+1": [["water", "location", "atmosphere"], ["water_vapor", "location", "atmosphere"]]}
+{"state_t": [["water", "location", "atmosphere"], ["water_vapor", "location", "atmosphere"]], "state_t+1": [["water", "location", "atmosphere"], ["clouds", "location", "atmosphere"]]}
+{"state_t": [["water", "location", "crack"]], "state_t+1": [["ice", "location", "crack"]]}
+{"state_t": [["steam", "location", "turbine"]], "state_t+1": [["steam", "location", "turbine"], ["electricity", "location", "turbine"]]}
+{"state_t": [["smaller_material", "location", "boiler"], ["water", "location", "boiler"]], "state_t+1": [["smaller_material", "location", "boiler"], ["water", "location", "boiler"], ["steam", "location", "boiler"]]}
+{"state_t": [["coal", "location", "ground"]], "state_t+1": [["pollution", "location", "sky"]]}
+{"state_t": [["pollution", "location", "sky"]], "state_t+1": [["pollution", "location", "cloud"]]}
+{"state_t": [["pollution", "location", "cloud"]], "state_t+1": [["pollution", "location", "rain"]]}
+{"state_t": [["sulfur_oxides", "location", "atmosphere"], ["water", "location", "atmosphere"]], "state_t+1": [["sulfur_trioxide", "location", "atmosphere"], ["water", "location", "atmosphere"]]}
+{"state_t": [["carbon_dioxide", "location", "atmosphere"]], "state_t+1": [["carbon_dioxide", "location", "atmosphere"], ["methane", "location", "atmosphere"]]}
+{"state_t": [["carbon_dioxide", "location", "atmosphere"], ["methane", "location", "atmosphere"]], "state_t+1": [["carbon_dioxide", "location", "atmosphere"], ["methane", "location", "atmosphere"], ["water_vapor", "location", "atmosphere"]]}
+{"state_t": [["carbon_dioxide", "location", "atmosphere"], ["methane", "location", "atmosphere"], ["water_vapor", "location", "atmosphere"]], "state_t+1": [["greenhouse_gases", "location", "atmosphere"]]}
+{"state_t": [["water", "location", "tray"]], "state_t+1": [["ice", "location", "tray"]]}
+{"state_t": [["batter", "location", "cake_pan"]], "state_t+1": [["cake", "location", "oven"]]}
+{"state_t": [["oil", "location", "house"]], "state_t+1": [["oil", "location", "stove"]]}
+{"state_t": [["oil", "location", "stove"]], "state_t+1": [["warm_air", "location", "stove"]]}
+{"state_t": [["warm_air", "location", "stove"]], "state_t+1": [["warm_air", "location", "house"]]}
+{"state_t": [["heating_oil", "location", "burner"], ["air", "location", "burner"]], "state_t+1": [["heating_oil", "location", "combustion_chamber"], ["air", "location", "combustion_chamber"]]}
+{"state_t": [["tectonic_plates", "location", "earths_crust"], ["lava", "location", "earths_crust"], ["volcanoes", "location", "surface"]], "state_t+1": [["tectonic_plates", "location", "earths_crust"], ["fissures", "location", "earths_crust"], ["lava", "location", "earths_crust"], ["volcanoes", "location", "surface"]]}
+{"state_t": [["tectonic_plates", "location", "earths_crust"], ["fissures", "location", "earths_crust"], ["upheavals_in_the_crust", "location", "earths_crust"], ["lava", "location", "earths_crust"], ["volcanoes", "location", "surface"]], "state_t+1": [["tectonic_plates", "location", "earths_crust"], ["fissures", "location", "earths_crust"], ["upheavals_in_the_crust", "location", "earths_crust"], ["lava", "location", "volcano"], ["volcanoes", "location", "surface"]]}
+{"state_t": [["tectonic_plates", "location", "earths_crust"], ["fissures", "location", "earths_crust"], ["upheavals_in_the_crust", "location", "earths_crust"], ["lava", "location", "volcano"], ["volcanoes", "location", "surface"]], "state_t+1": [["tectonic_plates", "location", "earths_crust"], ["fissures", "location", "earths_crust"], ["upheavals_in_the_crust", "location", "earths_crust"], ["lava", "location", "volcano"], ["mountains", "location", "volcano"]]}
+{"state_t": [["pressure", "location", "underground"], ["tectonic_plates", "location", "underground"]], "state_t+1": [["pressure", "location", "underground"], ["tectonic_plates", "location", "underground"], ["cracks", "location", "earth_crust"]]}
+{"state_t": [["seed", "location", "plant"]], "state_t+1": [["seed", "location", "ground"]]}
+{"state_t": [["plant", "location", "ground"]], "state_t+1": [["plant", "location", "ground"], ["flowers", "location", "plant"]]}
+{"state_t": [["plant", "location", "soil"]], "state_t+1": [["plant", "location", "soil"], ["roots", "location", "soil"]]}
+{"state_t": [["plant", "location", "soil"], ["roots", "location", "soil"]], "state_t+1": [["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"]]}
+{"state_t": [["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"]], "state_t+1": [["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"], ["fruit", "location", "flower"]]}
+{"state_t": [["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"], ["fruit", "location", "flower"]], "state_t+1": [["seed", "location", "fruit"], ["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["seed", "location", "fruit"], ["plant", "location", "soil"], ["roots", "location", "soil"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]], "state_t+1": [["seed", "location", "fruit"], ["roots", "location", "soil"], ["flowers", "location", "plant"], ["fruit", "location", "plant"]]}
+{"state_t": [["warm_water", "location", "ocean"], ["warm_air", "location", "outside_area"]], "state_t+1": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["warm_air", "location", "outside_area"]]}
+{"state_t": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["warm_air", "location", "outside_area"]], "state_t+1": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["warm_air", "location", "low_pressure_area"]]}
+{"state_t": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["warm_air", "location", "low_pressure_area"]], "state_t+1": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["clouds", "location", "low_pressure_area"]]}
+{"state_t": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["clouds", "location", "low_pressure_area"]], "state_t+1": [["warm_water", "location", "ocean"], ["low_pressure_air", "location", "near_the_surface_of_the_ocean"], ["clouds", "location", "low_pressure_area"], ["wind", "location", "cloud"], ["moisture", "location", "wind"]]}
+{"state_t": [["warm_ocean_water", "location", "ocean"]], "state_t+1": [["thunderstorms", "location", "ocean"], ["warm_ocean_water", "location", "ocean"]]}
+{"state_t": [["thunderstorms", "location", "ocean"], ["warm_ocean_water", "location", "ocean"]], "state_t+1": [["thunderstorms", "location", "ocean"], ["rotation", "location", "area_of_low_pressure"], ["warm_ocean_water", "location", "ocean"]]}
+{"state_t": [["thunderstorms", "location", "ocean"], ["rotation", "location", "area_of_low_pressure"], ["warm_ocean_water", "location", "ocean"]], "state_t+1": [["thunderstorms", "location", "ocean"], ["rotation", "location", "thunderstorm"], ["warm_ocean_water", "location", "ocean"]]}
+{"state_t": [["thunderstorms", "location", "ocean"], ["rotation", "location", "thunderstorm"], ["warm_ocean_water", "location", "ocean"]], "state_t+1": [["thunderstorms", "location", "ocean"], ["rotation", "location", "thunderstorm"], ["rising_air", "location", "ocean"]]}
+{"state_t": [["bees", "location", "tree"], ["wax", "location", "tree"]], "state_t+1": [["bees", "location", "tree"], ["chewed_up_wax", "location", "tree"]]}
+{"state_t": [["bees", "location", "tree"], ["chewed_up_wax", "location", "tree"]], "state_t+1": [["bees", "location", "tree"], ["chewed_up_wax", "location", "honeycomb"], ["honeycomb", "location", "tree"]]}
+{"state_t": [["bees", "location", "tree"], ["chewed_up_wax", "location", "honeycomb"], ["honeycomb", "location", "tree"]], "state_t+1": [["bees", "location", "hive"], ["honeycomb", "location", "hive"], ["hive", "location", "tree"]]}
+{"state_t": [["bees", "location", "out"], ["food", "location", "bee"], ["propolis", "location", "hive"]], "state_t+1": [["bees", "location", "out"], ["food", "location", "bee"], ["wax", "location", "bee"], ["propolis", "location", "hive"]]}
+{"state_t": [["bees", "location", "out"], ["food", "location", "bee"], ["wax", "location", "bee"], ["propolis", "location", "hive"]], "state_t+1": [["bees", "location", "out"], ["food", "location", "bee"], ["wax", "location", "bee"], ["honey", "location", "bee"], ["propolis", "location", "hive"]]}
+{"state_t": [["bees", "location", "out"], ["food", "location", "bee"], ["wax", "location", "bee"], ["honey", "location", "bee"], ["propolis", "location", "hive"]], "state_t+1": [["bees", "location", "hive"], ["food", "location", "bee"], ["wax", "location", "hive"], ["honey", "location", "bee"]]}
+{"state_t": [["bees", "location", "rock_crevice_or_tree_branch"], ["nectar", "location", "flower"]], "state_t+1": [["bees", "location", "flower"], ["nectar", "location", "bee"]]}
+{"state_t": [["nectar", "location", "bee"]], "state_t+1": [["honey", "location", "bee"]]}
+{"state_t": [["honey", "location", "bee"]], "state_t+1": [["wax", "location", "bee"]]}
+{"state_t": [["wax", "location", "bee"]], "state_t+1": [["cylinders", "location", "hive"]]}
+{"state_t": [["bees", "location", "hive"], ["cylinders", "location", "hive"]], "state_t+1": [["bees", "location", "hive"], ["hive", "location", "rock_crevice_or_tree_branch"]]}
+{"state_t": [["owls", "location", "perch"], ["prey", "location", "hunting_territory"]], "state_t+1": [["owls", "location", "hunting_territory"], ["prey", "location", "hunting_territory"]]}
+{"state_t": [["owl", "location", "nest"], ["mouse", "location", "ground"]], "state_t+1": [["owl", "location", "night"], ["mouse", "location", "ground"]]}
+{"state_t": [["owl", "location", "night"], ["mouse", "location", "ground"]], "state_t+1": [["owl", "location", "ground"], ["mouse", "location", "ground"]]}
+{"state_t": [["animals", "location", "forest"], ["habitat", "location", "forest"]], "state_t+1": [["forest_fire", "location", "forest"], ["animals", "location", "forest"], ["habitat", "location", "forest"]]}
+{"state_t": [["forest_fire", "location", "forest"], ["animals", "location", "forest"], ["habitat", "location", "forest"]], "state_t+1": [["forest_fire", "location", "forest"], ["animals", "location", "vicinity"]]}
+{"state_t": [["trees", "location", "forest"], ["plants", "location", "forest"], ["animals_home", "location", "forest"], ["animals", "location", "forest"]], "state_t+1": [["forest_fire", "location", "forest"], ["trees", "location", "forest"], ["plants", "location", "forest"], ["animals_home", "location", "forest"], ["animals", "location", "forest"]]}
+{"state_t": [["forest_fire", "location", "forest"], ["trees", "location", "forest"], ["plants", "location", "forest"], ["animals_home", "location", "forest"], ["animals", "location", "forest"]], "state_t+1": [["forest_fire", "location", "forest"], ["animals_home", "location", "forest"], ["animals", "location", "forest"]]}
+{"state_t": [["forest_fire", "location", "forest"], ["animals_home", "location", "forest"], ["animals", "location", "forest"]], "state_t+1": [["forest_fire", "location", "forest"], ["animals", "location", "forest"]]}
+{"state_t": [["organic_layer", "location", "bottom_of_ocean__riverbed_or_swamp"]], "state_t+1": [["kerogen", "location", "bottom_of_ocean__riverbed_or_swamp"]]}
+{"state_t": [["kerogen", "location", "bottom_of_ocean__riverbed_or_swamp"]], "state_t+1": [["carbon_and_hydrogen_atoms", "location", "bottom_of_ocean__riverbed_or_swamp"]]}
+{"state_t": [["food", "location", "esophagus"], ["unused_materials", "location", "small_intestine"]], "state_t+1": [["food", "location", "stomach"], ["unused_materials", "location", "small_intestine"]]}
+{"state_t": [["food", "location", "stomach"], ["unused_materials", "location", "small_intestine"]], "state_t+1": [["food", "location", "stomach"], ["nutrients", "location", "stomach"], ["unused_materials", "location", "small_intestine"]]}
+{"state_t": [["food", "location", "stomach"], ["nutrients", "location", "stomach"], ["unused_materials", "location", "small_intestine"]], "state_t+1": [["food", "location", "small_intestine"], ["nutrients", "location", "small_intestine"], ["unused_materials", "location", "small_intestine"]]}
+{"state_t": [["carbohydrates", "location", "small_intestine"], ["food", "location", "small_intestine"], ["nutrients", "location", "small_intestine"], ["unused_materials", "location", "small_intestine"]], "state_t+1": [["carbohydrates", "location", "small_intestine"], ["nutrients", "location", "small_intestine"], ["smallest_molecules", "location", "small_intestine"], ["unused_materials", "location", "small_intestine"]]}
+{"state_t": [["carbohydrates", "location", "small_intestine"], ["nutrients", "location", "small_intestine"], ["smallest_molecules", "location", "small_intestine"], ["unused_materials", "location", "small_intestine"]], "state_t+1": [["carbohydrates", "location", "small_intestine"], ["nutrients", "location", "blood_stream"], ["smallest_molecules", "location", "blood_stream"], ["unused_materials", "location", "small_intestine"]]}
+{"state_t": [["sunlight", "location", "sun"]], "state_t+1": [["sunlight", "location", "earth"]]}
+{"state_t": [["chromosome", "location", "cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["chromatid", "location", "cell"]], "state_t+1": [["chromosome", "location", "cell"], ["centriole", "location", "opposite_pole_of_the_cell"], ["spindle_fiber", "location", "cell"], ["chromatid", "location", "cell"]]}
+{"state_t": [["chromosome", "location", "cell"], ["centriole", "location", "opposite_pole_of_the_cell"], ["spindle_fiber", "location", "cell"], ["chromatid", "location", "cell"]], "state_t+1": [["chromosome", "location", "center_of_the_cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["chromatid", "location", "cell"]]}
+{"state_t": [["chromosome", "location", "center_of_the_cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["chromatid", "location", "cell"]], "state_t+1": [["chromosome", "location", "center_of_the_cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["individual_chromosome", "location", "cell"]]}
+{"state_t": [["chromosome", "location", "center_of_the_cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["individual_chromosome", "location", "cell"]], "state_t+1": [["chromosome", "location", "opposite_end_of_the_cell"], ["centriole", "location", "cell"], ["spindle_fiber", "location", "cell"], ["individual_chromosome", "location", "cell"]]}
+{"state_t": [["ammonia", "location", "liver"]], "state_t+1": [["bile", "location", "liver"], ["ammonia", "location", "liver"]]}
+{"state_t": [["bile", "location", "liver"], ["ammonia", "location", "liver"]], "state_t+1": [["bile", "location", "liver"], ["proteins", "location", "liver"], ["ammonia", "location", "liver"]]}
+{"state_t": [["bile", "location", "liver"], ["proteins", "location", "liver"], ["ammonia", "location", "liver"]], "state_t+1": [["bile", "location", "liver"], ["proteins", "location", "liver"], ["glycogen", "location", "liver"], ["ammonia", "location", "liver"]]}
+{"state_t": [["electrons_at_the_cathode", "location", "cathode"]], "state_t+1": [["electricity", "location", "battery"], ["electrons_at_the_cathode", "location", "cathode"]]}
+{"state_t": [["dna", "location", "cell"], ["cytoplasm", "location", "cell"], ["ribosomes", "location", "cytoplasm"]], "state_t+1": [["dna", "location", "cell"], ["rna", "location", "cell"], ["cytoplasm", "location", "cell"], ["ribosomes", "location", "cytoplasm"]]}
+{"state_t": [["proteins", "location", "cell"], ["dna", "location", "cell"], ["cytoplasm", "location", "cell"], ["ribosomes", "location", "cytoplasm"]], "state_t+1": [["proteins", "location", "cell"], ["dna", "location", "cytoplasm"], ["cytoplasm", "location", "cell"], ["ribosomes", "location", "cytoplasm"]]}
+{"state_t": [["mrna", "location", "cell"], ["dna_genetic_information", "location", "nucleus"], ["mrna", "location", "cell"], ["ribosome", "location", "nucleus"]], "state_t+1": [["mrna", "location", "nucleus"], ["dna_genetic_information", "location", "nucleus"], ["mrna", "location", "nucleus"], ["ribosome", "location", "nucleus"]]}
+{"state_t": [["mrna", "location", "nucleus"], ["dna_genetic_information", "location", "nucleus"], ["mrna", "location", "nucleus"], ["ribosome", "location", "nucleus"]], "state_t+1": [["mrna", "location", "nucleus"], ["dna_genetic_information", "location", "mrna"], ["mrna", "location", "nucleus"], ["ribosome", "location", "nucleus"]]}
+{"state_t": [["mrna", "location", "nucleus"], ["dna_genetic_information", "location", "mrna"], ["mrna", "location", "nucleus"], ["ribosome", "location", "nucleus"]], "state_t+1": [["mrna", "location", "ribosome"], ["dna_genetic_information", "location", "mrna"], ["mrna", "location", "ribosome"], ["ribosome", "location", "nucleus"]]}
+{"state_t": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"]], "state_t+1": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"], ["scab", "location", "wound"]]}
+{"state_t": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"], ["scab", "location", "wound"]], "state_t+1": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"], ["scab", "location", "wound"], ["skin", "location", "you"]]}
+{"state_t": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"], ["scab", "location", "wound"], ["skin", "location", "you"]], "state_t+1": [["wound", "location", "you"], ["bandaid", "location", "wound"], ["blood_clot", "location", "wound"], ["skin", "location", "you"]]}
+{"state_t": [["cut", "location", "body"]], "state_t+1": [["cut", "location", "body"], ["tissue", "location", "body"]]}
+{"state_t": [["cut", "location", "body"], ["tissue", "location", "body"]], "state_t+1": [["cut", "location", "body"], ["tissue", "location", "body"], ["skin", "location", "body"]]}
+{"state_t": [["cut", "location", "body"], ["tissue", "location", "body"], ["skin", "location", "body"]], "state_t+1": [["cut", "location", "body"], ["tissue", "location", "body"], ["skin", "location", "body"], ["blood_clots", "location", "skin"]]}
+{"state_t": [["spark", "location", "cylinder"], ["gases", "location", "cylinder"]], "state_t+1": [["spark", "location", "cylinder"], ["gases", "location", "cylinder"], ["energy", "location", "cylinder"]]}
+{"state_t": [["blood_sugar", "location", "bloodstream"], ["signal", "location", "pancreas"]], "state_t+1": [["blood_sugar", "location", "bloodstream"], ["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]]}
+{"state_t": [["blood_sugar", "location", "bloodstream"], ["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]], "state_t+1": [["blood_sugar", "location", "blood"], ["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]]}
+{"state_t": [["blood_sugar", "location", "blood"], ["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]], "state_t+1": [["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]]}
+{"state_t": [["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"]], "state_t+1": [["signal", "location", "pancreas"], ["insulin", "location", "bloodstream"], ["energy", "location", "cell"]]}
+{"state_t": [["sugar", "location", "bloodstream"]], "state_t+1": [["energy", "location", "bloodstream"]]}
+{"state_t": [["seeds", "location", "tree"]], "state_t+1": [["seeds", "location", "wind__animal__etc"]]}
+{"state_t": [["seeds", "location", "wind__animal__etc"]], "state_t+1": [["seeds", "location", "ground"]]}
+{"state_t": [["tree", "location", "ground"]], "state_t+1": [["tree", "location", "ground"], ["seeds", "location", "tree"]]}
+{"state_t": [["organic_material", "location", "soil"]], "state_t+1": [["organic_material", "location", "soil"], ["larger_plants", "location", "soil"]]}
+{"state_t": [["organic_material", "location", "soil"], ["larger_plants", "location", "soil"]], "state_t+1": [["organic_material", "location", "soil"], ["larger_plants", "location", "soil"], ["trees", "location", "soil"]]}
+{"state_t": [["electricity", "location", "turbine"]], "state_t+1": [["electricity", "location", "wire"]]}
+{"state_t": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["water", "location", "nuclear_plant"]], "state_t+1": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["heat", "location", "rod_contain_uranium"], ["steam", "location", "nuclear_plant"]]}
+{"state_t": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["heat", "location", "rod_contain_uranium"], ["steam", "location", "nuclear_plant"]], "state_t+1": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["heat", "location", "rod_contain_uranium"], ["steam", "location", "turbine"]]}
+{"state_t": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["heat", "location", "rod_contain_uranium"], ["steam", "location", "turbine"]], "state_t+1": [["energy", "location", "nuclear_plant"], ["neutrons", "location", "nuclear_plant"], ["heat", "location", "rod_contain_uranium"], ["electricity", "location", "generator"]]}
+{"state_t": [["speak", "location", "you"]], "state_t+1": [["speak", "location", "receiver"]]}
+{"state_t": [["speak", "location", "receiver"]], "state_t+1": [["speak", "location", "receiver"], ["sound_waves", "location", "receiver"]]}
+{"state_t": [["speak", "location", "receiver"], ["sound_waves", "location", "receiver"]], "state_t+1": [["speak", "location", "receiver"], ["sound_waves", "location", "receiver"], ["electricity", "location", "receiver"]]}
+{"state_t": [["speak", "location", "receiver"], ["electricity", "location", "receiver"]], "state_t+1": [["speak", "location", "receiver"], ["electricity", "location", "wire_or_cable"]]}
+{"state_t": [["body_fat", "location", "squirrel"], ["food_stores", "location", "near_its_den"]], "state_t+1": [["thicker_coat", "location", "squirrel"], ["body_fat", "location", "squirrel"], ["food_stores", "location", "near_its_den"]]}
+{"state_t": [["thicker_coat", "location", "squirrel"], ["body_fat", "location", "squirrel"], ["food_stores", "location", "near_its_den"]], "state_t+1": [["thicker_coat", "location", "squirrel"], ["food_stores", "location", "near_its_den"]]}
+{"state_t": [["thicker_coat", "location", "squirrel"], ["food_stores", "location", "near_its_den"]], "state_t+1": [["thicker_coat", "location", "squirrel"]]}
+{"state_t": [["shoot", "location", "soil"], ["leaf", "location", "shoot"]], "state_t+1": [["shoot", "location", "soil"], ["leaf", "location", "shoot"], ["flowers", "location", "tree"], ["fruit", "location", "tree"]]}
+{"state_t": [["electricity", "location", "magnetron"]], "state_t+1": [["radio_waves", "location", "magnetron"]]}
+{"state_t": [["radio_waves", "location", "magnetron"]], "state_t+1": [["radio_waves", "location", "wave_guide"]]}
+{"state_t": [["radio_waves", "location", "wave_guide"]], "state_t+1": [["radio_waves", "location", "food_compartment"]]}
+{"state_t": [["radio_waves", "location", "food_compartment"]], "state_t+1": [["radio_waves", "location", "food"]]}
+{"state_t": [["radiation", "location", "sun"], ["atmosphere", "location", "earth"]], "state_t+1": [["radiation", "location", "earth"], ["atmosphere", "location", "earth"]]}
+{"state_t": [["radiation", "location", "earth"], ["atmosphere", "location", "earth"]], "state_t+1": [["radiation", "location", "atmosphere"], ["atmosphere", "location", "earth"]]}
+{"state_t": [["heat", "location", "sun_light"], ["energy", "location", "sun_light"]], "state_t+1": [["several_types_of_gases", "location", "atmosphere"], ["heat", "location", "sun_light"], ["energy", "location", "sun_light"]]}
+{"state_t": [["several_types_of_gases", "location", "atmosphere"], ["heat", "location", "sun_light"], ["energy", "location", "sun_light"]], "state_t+1": [["several_types_of_gases", "location", "atmosphere"], ["heat", "location", "gas"], ["energy", "location", "gas"]]}
+{"state_t": [["several_types_of_gases", "location", "atmosphere"], ["heat", "location", "gas"], ["energy", "location", "gas"]], "state_t+1": [["several_types_of_gases", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["energy", "location", "atmosphere"]]}
+{"state_t": [["greenhouse_gas", "location", "air"], ["air", "location", "atmosphere"], ["heat", "location", "ground"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]], "state_t+1": [["greenhouse_gas", "location", "air"], ["air", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]]}
+{"state_t": [["greenhouse_gas", "location", "air"], ["air", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]], "state_t+1": [["greenhouse_gas", "location", "atmosphere"], ["air", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]]}
+{"state_t": [["greenhouse_gas", "location", "atmosphere"], ["air", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]], "state_t+1": [["greenhouse_gas", "location", "air"], ["air", "location", "atmosphere"], ["heat", "location", "atmosphere"], ["greenhouse_gas_molecules", "location", "atmosphere"], ["polar_ice_cap", "location", "earth"]]}
+{"state_t": [["paper", "location", "envelope"], ["message", "location", "letter"], ["letter", "location", "envelope"]], "state_t+1": [["paper", "location", "envelope"], ["message", "location", "letter"], ["letter", "location", "post_office"]]}
+{"state_t": [["paper", "location", "envelope"], ["message", "location", "letter"], ["letter", "location", "post_office"]], "state_t+1": [["paper", "location", "envelope"], ["message", "location", "recipient"], ["letter", "location", "recipient"]]}
+{"state_t": [["peice_of_paper", "location", "envelope"], ["letter", "location", "envelope"], ["stamp", "location", "envelope"]], "state_t+1": [["peice_of_paper", "location", "envelope"], ["letter", "location", "post_office"], ["stamp", "location", "envelope"]]}
+{"state_t": [["piece_of_paper", "location", "envelope"], ["letter", "location", "paper"], ["stamp", "location", "envelope"]], "state_t+1": [["piece_of_paper", "location", "envelope"], ["letter", "location", "mailbox"], ["stamp", "location", "envelope"]]}
+{"state_t": [["sunlight", "location", "atmosphere"], ["water", "location", "ocean"]], "state_t+1": [["sunlight", "location", "ocean"], ["water", "location", "ocean"]]}
+{"state_t": [["water", "location", "ocean"]], "state_t+1": [["water_vapor", "location", "air"]]}
+{"state_t": [["condensed_water", "location", "air"]], "state_t+1": [["condensed_water", "location", "air"], ["clouds", "location", "air"]]}
+{"state_t": [["water_vapor", "location", "warm_air"]], "state_t+1": [["water_vapor", "location", "air"]]}
+{"state_t": [["stream", "location", "soil_and_bedrock"]], "state_t+1": [["stream", "location", "soil_and_bedrock"], ["gash", "location", "soil_and_bedrock"]]}
+{"state_t": [["stream", "location", "soil_and_bedrock"], ["gash", "location", "soil_and_bedrock"]], "state_t+1": [["gash", "location", "soil_and_bedrock"]]}
+{"state_t": [["seeds", "location", "vegetation"]], "state_t+1": [["seeds", "location", "animal"]]}
+{"state_t": [["animals", "location", "someplace_else"], ["seeds", "location", "animal"]], "state_t+1": [["animals", "location", "someplace_else"], ["seeds", "location", "someplace_else"]]}
+{"state_t": [["animal", "location", "plant"], ["seeds", "location", "plant"], ["fruit", "location", "tree"]], "state_t+1": [["animal", "location", "plant"], ["seeds", "location", "fur"], ["fruit", "location", "tree"]]}
+{"state_t": [["seeds", "location", "fur"], ["fruit", "location", "tree"]], "state_t+1": [["seeds", "location", "fur"], ["eaten_seeds", "location", "animal"]]}
+{"state_t": [["seeds", "location", "fur"], ["eaten_seeds", "location", "animal"]], "state_t+1": [["seeds", "location", "location"], ["eaten_seeds", "location", "animal"]]}
+{"state_t": [["animal", "location", "location"], ["seeds", "location", "location"], ["eaten_seeds", "location", "animal"]], "state_t+1": [["animal", "location", "location"], ["seeds", "location", "location"], ["eaten_seeds", "location", "location"]]}
+{"state_t": [["sound_waves", "location", "bat"]], "state_t+1": [["sound_waves", "location", "object"]]}
+{"state_t": [["sound_waves", "location", "object"]], "state_t+1": [["echo", "location", "object"]]}
+{"state_t": [["pollen_sac", "location", "flower"]], "state_t+1": [["pollen_sac", "location", "bee"]]}
+{"state_t": [["bee", "location", "another_plant"], ["pollen_sac", "location", "bee"]], "state_t+1": [["bee", "location", "another_plant"], ["pollen_sac", "location", "another_plant"]]}
+{"state_t": [["nectar", "location", "plant"], ["pollen", "location", "flower"]], "state_t+1": [["pollen", "location", "flower"]]}
+{"state_t": [["bee", "location", "flower"], ["pollen", "location", "bee_fur"]], "state_t+1": [["bee", "location", "another_area"], ["pollen", "location", "bee_fur"]]}
+{"state_t": [["bee", "location", "another_area"], ["pollen", "location", "bee_fur"]], "state_t+1": [["bee", "location", "another_area"], ["pollen", "location", "area"]]}
+{"state_t": [["bee", "location", "flower"], ["pollen", "location", "hair_on_the_bee_leg"]], "state_t+1": [["bee", "location", "different_flower"], ["pollen", "location", "hair_on_the_bee_leg"]]}
+{"state_t": [["bee", "location", "different_flower"], ["pollen", "location", "hair_on_the_bee_leg"]], "state_t+1": [["bee", "location", "different_flower"], ["pollen", "location", "different_flower"]]}
+{"state_t": [["rain", "location", "limestone"], ["limestone", "location", "ground"]], "state_t+1": [["limestone", "location", "ground"]]}
+{"state_t": [["water", "location", "surface"]], "state_t+1": [["water", "location", "soil"]]}
+{"state_t": [["water", "location", "rock"], ["space", "location", "rock"]], "state_t+1": [["water", "location", "rock"], ["space", "location", "rock"], ["cave", "location", "rock"]]}
+{"state_t": [["water", "location", "rock"], ["space", "location", "rock"], ["cave", "location", "rock"]], "state_t+1": [["water", "location", "cavern"], ["space", "location", "rock"], ["cavern", "location", "rock"]]}
+{"state_t": [["sunlight", "location", "leaf"]], "state_t+1": [["glucose", "location", "leaf"]]}
+{"state_t": [["glucose", "location", "leaf"]], "state_t+1": [["glucose", "location", "plant"]]}
+{"state_t": [["air", "location", "you"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "bronchial_tube"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["air", "location", "bronchial_tube"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "bronchiole"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["air", "location", "bronchiole"], ["oxygen", "location", "air"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "alveolus"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "alveolus"], ["blood", "location", "lung"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "blood_vessel"], ["blood", "location", "lung"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "blood_vessel"], ["blood", "location", "lung"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "blood"], ["blood", "location", "body"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "blood"], ["blood", "location", "body"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "blood"], ["blood", "location", "lung"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "blood"], ["blood", "location", "lung"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["oxygen", "location", "blood"], ["blood", "location", "body"], ["carbon_dioxide", "location", "air"]]}
+{"state_t": [["air", "location", "nose_or_mouth"], ["carbon_dioxide", "location", "every_cell_in_the_body"]], "state_t+1": [["air", "location", "windpipe"], ["carbon_dioxide", "location", "every_cell_in_the_body"]]}
+{"state_t": [["air", "location", "windpipe"], ["carbon_dioxide", "location", "every_cell_in_the_body"]], "state_t+1": [["air", "location", "lung"], ["carbon_dioxide", "location", "every_cell_in_the_body"]]}
+{"state_t": [["air", "location", "lung"], ["carbon_dioxide", "location", "every_cell_in_the_body"]], "state_t+1": [["air", "location", "lung"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["air", "location", "lung"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["air", "location", "lung"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["air", "location", "mouth"], ["oxygen", "location", "mouth"]], "state_t+1": [["air", "location", "esophagus"], ["oxygen", "location", "esophagus"]]}
+{"state_t": [["air", "location", "esophagus"], ["oxygen", "location", "esophagus"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"]]}
+{"state_t": [["lava", "location", "surface"]], "state_t+1": [["minerals", "location", "water"]]}
+{"state_t": [["rock", "location", "earth_crust"]], "state_t+1": [["lava", "location", "earth_surface"]]}
+{"state_t": [["lava", "location", "earth_surface"]], "state_t+1": [["minerals", "location", "earth_surface"]]}
+{"state_t": [["hydrogen", "location", "plant"], ["oxygen", "location", "plant"]], "state_t+1": [["hydrogen", "location", "plant"], ["oxygen", "location", "atmosphere"]]}
+{"state_t": [["hydrogen", "location", "plant"], ["oxygen", "location", "atmosphere"], ["carbon_dioxide", "location", "plant"]], "state_t+1": [["oxygen", "location", "atmosphere"], ["intermediate", "location", "plant"]]}
+{"state_t": [["oxygen", "location", "atmosphere"], ["intermediate", "location", "plant"]], "state_t+1": [["oxygen", "location", "atmosphere"], ["glucose", "location", "plant"]]}
+{"state_t": [["seeds", "location", "plant"]], "state_t+1": [["seeds", "location", "air"]]}
+{"state_t": [["seeds", "location", "air"]], "state_t+1": [["seeds", "location", "area"]]}
+{"state_t": [["seeds", "location", "area"]], "state_t+1": [["seeds", "location", "fur_of_animal"]]}
+{"state_t": [["seeds", "location", "fur_of_animal"]], "state_t+1": [["seeds", "location", "ground"]]}
+{"state_t": [["fruit", "location", "animal"], ["seed", "location", "animal"]], "state_t+1": [["seed", "location", "animal"]]}
+{"state_t": [["seed", "location", "digestive_system"]], "state_t+1": [["seed", "location", "dropping"]]}
+{"state_t": [["seed", "location", "waste"]], "state_t+1": [["new_plant", "location", "waste"]]}
+{"state_t": [["air", "location", "bronchial_tube"], ["oxygen", "location", "bronchial_tube"], ["carbon_dioxide", "location", "bronchial_tube"]], "state_t+1": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["air", "location", "bronchiole"], ["oxygen", "location", "bronchiole"], ["carbon_dioxide", "location", "bronchiole"]]}
+{"state_t": [["air", "location", "bronchiole"], ["oxygen", "location", "bronchiole"], ["carbon_dioxide", "location", "bronchiole"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "alveolus"], ["carbon_dioxide", "location", "bronchiole"]]}
+{"state_t": [["oxygen", "location", "every_cell_in_the_body"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "every_cell_in_the_body"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "every_cell_in_the_body"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["oxygen", "location", "every_cell_in_the_body"], ["carbon_dioxide", "location", "air"]]}
+{"state_t": [["air", "location", "lung"], ["oxygen", "location", "lung"], ["carbon_dioxide", "location", "bloodstream"]], "state_t+1": [["air", "location", "alveolus"], ["oxygen", "location", "alveolus"], ["carbon_dioxide", "location", "bloodstream"]]}
+{"state_t": [["oxygen", "location", "alveolus"], ["carbon_dioxide", "location", "bloodstream"]], "state_t+1": [["oxygen", "location", "capillary"], ["carbon_dioxide", "location", "bloodstream"]]}
+{"state_t": [["oxygen", "location", "capillary"], ["carbon_dioxide", "location", "bloodstream"]], "state_t+1": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "bloodstream"]]}
+{"state_t": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "bloodstream"]], "state_t+1": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "lung"]]}
+{"state_t": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "lung"]], "state_t+1": [["oxygen", "location", "bloodstream"], ["carbon_dioxide", "location", "out"]]}
+{"state_t": [["air", "location", "mouth"], ["carbon_dioxide", "location", "air"], ["oxygen", "location", "air"]], "state_t+1": [["air", "location", "lung"], ["carbon_dioxide", "location", "air"], ["oxygen", "location", "air"]]}
+{"state_t": [["air", "location", "lung"], ["carbon_dioxide", "location", "air"], ["oxygen", "location", "air"]], "state_t+1": [["air", "location", "bronchial_tissue"], ["carbon_dioxide", "location", "air"], ["oxygen", "location", "air"]]}
+{"state_t": [["air", "location", "bronchial_tissue"], ["oxygen", "location", "air"]], "state_t+1": [["air", "location", "bronchial_tissue"], ["oxygen", "location", "lung"]]}
+{"state_t": [["air", "location", "bronchial_tissue"], ["oxygen", "location", "lung"]], "state_t+1": [["air", "location", "bronchial_tissue"], ["oxygen", "location", "body"]]}
+{"state_t": [["cool_water", "location", "tray"]], "state_t+1": [["cool_water", "location", "ice_cube_tray"]]}
+{"state_t": [["cool_water", "location", "ice_cube_tray"]], "state_t+1": [["ice_cubes", "location", "freezer"]]}
+{"state_t": [["ice_cubes", "location", "freezer"]], "state_t+1": [["ice_cubes", "location", "tray"]]}
+{"state_t": [["warm_water", "location", "ice_cube_tray"]], "state_t+1": [["ice_cubes", "location", "ice_cube_tray"]]}
+{"state_t": [["coal", "location", "furnace"]], "state_t+1": [["heat_energy", "location", "furnace"]]}
+{"state_t": [["heat_energy", "location", "furnace"], ["water", "location", "power_station"]], "state_t+1": [["water", "location", "power_station"]]}
+{"state_t": [["steam", "location", "power_station"]], "state_t+1": [["steam", "location", "generator"]]}
+{"state_t": [["steam", "location", "generator"]], "state_t+1": [["steam", "location", "generator"], ["electricity", "location", "generator"]]}
+{"state_t": [["coal", "location", "power_station"], ["hot_air", "location", "power_station"], ["water", "location", "pipe"]], "state_t+1": [["coal", "location", "firebox"], ["hot_air", "location", "firebox"], ["water", "location", "pipe"]]}
+{"state_t": [["coal", "location", "firebox"], ["water", "location", "pipe"]], "state_t+1": [["steam", "location", "pipe"]]}
+{"state_t": [["steam", "location", "pipe"]], "state_t+1": [["steam", "location", "separate_area"]]}
+{"state_t": [["steam", "location", "separate_area"]], "state_t+1": [["steam", "location", "turbine"]]}
+{"state_t": [["fuel", "location", "oven"], ["water", "location", "tank"], ["steam", "location", "tank"]], "state_t+1": [["fuel", "location", "oven"], ["water", "location", "tank"], ["steam", "location", "piston"]]}
+{"state_t": [["receptors", "location", "target_cell"]], "state_t+1": [["receptors", "location", "cell"]]}
+{"state_t": [["magnetic_field", "location", "electromagnet"], ["conductive_copper_wire", "location", "metal"], ["electric_current", "location", "wire"]], "state_t+1": [["magnetic_field", "location", "wire"], ["conductive_copper_wire", "location", "metal"], ["electric_current", "location", "wire"]]}
+{"state_t": [["conducting_metal", "location", "around_a_piece_of_metal"]], "state_t+1": [["conducting_metal", "location", "around_a_piece_of_metal"], ["electrical_current", "location", "battery"]]}
+{"state_t": [["conducting_metal", "location", "around_a_piece_of_metal"], ["electrical_current", "location", "battery"]], "state_t+1": [["conducting_metal", "location", "around_a_piece_of_metal"], ["electrical_current", "location", "wire"]]}
+{"state_t": [["conducting_metal", "location", "around_a_piece_of_metal"], ["electrical_current", "location", "wire"]], "state_t+1": [["conducting_metal", "location", "around_a_piece_of_metal"], ["electrical_current", "location", "wire"], ["magnetic_field", "location", "wire"]]}
+{"state_t": [["oxygen", "location", "blood"], ["proteins_and_acids", "location", "liver"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["proteins_and_acids", "location", "liver"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "body"], ["proteins_and_acids", "location", "liver"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["waste", "location", "liver"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "body"], ["waste", "location", "liver"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["waste", "location", "blood"], ["carbon_dioxide", "location", "blood"]]}
+{"state_t": [["oxygen", "location", "body"], ["waste", "location", "blood"], ["carbon_dioxide", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["waste", "location", "kidney"], ["carbon_dioxide", "location", "kidney"]]}
+{"state_t": [["oxygen", "location", "body"], ["waste", "location", "kidney"], ["carbon_dioxide", "location", "kidney"], ["salt", "location", "blood"]], "state_t+1": [["oxygen", "location", "body"], ["waste", "location", "kidney"], ["carbon_dioxide", "location", "kidney"], ["salt", "location", "kidney"]]}
+{"state_t": [["oxygen", "location", "body"], ["waste", "location", "kidney"], ["carbon_dioxide", "location", "kidney"], ["salt", "location", "kidney"]], "state_t+1": [["oxygen", "location", "body"], ["waste", "location", "kidney"], ["carbon_dioxide", "location", "lung"], ["salt", "location", "kidney"]]}
+{"state_t": [["coal", "location", "furnace"], ["water", "location", "boiler"]], "state_t+1": [["water", "location", "boiler"], ["steam", "location", "boiler"], ["heat_energy", "location", "turbine"]]}
+{"state_t": [["steam", "location", "boiler"], ["heat_energy", "location", "turbine"]], "state_t+1": [["steam", "location", "turbine"], ["mechanical_energy", "location", "turbine"]]}
+{"state_t": [["steam", "location", "turbine"], ["mechanical_energy", "location", "turbine"]], "state_t+1": [["steam", "location", "turbine"], ["electric_energy", "location", "generator"]]}
+{"state_t": [["steam", "location", "turbine"], ["electric_energy", "location", "generator"]], "state_t+1": [["electric_energy", "location", "generator"]]}
+{"state_t": [["mold_spore", "location", "air"]], "state_t+1": [["mold_spore", "location", "bread"]]}
+{"state_t": [["oil", "location", "earth"]], "state_t+1": [["oil", "location", "pipe"]]}
+{"state_t": [["oil", "location", "pipe"]], "state_t+1": [["oil", "location", "barrel"]]}
+{"state_t": [["oil", "location", "barrel"]], "state_t+1": [["oil", "location", "refinery"]]}
+{"state_t": [["motor_oil", "location", "refinery"]], "state_t+1": [["motor_oil", "location", "bottle"]]}
+{"state_t": [["motor_oil", "location", "bottle"]], "state_t+1": [["motor_oil", "location", "gas_station"]]}
+{"state_t": [["oil", "location", "oil_rig"]], "state_t+1": [["oil", "location", "refinery"]]}
+{"state_t": [["gasoline", "location", "refinery"]], "state_t+1": [["gasoline", "location", "tank_truck"]]}
+{"state_t": [["gasoline", "location", "tank_truck"]], "state_t+1": [["gasoline", "location", "gas_station"]]}
+{"state_t": [["oil", "location", "ground"]], "state_t+1": [["oil", "location", "factory"]]}
+{"state_t": [["oil", "location", "factory"]], "state_t+1": [["fuel", "location", "factory"]]}
+{"state_t": [["fuel", "location", "factory"]], "state_t+1": [["fuel", "location", "truck"]]}
+{"state_t": [["fuel", "location", "truck"]], "state_t+1": [["fuel", "location", "gas_station"]]}
+{"state_t": [["water_vapor", "location", "atmosphere"]], "state_t+1": [["tiny_water_droplets", "location", "atmosphere"]]}
+{"state_t": [["tiny_water_droplets", "location", "atmosphere"]], "state_t+1": [["clouds", "location", "atmosphere"]]}
+{"state_t": [["water_vapor", "location", "air"], ["dust", "location", "air"], ["moisture", "location", "air"]], "state_t+1": [["condensed_water", "location", "air"], ["dust", "location", "air"], ["moisture", "location", "air"]]}
+{"state_t": [["condensed_water", "location", "air"], ["dust", "location", "air"], ["water_droplets", "location", "air"], ["moisture", "location", "air"]], "state_t+1": [["cloud", "location", "air"], ["water_droplets", "location", "cloud"], ["moisture", "location", "air"]]}
+{"state_t": [["cloud", "location", "air"], ["water_droplets", "location", "cloud"], ["moisture", "location", "air"]], "state_t+1": [["cloud", "location", "air"], ["water_droplets", "location", "air"], ["moisture", "location", "air"]]}
+{"state_t": [["cloud", "location", "air"], ["water_droplets", "location", "air"], ["moisture", "location", "air"]], "state_t+1": [["cloud", "location", "air"], ["water_droplets", "location", "air"]]}
+{"state_t": [["cloud", "location", "air"], ["water_droplets", "location", "air"]], "state_t+1": [["cloud", "location", "air"], ["rain", "location", "air"]]}
+{"state_t": [["warm_water", "location", "sea"]], "state_t+1": [["warm_water", "location", "air"]]}
+{"state_t": [["warm_water", "location", "air"]], "state_t+1": [["clouds", "location", "air"]]}
+{"state_t": [["vapor", "location", "air"]], "state_t+1": [["clouds", "location", "atmosphere"]]}
+{"state_t": [["items", "location", "recycle_truck"]], "state_t+1": [["items", "location", "recycle_plant"]]}
+{"state_t": [["items", "location", "recycle_plant"]], "state_t+1": [["small_parts", "location", "recycle_plant"]]}
+{"state_t": [["small_parts", "location", "recycle_plant"]], "state_t+1": [["raw_parts", "location", "recycle_plant"]]}
+{"state_t": [["snowflakes", "location", "cloud"]], "state_t+1": [["snowflakes", "location", "ground"]]}
+{"state_t": [["insulin", "location", "pancreas"], ["glucose", "location", "blood"], ["glucagon", "location", "pancreas"], ["stored_glycogen", "location", "liver"]], "state_t+1": [["insulin", "location", "pancreas"], ["glucose", "location", "body"], ["glucagon", "location", "pancreas"], ["stored_glycogen", "location", "liver"]]}
+{"state_t": [["glucose", "location", "body"], ["stored_glycogen", "location", "liver"]], "state_t+1": [["glucose", "location", "liver"], ["glucose", "location", "liver"]]}
+{"state_t": [["glucose", "location", "liver"], ["glucose", "location", "liver"]], "state_t+1": [["glucose", "location", "blood"], ["glucose", "location", "blood"]]}
+{"state_t": [["glucose", "location", "liver"]], "state_t+1": [["glucose", "location", "blood"]]}
+{"state_t": [["sound_waves", "location", "middle_ear"]], "state_t+1": [["vibrations", "location", "eardrum"]]}
+{"state_t": [["vibrations", "location", "eardrum"]], "state_t+1": [["sound", "location", "eardrum"]]}
+{"state_t": [["sound", "location", "eardrum"]], "state_t+1": [["sound", "location", "inner_ear"]]}
+{"state_t": [["sound", "location", "inner_ear"]], "state_t+1": [["sound", "location", "cochlea"]]}
+{"state_t": [["sound", "location", "cochlea"]], "state_t+1": [["sound", "location", "cochlea"], ["nerve_signals", "location", "cochlea"]]}
+{"state_t": [["sound", "location", "cochlea"], ["nerve_signals", "location", "cochlea"]], "state_t+1": [["sound", "location", "brain"], ["nerve_signals", "location", "brain"]]}
+{"state_t": [["sound", "location", "drum"]], "state_t+1": [["electrical_impulses", "location", "drum"]]}
+{"state_t": [["electrical_impulses", "location", "drum"]], "state_t+1": [["electrical_impulses", "location", "brain"]]}
+{"state_t": [["electrical_impulses", "location", "brain"]], "state_t+1": [["electrical_impulses", "location", "brain"], ["sound", "location", "brain"]]}
+{"state_t": [["chemicals", "location", "food"], ["food", "location", "saliva"]], "state_t+1": [["chemicals", "location", "food"], ["food", "location", "tooth"]]}
+{"state_t": [["chemicals", "location", "food"], ["food", "location", "tooth"]], "state_t+1": [["chemicals", "location", "food"], ["food", "location", "stomach"]]}
+{"state_t": [["chemicals", "location", "food"], ["food", "location", "stomach"]], "state_t+1": [["chemicals", "location", "food"]]}
+{"state_t": [["sediment", "location", "fluid"], ["particles", "location", "earth"], ["fluid", "location", "body_of_water"]], "state_t+1": [["sediment", "location", "fluid"], ["particles", "location", "fluid"], ["fluid", "location", "body_of_water"]]}
+{"state_t": [["sediment", "location", "soil"], ["convection_currents", "location", "lakes_and_the_ocean"]], "state_t+1": [["sediment", "location", "river"], ["convection_currents", "location", "lakes_and_the_ocean"]]}
+{"state_t": [["sediment", "location", "river"], ["convection_currents", "location", "lakes_and_the_ocean"]], "state_t+1": [["sediment", "location", "lakes_and_the_ocean"], ["convection_currents", "location", "lakes_and_the_ocean"]]}
+{"state_t": [["fault_lines", "location", "crust_of_the_earth"], ["earth_plates", "location", "crust_of_the_earth"]], "state_t+1": [["energy", "location", "crust_of_the_earth"], ["fault_lines", "location", "crust_of_the_earth"], ["earth_plates", "location", "crust_of_the_earth"]]}
+{"state_t": [["energy", "location", "crust_of_the_earth"], ["fault_lines", "location", "crust_of_the_earth"], ["earth_plates", "location", "crust_of_the_earth"]], "state_t+1": [["energy", "location", "crust_of_the_earth"], ["earth_plates", "location", "crust_of_the_earth"]]}
+{"state_t": [["plates", "location", "earth_crust"], ["crust", "location", "earth"]], "state_t+1": [["plates", "location", "earth_crust"], ["force", "location", "plate"], ["crust", "location", "earth"]]}
+{"state_t": [["plates", "location", "earth_crust"], ["force", "location", "plate"], ["crust", "location", "earth"]], "state_t+1": [["plates", "location", "earth_crust"], ["force", "location", "plate"], ["crust", "location", "earth"], ["energy", "location", "earth"]]}
+{"state_t": [["plates", "location", "earth_crust"], ["force", "location", "plate"], ["crust", "location", "earth"], ["energy", "location", "earth"]], "state_t+1": [["plates", "location", "earth_crust"], ["force", "location", "plate"], ["crust", "location", "earth"], ["waves", "location", "earth"]]}
+{"state_t": [["gases", "location", "beneath_the_earth"], ["magma", "location", "beneath_the_earth"]], "state_t+1": [["gases", "location", "beneath_the_earth"], ["pressure", "location", "beneath_the_earth"], ["magma", "location", "beneath_the_earth"]]}
+{"state_t": [["gases", "location", "beneath_the_earth"], ["pressure", "location", "beneath_the_earth"], ["magma", "location", "beneath_the_earth"]], "state_t+1": [["gases", "location", "beneath_the_earth"], ["pressure", "location", "beneath_the_earth"], ["magma", "location", "surface"]]}
+{"state_t": [["magma", "location", "surface"], ["volcano", "location", "surface"]], "state_t+1": [["magma", "location", "surface"]]}
+{"state_t": [["magma", "location", "crack_in_the_earth_crust"]], "state_t+1": [["magma", "location", "crack_in_the_earth_crust"], ["pressure", "location", "plate"]]}
+{"state_t": [["magma", "location", "crack_in_the_earth_crust"], ["pressure", "location", "plate"]], "state_t+1": [["magma", "location", "surface"], ["pressure", "location", "plate"]]}
+{"state_t": [["pressure", "location", "plate"]], "state_t+1": [["pressure", "location", "plate"], ["crust", "location", "surface"]]}
+{"state_t": [["pressure", "location", "plate"], ["lava", "location", "new_crust"], ["crust", "location", "surface"]], "state_t+1": [["volcano", "location", "surface"], ["pressure", "location", "plate"], ["lava", "location", "new_crust"], ["crust", "location", "surface"], ["rocks", "location", "surface"]]}
+{"state_t": [["magma", "location", "inside_the_earth_crust"]], "state_t+1": [["magma", "location", "magma_chamber"]]}
+{"state_t": [["oxygen", "location", "capillary"], ["blood", "location", "capillary"]], "state_t+1": [["oxygen", "location", "heart"], ["blood", "location", "heart"]]}
+{"state_t": [["oxygen", "location", "heart"], ["blood", "location", "heart"]], "state_t+1": [["oxygen", "location", "body"], ["blood", "location", "body"]]}
+{"state_t": [["magma_chamber", "location", "ground"], ["magma", "location", "magma_chamber"]], "state_t+1": [["magma_chamber", "location", "ground"], ["magma", "location", "weakest_point_in_the_volcano"]]}
+{"state_t": [["magma_chamber", "location", "ground"], ["magma", "location", "weakest_point_in_the_volcano"]], "state_t+1": [["magma_chamber", "location", "ground"], ["magma", "location", "air"]]}
+{"state_t": [["magma_chamber", "location", "ground"], ["magma", "location", "air"]], "state_t+1": [["magma_chamber", "location", "ground"], ["lava", "location", "volcano"]]}
+{"state_t": [["magma", "location", "surround_rock"]], "state_t+1": [["magma", "location", "surround_rock"], ["gas_bubbles", "location", "magma"], ["pressure", "location", "magma"]]}
+{"state_t": [["magma", "location", "surround_rock"], ["gas_bubbles", "location", "magma"]], "state_t+1": [["magma", "location", "weak_spot_in_the_earth_surface"], ["gas_bubbles", "location", "magma"]]}
+{"state_t": [["magma", "location", "weak_spot_in_the_earth_surface"], ["gas_bubbles", "location", "magma"]], "state_t+1": [["gas_bubbles", "location", "magma"], ["lava", "location", "earth_surface"]]}
+{"state_t": [["ocean_waves", "location", "ocean"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]], "state_t+1": [["ocean_waves", "location", "land"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]]}
+{"state_t": [["ocean_waves", "location", "land"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]], "state_t+1": [["ocean_waves", "location", "beach"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]]}
+{"state_t": [["ocean_waves", "location", "beach"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]], "state_t+1": [["ocean_waves", "location", "cliff"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]]}
+{"state_t": [["ocean_waves", "location", "cliff"], ["sand", "location", "beach"], ["beaches", "location", "land"], ["rocks", "location", "cliff"], ["cliffs", "location", "land"]], "state_t+1": [["ocean_waves", "location", "ocean"], ["sand", "location", "ocean"], ["beaches", "location", "land"], ["rocks", "location", "ocean"], ["cliffs", "location", "land"]]}
+{"state_t": [["water", "location", "coast"], ["sediment", "location", "coast"]], "state_t+1": [["water", "location", "coast"], ["sediment", "location", "coast"], ["sand", "location", "coast"]]}
+{"state_t": [["light_energy", "location", "chlorophyll"], ["chlorophyll", "location", "plant"], ["carbon_dioxide", "location", "air"], ["nutrients", "location", "soil"]], "state_t+1": [["light_energy", "location", "chlorophyll"], ["chlorophyll", "location", "plant"], ["nutrients", "location", "soil"]]}
+{"state_t": [["light_energy", "location", "chlorophyll"], ["chlorophyll", "location", "plant"], ["nutrients", "location", "soil"]], "state_t+1": [["light_energy", "location", "chlorophyll"], ["chlorophyll", "location", "plant"], ["nutrients", "location", "plant"]]}
+{"state_t": [["chlorophyll", "location", "plant"], ["nutrients", "location", "plant"]], "state_t+1": [["chlorophyll", "location", "plant"], ["nutrients", "location", "plant"], ["glucose", "location", "plant"]]}
+{"state_t": [["chlorophyll", "location", "plant"], ["nutrients", "location", "plant"], ["glucose", "location", "plant"]], "state_t+1": [["chlorophyll", "location", "plant"], ["nutrients", "location", "plant"], ["glucose", "location", "plant"], ["oxygen", "location", "air"]]}
+{"state_t": [["sunlight", "location", "greenhouse"], ["colder_air", "location", "top"]], "state_t+1": [["sunlight", "location", "plant_and_floor"], ["colder_air", "location", "top"]]}
+{"state_t": [["sunlight", "location", "plant_and_floor"], ["colder_air", "location", "top"]], "state_t+1": [["heat", "location", "plant_and_floor"], ["colder_air", "location", "top"]]}
+{"state_t": [["heat", "location", "plant_and_floor"], ["hot_air", "location", "greenhouse"], ["colder_air", "location", "top"]], "state_t+1": [["heat", "location", "greenhouse"], ["hot_air", "location", "greenhouse"], ["colder_air", "location", "top"]]}
+{"state_t": [["heat", "location", "greenhouse"], ["hot_air", "location", "greenhouse"], ["colder_air", "location", "top"]], "state_t+1": [["heat", "location", "greenhouse"], ["hot_air", "location", "top"], ["colder_air", "location", "bottom"]]}
+{"state_t": [["roots", "location", "soil"], ["water", "location", "soil"], ["nutrients", "location", "soil"]], "state_t+1": [["roots", "location", "soil"], ["water", "location", "root_structure"], ["nutrients", "location", "root_structure"]]}
+{"state_t": [["water", "location", "pipe"], ["particles_of_food", "location", "dish"]], "state_t+1": [["water", "location", "paddle"], ["particles_of_food", "location", "dish"]]}
+{"state_t": [["water", "location", "paddle"], ["particles_of_food", "location", "dish"]], "state_t+1": [["water", "location", "dishwasher"], ["particles_of_food", "location", "dish"]]}
+{"state_t": [["water", "location", "dishwasher"], ["particles_of_food", "location", "dish"]], "state_t+1": [["water", "location", "bottom"], ["particles_of_food", "location", "dish"]]}
+{"state_t": [["dishes", "location", "dishwasher"], ["water", "location", "dishwasher"], ["detergent", "location", "dishwasher"]], "state_t+1": [["dishes", "location", "dishwasher"], ["detergent", "location", "dishwasher"]]}
+{"state_t": [["dishes", "location", "dishwasher"], ["detergent", "location", "dishwasher"]], "state_t+1": [["dishes", "location", "dishwasher"], ["detergent", "location", "dishwasher"], ["warm_air", "location", "dish"]]}
+{"state_t": [["satellite", "location", "rocket"], ["rocket", "location", "satellite"]], "state_t+1": [["satellite", "location", "rocket"], ["rocket", "location", "satellite"], ["rocket_fuel", "location", "rocket"]]}
+{"state_t": [["rocket", "location", "satellite"], ["rocket_fuel", "location", "rocket"]], "state_t+1": [["rocket", "location", "space"], ["rocket_fuel", "location", "rocket"]]}
+{"state_t": [["spores", "location", "hospitable_grow_environment"]], "state_t+1": [["spores", "location", "soil"]]}
+{"state_t": [["basidia", "location", "gill"]], "state_t+1": [["basidia", "location", "gill"], ["hyphae", "location", "spore"]]}
+{"state_t": [["basidia", "location", "gill"], ["hyphae", "location", "spore"]], "state_t+1": [["basidia", "location", "gill"], ["hyphae", "location", "ground"], ["hyphal_knot", "location", "ground"]]}
+{"state_t": [["basidia", "location", "gill"], ["hyphae", "location", "ground"], ["mycelium", "location", "ground"], ["hyphal_knot", "location", "ground"]], "state_t+1": [["basidia", "location", "gill"], ["hyphae", "location", "ground"], ["mycelium", "location", "ground"], ["hyphal_knot", "location", "ground"], ["primordia", "location", "ground"]]}
+{"state_t": [["cloud", "location", "sky"], ["ice", "location", "cloud"]], "state_t+1": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"]]}
+{"state_t": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"]], "state_t+1": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"], ["positively_charged_particles", "location", "bottom_of_the_cloud"]]}
+{"state_t": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"], ["positively_charged_particles", "location", "bottom_of_the_cloud"]], "state_t+1": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"], ["positively_charged_particles", "location", "bottom_of_the_cloud"], ["negatively_charged_particles", "location", "top"]]}
+{"state_t": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"], ["positively_charged_particles", "location", "bottom_of_the_cloud"], ["negatively_charged_particles", "location", "top"]], "state_t+1": [["cloud", "location", "sky"], ["ice", "location", "cloud"], ["electrical_charge", "location", "cloud"], ["positively_charged_particles", "location", "bottom_of_the_cloud"], ["negatively_charged_particles", "location", "top"], ["lightning", "location", "cloud"]]}
+{"state_t": [["ice", "location", "cloud"], ["electrostatic_charges", "location", "cloud"]], "state_t+1": [["ice", "location", "cloud"], ["electrostatic_charges", "location", "cloud"], ["negative_charge", "location", "cloud"]]}
+{"state_t": [["ice", "location", "cloud"], ["electrostatic_charges", "location", "cloud"], ["negative_charge", "location", "cloud"], ["positive_energy", "location", "ground"]], "state_t+1": [["ice", "location", "cloud"], ["electrostatic_charges", "location", "cloud"], ["negative_charge", "location", "cloud"], ["positive_energy", "location", "lightning"], ["lightning", "location", "cloud"]]}
+{"state_t": [["coal", "location", "boiler"], ["water", "location", "pipe"]], "state_t+1": [["coal", "location", "boiler"], ["steam", "location", "turn_mechanism"]]}
+{"state_t": [["coal", "location", "boiler"], ["steam", "location", "turn_mechanism"]], "state_t+1": [["coal", "location", "boiler"], ["steam", "location", "turn_mechanism"], ["electricity", "location", "turn_mechanism"]]}
+{"state_t": [["coal", "location", "boiler"], ["turbine", "location", "power_plant"]], "state_t+1": [["turbine", "location", "power_plant"]]}
+{"state_t": [["turbine", "location", "power_plant"]], "state_t+1": [["steam", "location", "boiler"], ["turbine", "location", "power_plant"]]}
+{"state_t": [["steam", "location", "boiler"], ["turbine", "location", "power_plant"]], "state_t+1": [["steam", "location", "turbine"], ["turbine", "location", "power_plant"]]}
+{"state_t": [["steam", "location", "turbine"], ["turbine", "location", "power_plant"]], "state_t+1": [["steam", "location", "turbine"], ["turbine", "location", "power_plant"], ["electricity", "location", "turbine"]]}
+{"state_t": [["vine", "location", "dirt"]], "state_t+1": [["vine", "location", "dirt"], ["flower", "location", "vine"]]}
+{"state_t": [["pumpkin_seeds", "location", "soil"]], "state_t+1": [["pumpkin_seeds", "location", "soil"], ["flowers", "location", "plant"]]}
+{"state_t": [["camping_gear", "location", "campsite"], ["food", "location", "campsite"], ["clothes", "location", "campsite"], ["tent", "location", "campsite"]], "state_t+1": [["camping_gear", "location", "campsite"], ["food", "location", "campsite"], ["clothes", "location", "campsite"], ["fire", "location", "fire_pit"], ["tent", "location", "campsite"]]}
+{"state_t": [["camping_gear", "location", "campsite"], ["food", "location", "campsite"], ["clothes", "location", "campsite"], ["fire", "location", "fire_pit"], ["tent", "location", "campsite"]], "state_t+1": [["camping_gear", "location", "campsite"], ["food", "location", "fire"], ["clothes", "location", "campsite"], ["fire", "location", "fire_pit"], ["tent", "location", "campsite"]]}
+{"state_t": [["camping_gear", "location", "campsite"], ["clothes", "location", "campsite"], ["fire", "location", "fire_pit"], ["tent", "location", "campsite"]], "state_t+1": [["camping_gear", "location", "campsite"], ["clothes", "location", "campsite"], ["tent", "location", "campsite"]]}
+{"state_t": [["tent", "location", "wilderness_area"], ["clothes", "location", "tent"], ["sleeping_bag", "location", "tent"]], "state_t+1": [["tent", "location", "wilderness_area"], ["clothes", "location", "tent"], ["sleeping_bag", "location", "tent"], ["firewood", "location", "wilderness_area"]]}
+{"state_t": [["tent", "location", "wilderness_area"], ["clothes", "location", "tent"], ["sleeping_bag", "location", "tent"], ["firewood", "location", "wilderness_area"]], "state_t+1": [["tent", "location", "wilderness_area"], ["clothes", "location", "tent"], ["sleeping_bag", "location", "tent"], ["firewood", "location", "wilderness_area"], ["fire", "location", "wilderness_area"]]}
+{"state_t": [["food", "location", "car"], ["tents", "location", "car"], ["sleeping_bags", "location", "car"]], "state_t+1": [["food", "location", "camping_spot"], ["tents", "location", "camping_spot"], ["sleeping_bags", "location", "camping_spot"]]}
+{"state_t": [["star", "location", "space"], ["hydrogen", "location", "star"]], "state_t+1": [["star", "location", "space"]]}
+{"state_t": [["star", "location", "space"]], "state_t+1": [["star", "location", "space"], ["red_giant", "location", "space"]]}
+{"state_t": [["star", "location", "space"], ["red_giant", "location", "space"]], "state_t+1": [["star", "location", "space"]]}
+{"state_t": [["twigs_and_other_refuse", "location", "bird"]], "state_t+1": [["twigs_and_other_refuse", "location", "tree"], ["flat_base", "location", "nest"]]}
+{"state_t": [["twigs_and_other_refuse", "location", "tree"], ["flat_base", "location", "nest"]], "state_t+1": [["twigs_and_other_refuse", "location", "nest"], ["flat_base", "location", "nest"], ["sides", "location", "nest"]]}
+{"state_t": [["twigs_and_other_refuse", "location", "nest"], ["flat_base", "location", "nest"], ["sides", "location", "nest"], ["softer_material", "location", "nest"]], "state_t+1": [["twigs_and_other_refuse", "location", "nest"], ["flat_base", "location", "nest"], ["sides", "location", "nest"], ["softer_material", "location", "nest"], ["nest", "location", "tree"]]}
+{"state_t": [["stamen_and_pistils", "location", "flowering_plant"], ["pollen", "location", "flowering_plant"]], "state_t+1": [["stamen_and_pistils", "location", "flowering_plant"], ["pollen", "location", "insect_ot_bird"]]}
+{"state_t": [["stamen_and_pistils", "location", "flowering_plant"], ["pollen", "location", "insect_ot_bird"]], "state_t+1": [["stamen_and_pistils", "location", "flowering_plant"], ["pollen", "location", "new_plant"]]}
+{"state_t": [["flour_baking_powder_sugar_and_salt", "location", "bowl"], ["milk_eggs_and_melted_butter", "location", "bowl"], ["batter", "location", "bowl"]], "state_t+1": [["flour_baking_powder_sugar_and_salt", "location", "griddle"], ["milk_eggs_and_melted_butter", "location", "griddle"], ["batter", "location", "griddle"]]}
+{"state_t": [["water", "location", "machine"], ["ground_coffee", "location", "filter"], ["salt", "location", "grounds"]], "state_t+1": [["water", "location", "grounds"], ["ground_coffee", "location", "filter"], ["salt", "location", "grounds"]]}
+{"state_t": [["water", "location", "well_of_the_machine"], ["ground_coffee", "location", "filter"]], "state_t+1": [["water", "location", "ground_coffee"], ["ground_coffee", "location", "filter"]]}
+{"state_t": [["water", "location", "ground_coffee"], ["ground_coffee", "location", "filter"]], "state_t+1": [["water", "location", "pot"], ["ground_coffee", "location", "filter"]]}
+{"state_t": [["salt", "location", "water"]], "state_t+1": [["salt", "location", "pot"]]}
+{"state_t": [["water", "location", "pot"], ["a_slightly_too_large_cover", "location", "pot"], ["salt", "location", "pot"]], "state_t+1": [["a_slightly_too_large_cover", "location", "pot"], ["water_vapor", "location", "pot"], ["salt", "location", "pot"]]}
+{"state_t": [["a_slightly_too_large_cover", "location", "pot"], ["water_vapor", "location", "pot"], ["salt", "location", "pot"]], "state_t+1": [["a_slightly_too_large_cover", "location", "pot"], ["water_vapor", "location", "lid"], ["salt", "location", "pot"]]}
+{"state_t": [["blood", "location", "renal_artery"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["water", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "blood"], ["water", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "blood"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["waste", "location", "kidney"], ["water", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"], ["waste", "location", "kidney"], ["water", "location", "kidney"]], "state_t+1": [["blood", "location", "kidney"], ["urine", "location", "kidney"]]}
+{"state_t": [["blood", "location", "kidney"]], "state_t+1": [["blood", "location", "neophron"]]}
+{"state_t": [["blood", "location", "neophron"]], "state_t+1": [["blood", "location", "neophron"], ["waste", "location", "bladder"]]}
+{"state_t": [["blood", "location", "neophron"], ["waste", "location", "bladder"]], "state_t+1": [["blood", "location", "neophron"], ["urine", "location", "bladder"]]}
