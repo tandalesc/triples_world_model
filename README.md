@@ -67,6 +67,22 @@ uv run python -m twm.metrics \
   --split all
 ```
 
+### Inference tool (pretrain + predict)
+
+If you want a single command that can **train missing weights** and then run inference:
+
+```bash
+uv run python scripts/inference_tool.py \
+  --checkpoint results/inference_ready \
+  --train-if-missing \
+  --data-dir data/combined \
+  --pretrained-embeds data/combined/pretrained_embeds.pt \
+  --epochs 200 \
+  --input '[["glass","state","full"],["alice","state","thirsty"]]'
+```
+
+For existing checkpoints (already trained), you can skip `--train-if-missing`.
+
 ### Rebuilding from scratch
 
 If you want to rebuild everything from raw data:
