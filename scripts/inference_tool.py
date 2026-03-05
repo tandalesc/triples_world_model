@@ -23,6 +23,7 @@ import argparse
 import json
 import subprocess
 import sys
+import hashlib
 from pathlib import Path
 
 from twm.serve import WorldModel
@@ -84,6 +85,66 @@ def _parse_input(input_json: str) -> list[list[str]]:
     return state
 
 
+def _pick_entity_anchor(token: str, vocab_tokens: set[str]) -> str | None:
+    anchors = ["alice", "bob", "carol", "person_a", "person_b", "person_c", "agent", "object"]
+    available = [a for a in anchors if a in vocab_tokens]
+    if not available:
+        return None
+    # deterministic mapping for stable behavior across calls
+    idx = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16) % len(available)
+    return available[idx]
+
+
+def _canonicalize_token(token: str, role: str, vocab_tokens: set[str]) -> str:
+    t = token.strip().lower()
+    if t in vocab_tokens:
+        return t
+
+    if role == "relation":
+        for candidate in ("state", "location", "status"):
+            if candidate in vocab_tokens:
+                return candidate
+        return t
+
+    if role == "entity":
+        anchor = _pick_entity_anchor(t, vocab_tokens)
+        return anchor if anchor else t
+
+    # value role
+    synonym_map = {
+        "on": "lit",
+        "off": "dead",
+        "hot": "warm",
+        "cool": "cold",
+        "tired": "resting",
+        "ok": "resting",
+    }
+    if t in synonym_map and synonym_map[t] in vocab_tokens:
+        return synonym_map[t]
+
+    for candidate in ("resting", "neutral", "unknown"):
+        if candidate in vocab_tokens:
+            return candidate
+    return t
+
+
+def _canonicalize_state(state: list[list[str]], vocab_tokens: set[str]) -> tuple[list[list[str]], list[dict[str, str]]]:
+    out: list[list[str]] = []
+    changes: list[dict[str, str]] = []
+    roles = ("entity", "relation", "value")
+
+    for triple in state:
+        fixed = []
+        for role, tok in zip(roles, triple):
+            new_tok = _canonicalize_token(tok, role, vocab_tokens)
+            fixed.append(new_tok)
+            if tok != new_tok:
+                changes.append({"role": role, "from": tok, "to": new_tok})
+        out.append(fixed)
+
+    return out, changes
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="TWM inference tool (pretrain + serve)")
     p.add_argument("--checkpoint", required=True, help="Run directory containing config/vocab/(model_*.pt)")
@@ -97,6 +158,16 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument(
+        "--canonicalize-oov",
+        action="store_true",
+        help="Map OOV tokens to stable in-vocab anchors/synonyms before inference",
+    )
+    p.add_argument(
+        "--show-canonicalization",
+        action="store_true",
+        help="Print token remapping decisions to stderr",
+    )
 
     args = p.parse_args()
 
@@ -104,6 +175,12 @@ def main() -> None:
     state = _parse_input(args.input)
 
     wm = WorldModel(args.checkpoint, device=args.device)
+
+    if args.canonicalize_oov:
+        vocab_tokens = set(wm.vocab.token2id.keys())
+        state, changes = _canonicalize_state(state, vocab_tokens)
+        if args.show_canonicalization and changes:
+            print(json.dumps({"canonicalization": changes}, indent=2), file=sys.stderr)
 
     try:
         if args.steps == 1:
