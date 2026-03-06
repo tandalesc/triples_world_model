@@ -3,25 +3,32 @@
 A minimal world model that learns temporal state dynamics over structured
 (entity, attribute, value) triples using a vanilla transformer encoder.
 
-**The core claim**: a small transformer (~3M params) over decomposed triple
-tokens can learn compositional state transitions that generalize to novel
-entity-state combinations never seen in training — and it needs cross-position
-attention to do it.
+**The core claim**: a small transformer over decomposed triple tokens can learn
+compositional state transitions that generalize to novel entity-state
+combinations never seen in training — and it needs cross-position attention
+to do it.
 
 ## Results
 
-| Model | Context-Dep (30) | Comp Gen (55) | Seen (26) |
-|-------|:---:|:---:|:---:|
-| Copy baseline | 0.29 | 0.29 | 0.29 |
-| Qwen3-VL 8B (5-shot) | 0.59 | 0.56 | 0.57 |
-| MLP + GloVe (no attention) | 0.76 | 0.70 | 0.64 |
-| **TWM (ours)** | **0.99** | **0.74** | **0.77** |
+Trained on 1,371 examples from 3 domains (handwritten physics, ProPara, OpenPI).
+Evaluated on held-out splits: compositional generalization (55), seen combos (26),
+and context-dependent cross-entity reasoning (30).
+
+### vs. Baselines (F1)
+
+| Model | Params | Context-Dep | Comp Gen | Seen |
+|-------|-------:|:---:|:---:|:---:|
+| Copy baseline | — | 0.29 | 0.29 | 0.29 |
+| Qwen3-VL 8B (5-shot) | 8B | 0.59 | 0.56 | 0.57 |
+| MLP + GloVe (no attention) | 4.5M | 0.76 | 0.70 | 0.64 |
+| **TWM Base** | **4.5M** | **0.98** | **0.75** | **0.78** |
+| **TWM Micro** | **80K** | **0.91** | **0.67** | **0.64** |
 
 The context-dependent test is the key result: when a triple's next state
 depends on what other triples are present (glass stays full if nobody's thirsty,
 fire goes out if wind is gusty), the MLP can't solve it because it processes
 each position independently. The transformer attends across positions and
-gets +23% F1.
+gets **+23% F1** over the MLP — and this holds even at micro scale.
 
 ### Model Family Scaling
 
@@ -30,21 +37,25 @@ the attention advantage at 57x fewer parameters:
 
 ![Final Comparison](results/family_benchmark/plots/final_comparison.png)
 
-| Model | Params | Context F1 | Comp Gen F1 | Seen F1 |
-|-------|-------:|:---:|:---:|:---:|
-| Base (256d, GloVe) | 4.5M | 0.978 | 0.748 | 0.778 |
-| Micro (16d, shared) | 80K | 0.911 | 0.671 | 0.640 |
-| Micro QAT (int8-ready) | 80K | 0.893 | 0.632 | 0.706 |
+| Model | d_model | Layers | Heads | Params | Context F1 | Comp Gen F1 | Seen F1 |
+|-------|--------:|-------:|------:|-------:|:---:|:---:|:---:|
+| Base (GloVe) | 256 | 4 | 4 | 4.5M | 0.978 | 0.748 | 0.778 |
+| Base Split | 256 | 4 | 4 | 4.5M | 0.989 | 0.745 | 0.760 |
+| Micro (shared) | 16 | 1 | 2 | 80K | 0.911 | 0.671 | 0.640 |
+| Micro QAT | 16 | 1 | 2 | 80K | 0.893 | 0.632 | 0.706 |
+| Micro Split | 16 | 1 | 2 | 85K | 0.822 | 0.633 | 0.668 |
+| Micro Split+QAT | 16 | 1 | 2 | 85K | 0.844 | 0.629 | 0.712 |
 
 ![Size vs Accuracy](results/family_benchmark/plots/efficiency.png)
 
-Key scaling findings:
+Key findings:
 - **Attention works at 16d/2-head** — context-dependent F1 drops only 7% (0.978 -> 0.911)
-- **Split embedding tables help at base scale** (+0.011 context) but **hurt at micro** (-0.089) — not enough dimensions for separate tables to learn useful representations
+- **Split embedding tables help at base scale** (+0.011 context) but **hurt at micro** (-0.089) — not enough dimensions for separate role tables to learn useful representations
 - **QAT is essentially free** — simulated int8 quantization noise costs <2% F1
 - **ESP32 target met**: ~4.4K params / ~5 KB at int8 with domain-specific vocab
 
-See [results/README.md](results/README.md) for full experiment progression and analysis.
+See [results/README.md](results/README.md) for full experiment progression
+(8 runs) and analysis.
 
 ## How It Works
 
