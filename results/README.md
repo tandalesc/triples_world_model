@@ -116,12 +116,17 @@ Trained 6 variants on the combined dataset (1,371 train examples) for 500 epochs
 4. **ESP32 target met.** With a domain-specific vocab (~50 tokens), micro
    achieves ~4.4K params / ~5 KB at int8. Attention advantage preserved.
 
-### Charts
+### Final F1 Comparison
 
-See `family_benchmark/plots/`:
-- `training_curves.png` — F1 over epochs for all variants and splits
-- `final_comparison.png` — Bar chart comparing final F1 across variants
-- `efficiency.png` — Size vs accuracy scatter (params on log scale)
+![Final Comparison](family_benchmark/plots/final_comparison.png)
+
+### Size vs. Accuracy Tradeoff
+
+![Efficiency](family_benchmark/plots/efficiency.png)
+
+### Training Curves
+
+![Training Curves](family_benchmark/plots/training_curves.png)
 
 ---
 
