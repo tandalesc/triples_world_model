@@ -11,7 +11,8 @@ import requests
 import torch
 
 from twm.vocab import Vocabulary
-from twm.model import ModelConfig, TripleWorldModel
+from twm.config import ModelConfig
+from twm.model import TripleWorldModel
 from twm.mlp_baseline import MLPWorldModel
 from twm.dataset import TripleTransitionDataset
 

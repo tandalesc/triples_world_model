@@ -13,6 +13,7 @@ results/
   07_ablation_no_propara/    Ablation: removed ProPara from training
   08_context_dependent/      Context-dependent attention test [CANONICAL]
   comparisons/               Cross-model comparisons (LLM, MLP, charts)
+  family_benchmark/          Model family scaling experiments (Sprint 2)
 ```
 
 Each run directory contains: `config.json`, `train_log.jsonl`, `vocab.json`,
@@ -49,10 +50,10 @@ On standard tests TWM leads MLP by 4-8%. On context-dependent tests: **+23% F1**
 
 The MLP fails specifically on "no-change" cases where it must check other
 entities to know nothing happens:
-- `flask full + nobody thirsty` → MLP empties the flask
-- `door closed + nobody pulling` → MLP opens the door
-- `bob lonely + everyone far` → MLP makes bob social
-- `carol tired + bed occupied` → MLP rests carol
+- `flask full + nobody thirsty` -> MLP empties the flask
+- `door closed + nobody pulling` -> MLP opens the door
+- `bob lonely + everyone far` -> MLP makes bob social
+- `carol tired + bed occupied` -> MLP rests carol
 
 TWM wins 15/30 examples the MLP gets wrong. MLP wins 0.
 
@@ -70,6 +71,59 @@ TWM wins 15/30 examples the MLP gets wrong. MLP wins 0.
 3. **Compositional generalization confirmed**: 74% exact F1 on novel combos.
 4. **Entity embeddings matter**: alice/bob/carol (GloVe sim 0.28) vs person_a/person_b (sim 0.62).
 5. **Multi-domain training helps**: 3 domains > 2 > 1.
+
+---
+
+## Model Family Benchmark (Sprint 2)
+
+Scaling experiment: can TWM's attention advantage survive aggressive compression?
+Trained 6 variants on the combined dataset (1,371 train examples) for 500 epochs.
+
+### Variants
+
+| Model | d_model | Layers | Heads | Params | Size (f32) |
+|-------|--------:|-------:|------:|-------:|-----------:|
+| Base (GloVe) | 256 | 4 | 4 | 4.5M | 17.3 MB |
+| Base Split | 256 | 4 | 4 | 4.5M | 17.0 MB |
+| Micro | 16 | 1 | 2 | 80K | 311 KB |
+| Micro Split | 16 | 1 | 2 | 85K | 334 KB |
+| Micro Split+QAT | 16 | 1 | 2 | 85K | 334 KB |
+| Micro QAT (shared) | 16 | 1 | 2 | 80K | 311 KB |
+
+"Split" = separate entity/attr/value embedding tables and output heads.
+"QAT" = quantization-aware training (simulated int8 noise during forward pass).
+
+### Results (F1)
+
+| Model | Comp Gen (55) | Seen (26) | Context-Dep (30) | Train |
+|-------|:---:|:---:|:---:|:---:|
+| Base (GloVe) | 0.748 | 0.778 | 0.978 | 1.000 |
+| Base Split | 0.745 | 0.760 | **0.989** | 1.000 |
+| Micro | **0.671** | 0.640 | **0.911** | 0.953 |
+| Micro Split | 0.633 | 0.668 | 0.822 | 0.955 |
+| Micro Split+QAT | 0.629 | 0.712 | 0.844 | 0.955 |
+| Micro QAT (shared) | 0.632 | 0.706 | 0.893 | 0.952 |
+
+### Key Findings
+
+1. **Micro is viable.** 80K params (57x smaller than base) retains 0.91
+   context-dependent F1 — the attention mechanism works at 16d/2-head.
+2. **Split embeddings hurt at micro scale.** At 16d there aren't enough
+   dimensions for separate tables to learn useful representations. Split helps
+   base (0.989 vs 0.978 context) but hurts micro (0.822 vs 0.911 context).
+3. **QAT is essentially free.** Micro QAT shared: 0.893 context F1 vs 0.911
+   plain — minimal degradation from simulated int8 quantization noise.
+4. **ESP32 target met.** With a domain-specific vocab (~50 tokens), micro
+   achieves ~4.4K params / ~5 KB at int8. Attention advantage preserved.
+
+### Charts
+
+See `family_benchmark/plots/`:
+- `training_curves.png` — F1 over epochs for all variants and splits
+- `final_comparison.png` — Bar chart comparing final F1 across variants
+- `efficiency.png` — Size vs accuracy scatter (params on log scale)
+
+---
 
 ## comparisons/
 

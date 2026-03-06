@@ -1,0 +1,14 @@
+{
+  "vocab_size": 2340,
+  "d_model": 256,
+  "n_heads": 4,
+  "n_layers": 4,
+  "d_ff": 1024,
+  "max_triples": 8,
+  "dropout": 0.1,
+  "pretrained_embed_dim": 300,
+  "profile": "base",
+  "n_entities": 0,
+  "n_attrs": 0,
+  "n_values": 0
+}

@@ -30,15 +30,25 @@ def _flatten_triples(triples: list[list[str]], vocab: Vocabulary) -> list[int]:
     return ids
 
 
+def _flatten_triples_split(triples: list[list[str]], vocab: Vocabulary) -> list[int]:
+    """Flatten list of triples to flat token ID list using role-specific vocabs."""
+    ids = []
+    for triple in triples:
+        ids.extend(vocab.encode_triple_split(triple))
+    return ids
+
+
 class TripleTransitionDataset(Dataset):
     def __init__(
         self,
         path: str | Path,
         vocab: Vocabulary,
         max_triples: int = 8,
+        split_vocab: bool = False,
     ):
         self.vocab = vocab
         self.max_triples = max_triples
+        self.split_vocab = split_vocab
         self.examples: list[tuple[list[list[str]], list[list[str]]]] = []
         with open(path) as f:
             for line in f:
@@ -59,8 +69,9 @@ class TripleTransitionDataset(Dataset):
         input_padded = _pad_triples(input_sorted, self.max_triples)
         output_padded = _pad_triples(output_sorted, self.max_triples)
 
-        input_ids = _flatten_triples(input_padded, self.vocab)
-        target_ids = _flatten_triples(output_padded, self.vocab)
+        flatten = _flatten_triples_split if self.split_vocab else _flatten_triples
+        input_ids = flatten(input_padded, self.vocab)
+        target_ids = flatten(output_padded, self.vocab)
 
         return {
             "input_ids": torch.tensor(input_ids, dtype=torch.long),

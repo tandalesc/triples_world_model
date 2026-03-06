@@ -3,7 +3,6 @@
 import argparse
 import json
 import math
-import time
 from pathlib import Path
 
 import torch
@@ -12,7 +11,8 @@ from torch.utils.data import DataLoader
 
 from .vocab import Vocabulary
 from .dataset import TripleTransitionDataset, collate_fn
-from .model import ModelConfig, TripleWorldModel
+from .config import ModelConfig
+from .model import TripleWorldModel
 from .metrics import compute_metrics, copy_baseline
 
 
@@ -35,11 +35,57 @@ def compute_loss(
     logits_flat = logits.reshape(-1, V)
     targets_flat = targets.reshape(-1)
 
+    # Clamp targets to valid range for split embeddings (different vocab sizes per role)
+    targets_flat = targets_flat.clamp(0, V - 1)
+
     loss_per_token = F.cross_entropy(logits_flat, targets_flat, reduction="none")
 
     # Weight: 1.0 for real tokens, pad_weight for <pad>
     weights = torch.where(targets_flat == pad_id, pad_weight, 1.0)
     return (loss_per_token * weights).sum() / weights.sum()
+
+
+def _fake_quantize(tensor: torch.Tensor) -> torch.Tensor:
+    """Simulate int8 quantization: quantize then dequantize."""
+    scale = tensor.abs().max() / 127.0
+    if scale == 0:
+        return tensor
+    quantized = (tensor / scale).round().clamp(-128, 127)
+    return quantized * scale
+
+
+def _apply_qat_noise(model: TripleWorldModel):
+    """Replace weight data with fake-quantized version for QAT forward pass."""
+    saved = {}
+    for name, param in model.named_parameters():
+        if param.requires_grad and param.ndim >= 2:
+            saved[name] = param.data.clone()
+            param.data = _fake_quantize(param.data)
+    return saved
+
+
+def _restore_weights(model: TripleWorldModel, saved: dict):
+    """Restore original float32 weights after QAT forward pass."""
+    for name, param in model.named_parameters():
+        if name in saved:
+            param.data = saved[name]
+
+
+def save_int8_checkpoint(model: TripleWorldModel, path: Path):
+    """Save an int8-quantized version of the model state dict."""
+    state = {}
+    for name, param in model.state_dict().items():
+        if param.ndim >= 2:
+            scale = param.abs().max() / 127.0
+            if scale > 0:
+                state[name] = (param / scale).round().clamp(-128, 127).to(torch.int8)
+                state[name + "._scale"] = scale
+            else:
+                state[name] = param.to(torch.int8)
+                state[name + "._scale"] = torch.tensor(0.0)
+        else:
+            state[name] = param
+    torch.save(state, path)
 
 
 def train(args):
@@ -50,50 +96,68 @@ def train(args):
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- vocab ---
+    # --- vocab: scan ALL data files the model will see ---
     data_dir = Path(args.data_dir)
-    data_files = [data_dir / "train.jsonl"]
-    for f in ["test_comp.jsonl", "test_seen.jsonl"]:
-        p = data_dir / f
-        if p.exists():
-            data_files.append(p)
+    data_files = []
+    for f in data_dir.glob("*.jsonl"):
+        data_files.append(f)
+    if not data_files:
+        raise FileNotFoundError(f"No .jsonl files found in {data_dir}")
     vocab = Vocabulary.from_files(*data_files)
     vocab.save(out_dir / "vocab.json")
     print(f"Vocabulary: {len(vocab)} tokens")
+    if args.split_embeddings:
+        for role in ("entity", "attr", "value"):
+            print(f"  {role}: {vocab.role_vocab_size(role)} tokens")
 
-    # --- model ---
-    config = ModelConfig(
-        vocab_size=len(vocab),
-        d_model=args.d_model,
-        n_heads=args.n_heads,
-        n_layers=args.n_layers,
-        d_ff=args.d_ff,
-        max_triples=args.max_triples,
-        dropout=args.dropout,
-    )
+    # --- model config ---
+    if args.config:
+        config = ModelConfig.from_profile(args.config, vocab_size=len(vocab))
+    else:
+        config = ModelConfig(vocab_size=len(vocab))
+
+    # Override with explicit CLI args (only if user passed them)
+    for attr in ("d_model", "n_heads", "n_layers", "d_ff", "max_triples", "dropout"):
+        cli_val = getattr(args, attr.replace("-", "_"), None)
+        if cli_val is not None:
+            setattr(config, attr, cli_val)
+
+    if args.split_embeddings:
+        config.n_entities = vocab.role_vocab_size("entity")
+        config.n_attrs = vocab.role_vocab_size("attr")
+        config.n_values = vocab.role_vocab_size("value")
+
     pretrained_embeds = None
     if args.pretrained_embeds:
-        pretrained_embeds = torch.load(args.pretrained_embeds, weights_only=True)
-        print(f"Pretrained embeddings: {pretrained_embeds.shape}")
+        if args.split_embeddings:
+            print("Warning: pretrained embeddings not supported with split embeddings, ignoring")
+        else:
+            pretrained_embeds = torch.load(args.pretrained_embeds, weights_only=True)
+            print(f"Pretrained embeddings: {pretrained_embeds.shape}")
 
     model = TripleWorldModel(config, pretrained_embeds=pretrained_embeds).to(device)
-    config.save(out_dir / "config.json")  # save after init so pretrained_embed_dim is set
+    config.save(out_dir / "config.json")
     print(f"Parameters: {model.param_count():,}")
+    if args.quantize_aware:
+        print("Quantization-aware training: ENABLED")
 
     # --- data ---
+    split_vocab = args.split_embeddings
     train_ds = TripleTransitionDataset(
-        data_dir / "train.jsonl", vocab, max_triples=args.max_triples
+        data_dir / "train.jsonl", vocab, max_triples=config.max_triples,
+        split_vocab=split_vocab,
     )
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
 
     test_datasets = {}
-    for name in ["train", "test_comp", "test_seen", "propara_dev", "openpi_dev"]:
+    for name in ["train", "test_comp", "test_seen", "test_context", "propara_dev", "openpi_dev"]:
         p = data_dir / f"{name}.jsonl"
         if p.exists():
             test_datasets[name] = TripleTransitionDataset(
-                p, vocab, max_triples=args.max_triples
+                p, vocab, max_triples=config.max_triples,
+                split_vocab=split_vocab,
             )
 
     # --- optimizer + scheduler ---
@@ -128,11 +192,19 @@ def train(args):
             input_ids = batch["input_ids"].to(device)
             target_ids = batch["target_ids"].to(device)
 
-            logits = model(input_ids)
-            loss = compute_loss(logits, target_ids, pad_id=vocab.pad_id, pad_weight=args.pad_weight)
+            if args.quantize_aware:
+                saved = _apply_qat_noise(model)
+                logits = model(input_ids)
+                loss = compute_loss(logits, target_ids, pad_id=vocab.pad_id, pad_weight=args.pad_weight)
+                optimizer.zero_grad()
+                loss.backward()
+                _restore_weights(model, saved)
+            else:
+                logits = model(input_ids)
+                loss = compute_loss(logits, target_ids, pad_id=vocab.pad_id, pad_weight=args.pad_weight)
+                optimizer.zero_grad()
+                loss.backward()
 
-            optimizer.zero_grad()
-            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             optimizer.step()
             scheduler.step()
@@ -149,7 +221,7 @@ def train(args):
             row = {"epoch": epoch, "step": global_step, "train_loss": avg_loss, "lr": scheduler.get_last_lr()[0]}
 
             for name, ds in test_datasets.items():
-                m = compute_metrics(model, ds, vocab, device)
+                m = compute_metrics(model, ds, vocab, device, split_vocab=split_vocab)
                 for k, v in m.items():
                     row[f"{name}/{k}"] = v
 
@@ -158,7 +230,7 @@ def train(args):
 
             train_f1 = row.get("train/f1", 0.0)
             parts = [f"  epoch {epoch:4d} | loss {avg_loss:.4f}"]
-            for label in ["train", "test_comp", "test_seen", "propara_dev", "openpi_dev"]:
+            for label in ["train", "test_comp", "test_seen", "test_context", "propara_dev", "openpi_dev"]:
                 key = f"{label}/f1"
                 if key in row:
                     short = label.replace("test_", "").replace("propara_", "pp_")
@@ -175,13 +247,16 @@ def train(args):
 
     # Save final model
     torch.save(model.state_dict(), out_dir / "model_final.pt")
+    if args.quantize_aware:
+        save_int8_checkpoint(model, out_dir / "model_int8.pt")
+        print(f"Int8 checkpoint saved to {out_dir / 'model_int8.pt'}")
     log_f.close()
 
     # --- final assessment ---
     print("\n--- Final Results ---")
     model.train(False)
     for name, ds in test_datasets.items():
-        m = compute_metrics(model, ds, vocab, device)
+        m = compute_metrics(model, ds, vocab, device, split_vocab=split_vocab)
         print(f"\n{name}:")
         for k, v in m.items():
             print(f"  {k}: {v:.4f}")
@@ -198,13 +273,18 @@ def main():
     # data
     parser.add_argument("--data-dir", type=str, default="data")
     parser.add_argument("--out-dir", type=str, default="results/run")
+    # config profile
+    parser.add_argument("--config", type=str, default=None,
+                        help="Config profile: base, micro, atomic (overrides model defaults)")
     # model
-    parser.add_argument("--d-model", type=int, default=256)
-    parser.add_argument("--n-heads", type=int, default=4)
-    parser.add_argument("--n-layers", type=int, default=4)
-    parser.add_argument("--d-ff", type=int, default=1024)
-    parser.add_argument("--max-triples", type=int, default=8)
-    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--d-model", type=int, default=None)
+    parser.add_argument("--n-heads", type=int, default=None)
+    parser.add_argument("--n-layers", type=int, default=None)
+    parser.add_argument("--d-ff", type=int, default=None)
+    parser.add_argument("--max-triples", type=int, default=None)
+    parser.add_argument("--dropout", type=float, default=None)
+    parser.add_argument("--split-embeddings", action="store_true",
+                        help="Use separate entity/attr/value embedding tables")
     # training
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -216,8 +296,25 @@ def main():
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--pretrained-embeds", type=str, default=None,
                         help="Path to pretrained embedding matrix (.pt)")
+    parser.add_argument("--quantize-aware", action="store_true",
+                        help="Enable quantization-aware training (simulated int8)")
 
     args = parser.parse_args()
+
+    # Apply profile defaults for unset args
+    if args.config:
+        profile = ModelConfig.from_profile(args.config)
+        for attr in ("d_model", "n_heads", "n_layers", "d_ff", "max_triples", "dropout"):
+            if getattr(args, attr) is None:
+                setattr(args, attr, getattr(profile, attr))
+    else:
+        # Legacy defaults matching original behavior
+        defaults = {"d_model": 256, "n_heads": 4, "n_layers": 4, "d_ff": 1024,
+                     "max_triples": 8, "dropout": 0.1}
+        for attr, val in defaults.items():
+            if getattr(args, attr) is None:
+                setattr(args, attr, val)
+
     train(args)
 
 

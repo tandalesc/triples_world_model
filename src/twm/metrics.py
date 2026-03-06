@@ -8,7 +8,8 @@ import torch
 
 from .vocab import Vocabulary
 from .dataset import TripleTransitionDataset, collate_fn, _sort_triples
-from .model import ModelConfig, TripleWorldModel
+from .config import ModelConfig
+from .model import TripleWorldModel
 
 
 def _set_match(pred_triples: list[list[str]], tgt_triples: list[list[str]]) -> dict:
@@ -56,6 +57,7 @@ def compute_metrics(
     dataset: TripleTransitionDataset,
     vocab: Vocabulary,
     device: torch.device,
+    split_vocab: bool = False,
 ) -> dict[str, float]:
     """Compute set-based assessment metrics on a dataset.
 
@@ -85,8 +87,9 @@ def compute_metrics(
             pred_ids = model.predict(ex["input_ids"].unsqueeze(0).to(device))[0].cpu().tolist()
             tgt_ids = ex["target_ids"].tolist()
 
-            pred_triples = vocab.decode_triples(pred_ids)
-            tgt_triples = vocab.decode_triples(tgt_ids)
+            decode = vocab.decode_triples_split if split_vocab else vocab.decode_triples
+            pred_triples = decode(pred_ids)
+            tgt_triples = decode(tgt_ids)
 
             m = _set_match(pred_triples, tgt_triples)
 
@@ -231,7 +234,7 @@ def extract_attention_weights(
     attn_weights = []
 
     pos_enc = model._build_position_encoding(input_ids.device)
-    input_emb = model.token_emb(input_ids)
+    input_emb = model._embed_input(input_ids)
     x = input_emb + pos_enc
     pad_mask = input_ids == 0
 

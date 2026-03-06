@@ -14,7 +14,8 @@ from torch.utils.data import DataLoader
 
 from twm.vocab import Vocabulary
 from twm.dataset import TripleTransitionDataset, collate_fn
-from twm.model import ModelConfig, TripleWorldModel
+from twm.config import ModelConfig
+from twm.model import TripleWorldModel
 from twm.mlp_baseline import MLPWorldModel
 from twm.metrics import compute_metrics, compute_delta_metrics
 

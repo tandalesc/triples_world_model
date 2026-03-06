@@ -8,7 +8,7 @@ attention mechanism actually contributes beyond the pretrained embeddings.
 import torch
 import torch.nn as nn
 
-from .model import ModelConfig
+from .config import ModelConfig
 
 
 class MLPWorldModel(nn.Module):

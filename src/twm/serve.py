@@ -18,7 +18,8 @@ import torch
 
 from .vocab import Vocabulary
 from .dataset import _sort_triples, _pad_triples, _flatten_triples
-from .model import ModelConfig, TripleWorldModel
+from .config import ModelConfig
+from .model import TripleWorldModel
 
 
 class WorldModel:
