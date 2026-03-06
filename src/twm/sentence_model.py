@@ -54,6 +54,35 @@ class SentenceTripleWorldModel(nn.Module):
         """Forward pass returning predicted ST-space embeddings."""
         return self.forward(input_embeds, pad_mask)
 
+    def load_dynamics_from_checkpoint(self, checkpoint_path: str, legacy: bool = True):
+        """Load dynamics weights from a pretrained TWM checkpoint.
+
+        Args:
+            checkpoint_path: path to .pt file
+            legacy: if True, remap flat 'encoder.*' keys to 'encoder.*'
+        """
+        sd = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+
+        dynamics_sd = {}
+        for key, val in sd.items():
+            if legacy and key.startswith("encoder."):
+                # Legacy flat format: encoder.layers.* -> encoder.layers.*
+                dynamics_sd[key] = val
+            elif key.startswith("dynamics.encoder."):
+                # New nested format: dynamics.encoder.* -> encoder.*
+                new_key = key.removeprefix("dynamics.")
+                dynamics_sd[new_key] = val
+
+        self.dynamics.load_state_dict(dynamics_sd, strict=True)
+
+    def freeze_dynamics(self):
+        """Freeze dynamics weights — only train encoder/decoder projections."""
+        for param in self.dynamics.parameters():
+            param.requires_grad = False
+
+    def trainable_param_count(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def param_count(self) -> int:
         return sum(p.numel() for p in self.parameters())
 

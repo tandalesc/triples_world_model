@@ -101,6 +101,10 @@ def main():
                         choices=list(PROFILES.keys()))
     parser.add_argument("--st-model", type=str, default="all-MiniLM-L6-v2",
                         help="Sentence-transformer model name")
+    parser.add_argument("--pretrained-dynamics", type=str, default=None,
+                        help="Path to pretrained TWM checkpoint (.pt) to load dynamics from")
+    parser.add_argument("--freeze-dynamics", action="store_true",
+                        help="Freeze dynamics weights, only train projection layers")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -161,15 +165,36 @@ def main():
 
     # Build model
     model = SentenceTripleWorldModel(config, st_dim).to(device)
-    print(f"Model: {model.param_count():,} params", flush=True)
+
+    if args.pretrained_dynamics:
+        print(f"Loading dynamics from {args.pretrained_dynamics}...", flush=True)
+        model.load_dynamics_from_checkpoint(args.pretrained_dynamics)
+
+    if args.freeze_dynamics:
+        model.freeze_dynamics()
+        print(f"Model: {model.param_count():,} total params, {model.trainable_param_count():,} trainable (dynamics frozen)", flush=True)
+    else:
+        print(f"Model: {model.param_count():,} params", flush=True)
 
     # Save config
     config.save(out_dir / "config.json")
     with open(out_dir / "st_config.json", "w") as f:
         json.dump({"st_model": args.st_model, "st_dim": st_dim}, f, indent=2)
 
-    # Training
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    # Training — use differential LR if dynamics are pretrained but not frozen
+    if args.pretrained_dynamics and not args.freeze_dynamics:
+        proj_params = list(model.encoder.parameters()) + list(model.decoder.parameters())
+        dyn_params = list(model.dynamics.parameters())
+        optimizer = torch.optim.AdamW([
+            {"params": proj_params, "lr": args.lr},
+            {"params": dyn_params, "lr": args.lr * 0.1},
+        ], weight_decay=0.01)
+        print(f"  Differential LR: projections={args.lr}, dynamics={args.lr * 0.1}", flush=True)
+    else:
+        optimizer = torch.optim.AdamW(
+            [p for p in model.parameters() if p.requires_grad],
+            lr=args.lr, weight_decay=0.01,
+        )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
