@@ -87,7 +87,6 @@ def load_atomic_tsv(path: str, relations: set[str] | None = None) -> list[dict]:
     """Load ATOMIC 2020 TSV file, optionally filtering by relation."""
     examples = []
     with open(path) as f:
-        header = f.readline().strip().split("\t")
         for line in f:
             parts = line.strip().split("\t")
             if len(parts) < 3:
@@ -117,7 +116,7 @@ def normalize_token(text: str) -> str:
 
 
 def simple_decompose(example: dict) -> dict | None:
-    """Rule-based decomposition for physical-entity relations.
+    """Rule-based decomposition for single ATOMIC tuples.
 
     Converts ATOMIC tuples directly without LLM, using structural rules.
     This handles the common case where the mapping is straightforward.
@@ -137,6 +136,76 @@ def simple_decompose(example: dict) -> dict | None:
     # state_t+1 reveals the property/capability/location.
     state_t = [[entity, attr, "unknown"]]
     state_t1 = [[entity, attr, value]]
+
+    return {"state_t": state_t, "state_t+1": state_t1}
+
+
+def group_by_head(raw: list[dict]) -> dict[str, list[tuple[str, str]]]:
+    """Group ATOMIC tuples by head event for multi-triple conversion."""
+    grouped = {}
+    for ex in raw:
+        grouped.setdefault(ex["head"], []).append((ex["relation"], ex["tail"]))
+    return grouped
+
+
+def grouped_decompose(head: str, relations: list[tuple[str, str]]) -> dict | None:
+    """Convert a head event + its relations into a multi-triple TWM transition.
+
+    Models an event as: state_t captures the preconditions/context,
+    state_t+1 captures the effects/reactions/consequences.
+    """
+    entity = normalize_token(head)
+    if not entity:
+        return None
+
+    # Separate relations into "before" (preconditions) and "after" (effects)
+    before_rels = {"xIntent", "xNeed", "xReason", "isBefore", "HinderedBy"}
+    static_rels = {"AtLocation", "HasProperty", "MadeUpOf", "ObjectUse",
+                   "CapableOf", "isFilledBy"}
+    after_rels = {"xEffect", "oEffect", "xReact", "oReact", "xWant", "oWant",
+                  "xAttr", "Causes", "HasSubEvent", "isAfter",
+                  "Desires", "NotDesires"}
+
+    state_t = []
+    state_t1 = []
+
+    # Deduplicate (relation, value) pairs
+    seen_before = set()
+    seen_after = set()
+
+    for rel, tail in relations:
+        attr = RELATION_MAP.get(rel, normalize_token(rel))
+        value = normalize_token(tail)
+        if not value or value == "unknown":
+            continue
+
+        if rel in before_rels:
+            key = (attr, value)
+            if key not in seen_before:
+                state_t.append([entity, attr, value])
+                seen_before.add(key)
+        elif rel in static_rels:
+            # Static facts appear in both states (they persist)
+            key = (attr, value)
+            if key not in seen_before:
+                state_t.append([entity, attr, value])
+                state_t1.append([entity, attr, value])
+                seen_before.add(key)
+        elif rel in after_rels:
+            key = (attr, value)
+            if key not in seen_after:
+                state_t1.append([entity, attr, value])
+                seen_after.add(key)
+
+    # Need at least 1 triple in each state, and at least 2 total
+    if not state_t or not state_t1:
+        return None
+    if len(state_t) + len(state_t1) < 3:
+        return None
+
+    # Cap at max_triples (8 by default) per state
+    state_t = state_t[:8]
+    state_t1 = state_t1[:8]
 
     return {"state_t": state_t, "state_t+1": state_t1}
 
@@ -253,9 +322,9 @@ def main():
     parser = argparse.ArgumentParser(description="Convert ATOMIC 2020 to TWM format")
     parser.add_argument("--atomic-path", required=True, help="Path to ATOMIC 2020 TSV file")
     parser.add_argument("--out-dir", default="data/atomic", help="Output directory")
-    parser.add_argument("--api", choices=["anthropic", "vllm", "simple", "cache"],
-                        default="simple",
-                        help="Decomposition method (simple=rule-based, no LLM needed)")
+    parser.add_argument("--api", choices=["anthropic", "vllm", "simple", "grouped", "cache"],
+                        default="grouped",
+                        help="Decomposition method (grouped=multi-triple per event, simple=single-triple, no LLM needed)")
     parser.add_argument("--vllm-url", default="http://localhost:8000/v1")
     parser.add_argument("--vllm-model", default="default")
     parser.add_argument("--cache-path", default=None, help="Path to conversion cache")
@@ -284,14 +353,21 @@ def main():
     raw = load_atomic_tsv(args.atomic_path, target_relations)
     print(f"  Found {len(raw)} tuples for {args.relations} relations")
 
-    # Sample if needed
-    if len(raw) > args.max_examples:
+    # Sample if needed (for non-grouped modes)
+    if args.api != "grouped" and len(raw) > args.max_examples:
         raw = random.sample(raw, args.max_examples)
         print(f"  Sampled {args.max_examples} examples")
 
     # Convert
     print(f"Converting with method: {args.api}")
-    if args.api == "simple":
+    if args.api == "grouped":
+        grouped = group_by_head(raw)
+        heads = list(grouped.keys())
+        if len(heads) > args.max_examples:
+            heads = random.sample(heads, args.max_examples)
+            print(f"  Sampled {args.max_examples} head events")
+        converted = [grouped_decompose(h, grouped[h]) for h in heads]
+    elif args.api == "simple":
         converted = [simple_decompose(ex) for ex in raw]
     elif args.api == "anthropic":
         api_key = os.environ.get("ANTHROPIC_API_KEY")
