@@ -46,7 +46,7 @@ def make_encode_fn(model_name: str, device: torch.device, batch_size: int = 256)
             convert_to_tensor=True,
             device=str(device),
         )
-        return embeddings.cpu()
+        return embeddings
 
     return encode, st_dim
 
@@ -61,35 +61,30 @@ def build_eval(
     """Compute cosine loss and nearest-neighbor triple accuracy."""
     model.train(False)
 
-    total_loss = 0.0
-    total_correct_triples = 0
-    total_triples = 0
-    n = 0
+    n = min(len(dataset), max_examples)
+    inp = dataset._all_inputs[:n].to(device)
+    tgt = dataset._all_targets[:n].to(device)
+    pad = dataset._all_pad_masks[:n].to(device)
 
     with torch.no_grad():
-        for i in range(min(len(dataset), max_examples)):
-            ex = dataset[i]
-            inp = ex["input_embeds"].unsqueeze(0).to(device)
-            tgt = ex["target_embeds"].unsqueeze(0).to(device)
-            pad = ex["pad_mask"].unsqueeze(0).to(device)
+        pred = model.predict(inp, pad)
+        loss = cosine_embedding_loss(pred, tgt, pad).item()
 
-            pred = model.predict(inp, pad)
-            loss = cosine_embedding_loss(pred, tgt, pad)
-            total_loss += loss.item()
-
-            # Decode predicted and target triples via phrase bank
-            pred_triples = phrase_bank.decode_triples(pred[0].cpu())
-            tgt_triples = phrase_bank.decode_triples(tgt[0].cpu())
-
-            pred_set = set(tuple(t) for t in pred_triples)
-            tgt_set = set(tuple(t) for t in tgt_triples)
-            total_correct_triples += len(pred_set & tgt_set)
-            total_triples += len(tgt_set)
-            n += 1
+    # NN decode for recall (sample a subset to keep it fast)
+    n_decode = min(n, 50)
+    total_correct = 0
+    total_triples = 0
+    for i in range(n_decode):
+        pred_triples = phrase_bank.decode_triples(pred[i].cpu())
+        tgt_triples = phrase_bank.decode_triples(tgt[i].cpu())
+        pred_set = set(tuple(t) for t in pred_triples)
+        tgt_set = set(tuple(t) for t in tgt_triples)
+        total_correct += len(pred_set & tgt_set)
+        total_triples += len(tgt_set)
 
     return {
-        "loss": total_loss / max(n, 1),
-        "triple_recall": total_correct_triples / max(total_triples, 1),
+        "loss": loss,
+        "triple_recall": total_correct / max(total_triples, 1),
     }
 
 
@@ -196,10 +191,12 @@ def main():
             lr=args.lr, weight_decay=0.01,
         )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    train_loader = DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True,
-        collate_fn=collate_sentence_fn, drop_last=True,
-    )
+
+    # Move entire dataset to device as contiguous tensors — no DataLoader needed
+    all_inputs = train_ds._all_inputs.to(device)
+    all_targets = train_ds._all_targets.to(device)
+    all_pad_masks = train_ds._all_pad_masks.to(device)
+    n_train = all_inputs.shape[0]
 
     best_test_loss = float("inf")
     history = []
@@ -210,10 +207,13 @@ def main():
         epoch_loss = 0.0
         n_batches = 0
 
-        for batch in train_loader:
-            inp = batch["input_embeds"].to(device)
-            tgt = batch["target_embeds"].to(device)
-            pad = batch["pad_mask"].to(device)
+        # Shuffle indices
+        perm = torch.randperm(n_train, device=device)
+        for start in range(0, n_train - args.batch_size + 1, args.batch_size):
+            idx = perm[start:start + args.batch_size]
+            inp = all_inputs[idx]
+            tgt = all_targets[idx]
+            pad = all_pad_masks[idx]
 
             pred = model(inp, pad)
             loss = cosine_embedding_loss(pred, tgt, pad)

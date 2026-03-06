@@ -29,7 +29,8 @@ def _pad_triples(triples: list[list[str]], max_triples: int) -> list[list[str]]:
 class SentenceTripleDataset(Dataset):
     """Triple transition dataset that produces sentence-transformer embeddings.
 
-    Pre-computes all embeddings at init time for fast training.
+    Pre-computes all embeddings at init time into contiguous tensors
+    for fast batched training with zero per-item overhead.
     """
 
     def __init__(
@@ -38,12 +39,6 @@ class SentenceTripleDataset(Dataset):
         encode_fn,
         max_triples: int = 8,
     ):
-        """
-        Args:
-            path: JSONL file with state_t / state_t+1 triples (free-text phrases)
-            encode_fn: callable(list[str]) -> (N, st_dim) tensor
-            max_triples: max triples per state
-        """
         self.max_triples = max_triples
         self.examples: list[tuple[list[list[str]], list[list[str]]]] = []
 
@@ -63,56 +58,47 @@ class SentenceTripleDataset(Dataset):
         embeddings = encode_fn(phrase_list)  # (N, st_dim)
         self.st_dim = embeddings.shape[1]
 
-        # Build lookup: phrase -> embedding vector
-        self._phrase_to_embed = {p: embeddings[i] for i, p in enumerate(phrase_list)}
+        # Build phrase -> index lookup
+        phrase_to_idx = {p: i for i, p in enumerate(phrase_list)}
+        pad_idx = phrase_to_idx[PAD_PHRASE]
+        T = max_triples * 3
 
-        # Pre-compute all examples
-        self._inputs: list[torch.Tensor] = []
-        self._targets: list[torch.Tensor] = []
-        self._pad_masks: list[torch.Tensor] = []
+        # Build index arrays for all examples (pure Python, fast)
+        n = len(self.examples)
+        input_indices = torch.full((n, T), pad_idx, dtype=torch.long)
+        target_indices = torch.full((n, T), pad_idx, dtype=torch.long)
+        pad_masks = torch.ones((n, T), dtype=torch.bool)
 
-        for inp_triples, out_triples in self.examples:
-            inp_sorted = _sort_triples(inp_triples)
-            out_sorted = _sort_triples(out_triples)
-            inp_padded = _pad_triples(inp_sorted, max_triples)
-            out_padded = _pad_triples(out_sorted, max_triples)
+        for i, (inp_triples, out_triples) in enumerate(self.examples):
+            inp_padded = _pad_triples(_sort_triples(inp_triples), max_triples)
+            out_padded = _pad_triples(_sort_triples(out_triples), max_triples)
 
-            inp_embeds = self._flatten_to_embeds(inp_padded)
-            out_embeds = self._flatten_to_embeds(out_padded)
+            for j, triple in enumerate(inp_padded):
+                for k, phrase in enumerate(triple):
+                    pos = j * 3 + k
+                    idx = phrase_to_idx[phrase]
+                    input_indices[i, pos] = idx
+                    if phrase != PAD_PHRASE:
+                        pad_masks[i, pos] = False
 
-            # Pad mask: True where input is <pad>
-            pad_mask = torch.tensor([
-                all(p == PAD_PHRASE for p in triple)
-                for triple in inp_padded
-                for p in triple  # one mask per position
-            ], dtype=torch.bool)
-            # Actually we want per-position: pad if the phrase is <pad>
-            pad_mask = torch.tensor([
-                p == PAD_PHRASE
-                for triple in inp_padded
-                for p in triple
-            ], dtype=torch.bool)
+            for j, triple in enumerate(out_padded):
+                for k, phrase in enumerate(triple):
+                    pos = j * 3 + k
+                    target_indices[i, pos] = phrase_to_idx[phrase]
 
-            self._inputs.append(inp_embeds)
-            self._targets.append(out_embeds)
-            self._pad_masks.append(pad_mask)
-
-    def _flatten_to_embeds(self, triples: list[list[str]]) -> torch.Tensor:
-        """Convert padded triples to (max_triples * 3, st_dim) embedding tensor."""
-        embeds = []
-        for triple in triples:
-            for phrase in triple:
-                embeds.append(self._phrase_to_embed[phrase])
-        return torch.stack(embeds)
+        # Single batched index lookup — all on GPU at once
+        self._all_inputs = embeddings[input_indices]    # (n, T, st_dim)
+        self._all_targets = embeddings[target_indices]  # (n, T, st_dim)
+        self._all_pad_masks = pad_masks                 # (n, T)
 
     def __len__(self) -> int:
         return len(self.examples)
 
     def __getitem__(self, idx: int) -> dict:
         return {
-            "input_embeds": self._inputs[idx],    # (T, st_dim)
-            "target_embeds": self._targets[idx],   # (T, st_dim)
-            "pad_mask": self._pad_masks[idx],      # (T,)
+            "input_embeds": self._all_inputs[idx],
+            "target_embeds": self._all_targets[idx],
+            "pad_mask": self._all_pad_masks[idx],
         }
 
 
