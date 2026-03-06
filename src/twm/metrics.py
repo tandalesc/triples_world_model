@@ -233,10 +233,26 @@ def extract_attention_weights(
     Returns list of (n_heads, T, T) tensors, one per layer.
     """
     model.train(False)
+    attn_weights = []
 
-    latent, _raw_emb = model.triple_encoder(input_ids)
+    pos_enc = model._build_position_encoding(input_ids.device)
+    input_emb = model._embed_input(input_ids)
+    x = input_emb + pos_enc
     pad_mask = input_ids == 0
-    return model.dynamics.extract_attention_weights(latent, pad_mask)
+
+    for layer in model.encoder.layers:
+        x_norm = layer.norm1(x)
+        attn_out, weights = layer.self_attn(
+            x_norm, x_norm, x_norm,
+            key_padding_mask=pad_mask,
+            need_weights=True,
+            average_attn_weights=False,
+        )
+        x = x + attn_out
+        x = x + layer._ff_block(layer.norm2(x))
+        attn_weights.append(weights.detach().cpu())
+
+    return attn_weights
 
 
 def run_assessment():
