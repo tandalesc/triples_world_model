@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 
 from .vocab import Vocabulary
-from .dataset import _sort_triples, _pad_triples, _flatten_triples
+from .dataset import _sort_triples, _pad_triples, _flatten_triples, _flatten_triples_split
 from .config import ModelConfig
 from .model import TripleWorldModel
 
@@ -55,14 +55,19 @@ class WorldModel:
         Returns:
             predicted next-state triples (variable length, <pad> stripped)
         """
-        padded = _pad_triples(state, self.config.max_triples)
-        ids = _flatten_triples(padded, self.vocab)
+        sorted_state = _sort_triples(state)
+        padded = _pad_triples(sorted_state, self.config.max_triples)
+
+        flatten = _flatten_triples_split if self.config.use_split_embeddings else _flatten_triples
+        decode = self.vocab.decode_triples_split if self.config.use_split_embeddings else self.vocab.decode_triples
+
+        ids = flatten(padded, self.vocab)
         input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
 
         with torch.no_grad():
             pred_ids = self.model.predict(input_ids)[0].cpu().tolist()
 
-        return self.vocab.decode_triples(pred_ids)
+        return decode(pred_ids)
 
     def advance_n(self, state: list[list[str]], n_steps: int) -> list[list[list[str]]]:
         """Multi-step prediction: advance state n times.
