@@ -128,6 +128,7 @@ def compute_delta_metrics(
     dataset: TripleTransitionDataset,
     vocab: Vocabulary,
     device: torch.device,
+    split_vocab: bool = False,
 ) -> dict[str, float]:
     """Compute metrics on CHANGED triples only.
 
@@ -167,7 +168,8 @@ def compute_delta_metrics(
 
             # Get model prediction
             pred_ids = model.predict(ex["input_ids"].unsqueeze(0).to(device))[0].cpu().tolist()
-            pred_triples = vocab.decode_triples(pred_ids)
+            decode = vocab.decode_triples_split if split_vocab else vocab.decode_triples
+            pred_triples = decode(pred_ids)
             pred_set = set(tuple(t) for t in pred_triples)
 
             # Predicted delta: triples model outputs that weren't in input
@@ -257,7 +259,7 @@ def run_assessment():
     parser = argparse.ArgumentParser(description="Assess Triple World Model")
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to run directory")
     parser.add_argument("--data-dir", type=str, default="data")
-    parser.add_argument("--split", type=str, default="all", choices=["all", "train", "test_comp", "test_seen"])
+    parser.add_argument("--split", type=str, default="all", choices=["all", "train", "test_comp", "test_seen", "test_context"])
 
     args = parser.parse_args()
 
@@ -284,14 +286,21 @@ def run_assessment():
     print(f"Loaded model from {ckpt} ({model.param_count():,} params)")
     print(f"Device: {device}\n")
 
-    splits = ["train", "test_comp", "test_seen"] if args.split == "all" else [args.split]
+    split_vocab = config.use_split_embeddings
+
+    splits = ["train", "test_comp", "test_seen", "test_context"] if args.split == "all" else [args.split]
 
     for name in splits:
         path = data_dir / f"{name}.jsonl"
         if not path.exists():
             continue
-        ds = TripleTransitionDataset(path, vocab, max_triples=config.max_triples)
-        m = compute_metrics(model, ds, vocab, device)
+        ds = TripleTransitionDataset(
+            path,
+            vocab,
+            max_triples=config.max_triples,
+            split_vocab=split_vocab,
+        )
+        m = compute_metrics(model, ds, vocab, device, split_vocab=split_vocab)
 
         print(f"--- {name} ({len(ds)} examples) ---")
         for k, v in m.items():
