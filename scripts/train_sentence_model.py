@@ -156,11 +156,12 @@ def main():
     phrase_bank.build(train_examples, encode_fn)
     for role in ("entity", "attr", "value"):
         print(f"  {role}: {len(phrase_bank.phrases[role])} phrases")
-    phrase_bank.save(out_dir / "phrase_bank.json")
+    phrase_bank.save(out_dir / "phrase_bank.pt")
+    print("  Phrase bank saved.", flush=True)
 
     # Build model
     model = SentenceTripleWorldModel(config, st_dim).to(device)
-    print(f"Model: {model.param_count():,} params")
+    print(f"Model: {model.param_count():,} params", flush=True)
 
     # Save config
     config.save(out_dir / "config.json")
@@ -178,7 +179,7 @@ def main():
     best_test_loss = float("inf")
     history = []
 
-    print(f"\nTraining for {args.epochs} epochs...")
+    print(f"\nTraining for {args.epochs} epochs...", flush=True)
     for epoch in range(1, args.epochs + 1):
         model.train()
         epoch_loss = 0.0
@@ -217,7 +218,7 @@ def main():
             else:
                 test_metrics = None
 
-            print(log)
+            print(log, flush=True)
             history.append({
                 "epoch": epoch,
                 "train_loss": avg_loss,

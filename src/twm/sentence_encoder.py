@@ -175,26 +175,21 @@ class PhraseBank:
         return triples
 
     def save(self, path):
-        """Save phrase bank to disk."""
+        """Save phrase bank to disk using torch (fast, compact)."""
         data = {}
         for role in self.phrases:
             data[role] = {
                 "phrases": self.phrases[role],
-                "embeddings": self.embeddings[role].cpu().numpy().tolist() if self.embeddings[role] is not None else None,
+                "embeddings": self.embeddings[role].cpu() if self.embeddings[role] is not None else None,
             }
-        import json
-        with open(path, "w") as f:
-            json.dump(data, f)
+        torch.save(data, path)
 
     @classmethod
     def load(cls, path) -> "PhraseBank":
         """Load phrase bank from disk."""
-        import json
         bank = cls()
-        with open(path) as f:
-            data = json.load(f)
+        data = torch.load(path, map_location="cpu", weights_only=False)
         for role in data:
             bank.phrases[role] = data[role]["phrases"]
-            if data[role]["embeddings"] is not None:
-                bank.embeddings[role] = torch.tensor(data[role]["embeddings"], dtype=torch.float32)
+            bank.embeddings[role] = data[role]["embeddings"]
         return bank
