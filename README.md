@@ -23,6 +23,29 @@ fire goes out if wind is gusty), the MLP can't solve it because it processes
 each position independently. The transformer attends across positions and
 gets +23% F1.
 
+### Model Family Scaling
+
+TWM scales down to embedded/edge hardware. Micro (16d, 1 layer, 2 heads) retains
+the attention advantage at 57x fewer parameters:
+
+![Final Comparison](results/family_benchmark/plots/final_comparison.png)
+
+| Model | Params | Context F1 | Comp Gen F1 | Seen F1 |
+|-------|-------:|:---:|:---:|:---:|
+| Base (256d, GloVe) | 4.5M | 0.978 | 0.748 | 0.778 |
+| Micro (16d, shared) | 80K | 0.911 | 0.671 | 0.640 |
+| Micro QAT (int8-ready) | 80K | 0.893 | 0.632 | 0.706 |
+
+![Size vs Accuracy](results/family_benchmark/plots/efficiency.png)
+
+Key scaling findings:
+- **Attention works at 16d/2-head** — context-dependent F1 drops only 7% (0.978 -> 0.911)
+- **Split embedding tables help at base scale** (+0.011 context) but **hurt at micro** (-0.089) — not enough dimensions for separate tables to learn useful representations
+- **QAT is essentially free** — simulated int8 quantization noise costs <2% F1
+- **ESP32 target met**: ~4.4K params / ~5 KB at int8 with domain-specific vocab
+
+See [results/README.md](results/README.md) for full experiment progression and analysis.
+
 ## How It Works
 
 ```
@@ -33,14 +56,14 @@ Tokenized (3 tokens per triple, sorted alphabetically):
   [alice] [state] [thirsty] [bob] [state] [resting] [glass] [state] [full]
   + positional encoding: (triple_index, role: entity/attr/value)
 
-  → Transformer encoder (4 layers, 4 heads, 256-dim)
-  → Linear head per position → predicted next-state tokens
+  -> Transformer encoder (4 layers, 4 heads, 256-dim)
+  -> Linear head per position -> predicted next-state tokens
 
 Predicted next state:
   (glass, state, empty), (alice, state, satisfied), (bob, state, resting)
 ```
 
-- GloVe 300d pretrained token embeddings, projected 300→256
+- GloVe 300d pretrained token embeddings, projected 300->256
 - Set-to-set prediction (not autoregressive) — triples have no natural order
 - Input residual: most of the world persists, model only learns the delta
 - Padding mask for variable-length triple sets (up to 8 triples)
@@ -53,12 +76,20 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 # Install dependencies
 uv sync
 
-# Train the model (takes ~5 min on MPS/GPU, ~15 min CPU)
+# Train the base model
 uv run python -m twm.train \
   --data-dir data/combined \
   --out-dir results/my_run \
+  --config base \
   --pretrained-embeds data/combined/pretrained_embeds.pt \
-  --epochs 500 --batch-size 32 --lr 1e-3
+  --epochs 500
+
+# Train the micro model (for embedded deployment)
+uv run python -m twm.train \
+  --data-dir data/combined \
+  --out-dir results/my_micro_run \
+  --config micro \
+  --epochs 500
 
 # Evaluate on all test splits
 uv run python -m twm.metrics \
@@ -67,9 +98,19 @@ uv run python -m twm.metrics \
   --split all
 ```
 
-### Inference tool (pretrain + predict)
+### Config profiles
 
-If you want a single command that can **train missing weights** and then run inference:
+| Profile | d_model | Layers | Heads | d_ff | Target |
+|---------|--------:|-------:|------:|-----:|--------|
+| `base` | 256 | 4 | 4 | 1024 | GPU training/inference |
+| `micro` | 16 | 1 | 2 | 32 | ESP32 / edge deployment |
+| `atomic` | 256 | 4 | 4 | 1024 | ATOMIC 2020 (12 triples) |
+
+Additional flags:
+- `--split-embeddings` — separate entity/attr/value embedding tables
+- `--quantize-aware` — simulate int8 quantization during training
+
+### Inference tool (pretrain + predict)
 
 ```bash
 uv run python scripts/inference_tool.py \
@@ -81,9 +122,7 @@ uv run python scripts/inference_tool.py \
   --input '[["glass","state","full"],["alice","state","thirsty"]]'
 ```
 
-For existing checkpoints (already trained), you can skip `--train-if-missing`.
-
-If your input contains out-of-vocabulary tokens, enable canonicalization:
+For existing checkpoints, skip `--train-if-missing`. For OOV tokens:
 
 ```bash
 uv run python scripts/inference_tool.py \
@@ -92,9 +131,25 @@ uv run python scripts/inference_tool.py \
   --input '[["cedric","state","curious"],["alice","state","thirsty"]]'
 ```
 
-### Rebuilding from scratch
+### LLM bridge (prototype)
 
-If you want to rebuild everything from raw data:
+TWM as structured reasoning middleware for LLMs:
+
+```python
+from twm.llm_bridge import TWMBridge
+
+bridge = TWMBridge(checkpoint_dir="results/08_context_dependent")
+
+# Full pipeline: natural language -> triples -> predict -> explain
+result = bridge.reason("Alice has a full glass and she's thirsty")
+
+# Or skip LLM, use structured triples directly
+result = bridge.reason_no_llm(
+    [["glass", "state", "full"], ["alice", "state", "thirsty"]]
+)
+```
+
+### Rebuilding from scratch
 
 ```bash
 # 1. Build GloVe pretrained embeddings (downloads ~1GB model on first run)
@@ -106,10 +161,17 @@ uv run python scripts/build_pretrained_embeds.py \
 uv run python -m twm.train \
   --data-dir data/combined \
   --out-dir results/my_run \
+  --config base \
   --pretrained-embeds data/combined/pretrained_embeds.pt
 
 # 3. Run MLP baseline comparison
 uv run python scripts/run_mlp_baseline.py
+
+# 4. Run model family benchmark
+uv run python scripts/benchmark_family.py \
+  --data-dir data/combined \
+  --results-dir results/family_benchmark \
+  --epochs 500
 ```
 
 ### Data pipeline (if modifying training data)
@@ -130,9 +192,6 @@ uv run python scripts/build_pretrained_embeds.py \
 
 ### LLM benchmark (requires local inference server)
 
-The LLM comparison requires a local vLLM/Ollama server and an embedding
-model server. Update the URLs in `scripts/benchmark_llm.py` to match your setup.
-
 ```bash
 uv run python scripts/benchmark_llm.py --split test_context --few-shot 5
 ```
@@ -141,36 +200,40 @@ uv run python scripts/benchmark_llm.py --split test_context --few-shot 5
 
 ```
 src/twm/
-  model.py          Transformer world model (TripleWorldModel)
-  mlp_baseline.py   MLP baseline (no cross-position attention)
-  dataset.py        Triple transition dataset + collation
-  vocab.py          Token vocabulary builder
-  train.py          Training loop with eval
-  metrics.py        Set-based F1, exact match, delta metrics
+  config.py          Model config profiles (base, micro, atomic)
+  model.py           Transformer world model (TripleWorldModel)
+  mlp_baseline.py    MLP baseline (no cross-position attention)
+  dataset.py         Triple transition dataset + collation
+  vocab.py           Token vocabulary builder (shared + role-split)
+  train.py           Training loop with eval, QAT support
+  metrics.py         Set-based F1, exact match, delta metrics
+  serve.py           Inference wrapper (WorldModel)
+  llm_bridge.py      LLM<->TWM bridge for structured reasoning
 
 scripts/
-  build_pretrained_embeds.py   GloVe embedding initialization
-  run_mlp_baseline.py          Train + compare MLP vs transformer
-  benchmark_llm.py             LLM benchmark with few-shot + semantic eval
-  semantic_eval_all.py         Semantic similarity evaluation
-  convert_propara.py           ProPara → triple format
-  convert_openpi.py            OpenPI → triple format
-  merge_datasets.py            Merge all data sources
-  normalize_openpi_llm.py      LLM-based value normalization for OpenPI
+  benchmark_family.py        Train + eval all model variants
+  plot_family.py             Generate comparison charts
+  convert_atomic.py          ATOMIC 2020 -> TWM triple format
+  build_pretrained_embeds.py GloVe embedding initialization
+  run_mlp_baseline.py        Train + compare MLP vs transformer
+  benchmark_llm.py           LLM benchmark with few-shot + semantic eval
+  semantic_eval_all.py       Semantic similarity evaluation
+  inference_tool.py          Train-if-missing + inference CLI
+  convert_propara.py         ProPara -> triple format
+  convert_openpi.py          OpenPI -> triple format
+  merge_datasets.py          Merge all data sources
 
 data/
-  train.jsonl                  Handwritten training examples (121)
-  context_dependent_train.jsonl  Cross-entity interaction examples (83)
-  test_comp.jsonl              Compositional generalization test (27)
-  test_seen.jsonl              Seen-combination test (12)
-  test_context.jsonl           Context-dependent attention test (30)
-  combined/                    Merged dataset (1371 train, all test splits)
-    train.jsonl, test_*.jsonl, vocab.json, pretrained_embeds.pt
+  combined/                  Merged dataset (1371 train, all test splits)
+  train.jsonl                Handwritten training examples (121)
+  test_comp.jsonl            Compositional generalization test
+  test_context.jsonl         Context-dependent attention test (30)
 
 results/
-  01-08_*/                     Numbered experiment runs with NOTES.md each
-  comparisons/                 Cross-model comparison charts and data
-  README.md                    Full results summary and progression
+  01-08_*/                   Numbered experiment runs with NOTES.md
+  family_benchmark/          Model family scaling experiments
+  comparisons/               Cross-model comparison charts and data
+  README.md                  Full results summary and progression
 ```
 
 ## Training Data
