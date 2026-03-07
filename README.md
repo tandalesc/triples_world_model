@@ -1,5 +1,10 @@
 # Triple World Model (TWM)
 
+> A state machine that discovers its own states. Learns transition rules from
+> examples instead of specifications. Resolves variable interactions through
+> attention rather than exponential enumeration. Fits in as little as 80K
+> parameters. And teaches itself new behaviors at runtime.
+
 A minimal world model that learns temporal state dynamics over structured
 (entity, attribute, value) triples using a vanilla transformer encoder.
 
