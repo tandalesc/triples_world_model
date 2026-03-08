@@ -32,7 +32,7 @@ directly with thin encoder/decoder wrappers.
   │ Encoder │              │ Decoder │
   │         │              │         │
   │ tok IDs │              │ latent  │
-  │   → d   │              │  → V   │
+  │   → d   │              │  → V    │
   └────┬────┘              └────┬────┘
        │     ┌───────────┐      │
        └────►│ Dynamics  ├──────┘
