@@ -95,7 +95,7 @@ and other use cases:
              ┌──────────┐                        ┌──────────┐
              │ Dynamics │                        │ Dynamics │
              │  (core)  │                        │  (core)  │
-             └────┬─────┘                        └────┬─────┘
+             └────┬─────┘                        └─────┬────┘
                   │                                    │
                   ▼                                    ▼
          Decoder → logits               Expander → BPE text
