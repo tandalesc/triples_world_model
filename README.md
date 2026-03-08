@@ -5,11 +5,11 @@
 > attention rather than exponential enumeration. Scales down to as few as
 > 4K parameters (Micro) and runs client-side in 303 KB of JavaScript.
 
-A minimal world model that learns temporal state dynamics over structured
+A minimal world model that learns state dynamics over structured
 (entity, attribute, value) triples using a vanilla transformer encoder.
 
 **The core claim**: a small transformer over decomposed triple tokens can learn
-compositional state transitions that generalize to novel entity-state
+compositional state transformations that generalize to novel entity-state
 combinations never seen in training — and it needs cross-position attention
 to do it.
 
@@ -30,7 +30,7 @@ and context-dependent cross-entity reasoning (30).
 | **TWM Mini** | **178K** | **695 KB** | **0.98** | **0.71** | **0.78** |
 | **TWM Micro** | **80K** | **311 KB** | **0.91** | **0.67** | **0.64** |
 
-The context-dependent test is the key result: when a triple's next state
+The context-dependent test is the key result: when a triple's output
 depends on what other triples are present (glass stays full if nobody's thirsty,
 fire goes out if wind is gusty), the MLP can't solve it because it processes
 each position independently. The transformer attends across positions and
@@ -97,7 +97,7 @@ Tokenized (3 tokens per triple):
   -> Transformer encoder (2 layers, 2 heads, 32-dim for Mini)
   -> Linear head per position -> predicted output tokens
 
-Output: predicted next state
+Output: predicted state
 
   (Buddy, hunger, full)                     <- hunger improved
   (Buddy, energy, rested)                   <- unchanged
@@ -111,7 +111,7 @@ Output: predicted next state
   The same mechanism extends to other modes (e.g., `query` for state interrogation)
   — it's just training data.
 - **Set-to-set prediction** (not autoregressive) — triples have no natural order
-- **Input residual**: most of the world persists, model only learns the delta
+- **Input residual**: most of the state persists, model only learns the delta
 - **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
 
 ## Quick Start
@@ -367,5 +367,5 @@ training. TWM learns the mapping directly.
   encoder and decoder for greater expressibility — though note this is with
   an identity transfer function (pure reconstruction), not yet with world
   dynamics active.
-- **Input residual.** Most of the world persists between timesteps. The model
-  only needs to learn what changes.
+- **Input residual.** Most of the state persists across transformations. The
+  model only needs to learn what changes.
