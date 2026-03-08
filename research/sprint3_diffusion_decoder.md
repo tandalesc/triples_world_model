@@ -6,12 +6,15 @@ Built a continuous diffusion decoder that reconstructs natural language from TWM
 
 ## Key Results
 
-| Phase | Architecture | Exact Match | Token Acc | What Changed |
-|-------|-------------|:-----------:|:---------:|-------------|
-| 1 | Sentence enc + discrete masking | ~2% | ~65% | Baseline — discrete masking can't generate |
-| 2 | Sentence enc + continuous noise | ~45% | ~85% | Gaussian noise fixes mask discontinuity |
+| Phase | Architecture | Gen Exact | Gen Token | Notes |
+|-------|-------------|:---------:|:---------:|-------|
+| 1 | Sentence enc + discrete masking | — | 48.6%* | *Conditional completion (some visible tokens), not generation |
+| 2 | Sentence enc + continuous noise | 0% | 21.7% | First gen-from-scratch metric; solved conditioning collapse |
 | 3 | BPE compressor/expander (1L) | 65.0% | 91.5% | Token-level enc/dec fixes meaning→spelling gap |
-| 3 | + length head + 2L denoiser | 81.1% | 95.2% | Depth + truncation |
+| 3 | + length head + 3L denoiser | **81.1%** | **93.4%** | Depth + truncation |
+
+Note: Metrics changed between phases. Phase 1 measured conditional completion (50% visible tokens).
+Phase 2+ measured generation from scratch (0% visible tokens). Numbers are not directly comparable.
 
 ## Detailed Experiment Tables
 
@@ -115,12 +118,14 @@ Built a continuous diffusion decoder that reconstructs natural language from TWM
 
 **Solution:** Deeper denoiser. 1L→2L: +16% exact match. 2L→3L: +0.5% value but +8% entity. Each layer adds a refinement round. Per-length-bucket metrics revealed the gains concentrate on medium and long phrases.
 
-## Distilled Insights
+## Distilled Principles
 
-1. **Continuous > discrete for diffusion.** Discrete masking creates a qualitative task discontinuity at full mask. Gaussian noise degrades smoothly — same task at every noise level.
-2. **Freeze your embeddings.** Trainable embeddings collapse under continuous noise. Fixed landmarks force the model to actually use conditioning.
-3. **Spelling ≠ meaning.** Sentence encoders capture semantics but not orthography. BPE-level compression preserves both.
-4. **Depth buys ordering.** Shallow denoisers get tokens right but can't sequence them. Each additional layer is a refinement pass over position assignments.
-5. **Don't multi-fix.** Change one thing at a time. The pad fix went from 67.7% → 6% because we changed four things simultaneously. Reverting to single-change (length head only) solved it.
-6. **Measure what matters.** Token accuracy and exact match diverge wildly. 65% token accuracy ≈ 2% exact match. Pick your metric early.
-7. **Be patient.** Every "plateau" was premature. The model kept improving with more training — gains on hard examples are invisible until they flip.
+1. **Continuous > discrete** — Gaussian noise eliminates the masking task discontinuity (#1)
+2. **Freeze embeddings** — trainable embeddings collapse under continuous noise (#6)
+3. **Spelling ≠ meaning** — BPE compression preserves orthography; sentence encoders don't (#8)
+4. **Depth buys ordering** — each denoiser layer is a position refinement pass (#12)
+5. **Change one thing** — multi-fix went 67.7% → 6%; single-fix (length head) solved it (#10)
+6. **Measure what matters** — 65% token accuracy ≈ 2% exact match (#4)
+7. **Be patient** — every "plateau" was premature (#11)
+
+See also: [theoretical foundations](theoretical_foundations.md) for geometric justification of principles 1-3.
