@@ -135,7 +135,7 @@ transparent to it.
   Per denoising step (T=50 steps at inference):
   ┌─────────────────────────────────────────────────────┐
   │                                                     │
-  │   x_noisy = sqrt(α) · x_clean + sqrt(1-α) · noise  │
+  │   x_noisy = sqrt(α) · x_clean + sqrt(1-α) · noise   │
   │   (at training: random t, at inference: t=1→0)      │
   │                                                     │
   │        x_noisy (S positions, 256d each)             │
