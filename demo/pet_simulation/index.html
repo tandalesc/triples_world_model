@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pet Simulator — Triple World Model</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+        --bg: #0a0a1a;
+        --card: #141428;
+        --card-border: #2a2a4a;
+        --surface: #1a1a32;
+        --text: #e8e8f0;
+        --text-dim: #6a6a8a;
+        --accent: #6c5ce7;
+        --green: #00b894;
+        --yellow: #fdcb6e;
+        --red: #e17055;
+        --bar-empty: #1a1a2a;
+    }
+
+    body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Courier New', 'Consolas', monospace;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .pixel-font { font-family: 'Press Start 2P', monospace; }
+
+    /* Loading */
+    #loading {
+        position: fixed; inset: 0; background: var(--bg);
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        z-index: 100; transition: opacity 0.4s;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading h2 { font-family: 'Press Start 2P', monospace; font-size: 14px; margin-bottom: 16px; }
+    #loading p { color: var(--text-dim); font-size: 13px; }
+    .spinner {
+        width: 32px; height: 32px; border: 3px solid var(--card-border);
+        border-top-color: var(--accent); border-radius: 50%;
+        animation: spin 0.8s linear infinite; margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Layout */
+    #app { display: none; width: 100%; max-width: 740px; padding: 16px; }
+    #app.visible { display: block; }
+
+    header { text-align: center; padding: 20px 0 12px; }
+    header h1 { font-family: 'Press Start 2P', monospace; font-size: 18px; letter-spacing: 2px; margin-bottom: 8px; }
+    header .subtitle { color: var(--text-dim); font-size: 11px; line-height: 1.6; }
+    header .subtitle span { color: var(--accent); font-family: 'Press Start 2P', monospace; font-size: 9px; }
+
+    .top-bar { display: flex; justify-content: center; gap: 12px; margin: 12px 0 20px; }
+    .top-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 8px 14px;
+        background: var(--surface); color: var(--text-dim); border: 2px solid var(--card-border);
+        border-radius: 4px; cursor: pointer; transition: all 0.15s;
+    }
+    .top-btn:hover { border-color: var(--accent); color: var(--text); }
+    .top-btn.active { border-color: var(--accent); color: var(--accent); background: #1a1a3a; }
+
+    /* Pet Cards */
+    .pets-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    @media (max-width: 520px) { .pets-row { grid-template-columns: 1fr; } }
+
+    .pet-card {
+        background: var(--card); border: 2px solid var(--card-border);
+        border-radius: 8px; padding: 16px; text-align: center;
+    }
+    .pet-name { font-family: 'Press Start 2P', monospace; font-size: 12px; margin-bottom: 12px; letter-spacing: 1px; }
+
+    .sprite-container {
+        width: 140px; height: 140px; margin: 0 auto 14px;
+        position: relative; display: flex; align-items: flex-end; justify-content: center;
+    }
+    .sprite-container img { max-width: 100%; max-height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+    .sprite-container::after {
+        content: ''; position: absolute; bottom: 0; width: 70%; height: 10px;
+        background: radial-gradient(ellipse, rgba(0,0,0,0.35) 0%, transparent 70%); z-index: -1;
+    }
+
+    /* Stats */
+    .stats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .stat-row { display: flex; align-items: center; gap: 8px; }
+    .stat-label {
+        font-size: 9px; font-family: 'Press Start 2P', monospace;
+        color: var(--text-dim); width: 70px; text-align: right; text-transform: uppercase;
+    }
+    .stat-bar { display: flex; gap: 3px; flex: 1; }
+    .stat-segment {
+        height: 14px; flex: 1; border-radius: 2px;
+        background: var(--bar-empty); transition: background 0.4s;
+    }
+    .stat-value { font-size: 10px; color: var(--text-dim); width: 72px; text-align: left; }
+    .stat-value.changed { color: var(--text); animation: flash 0.6s ease-out; }
+    @keyframes flash {
+        0% { color: #fff; text-shadow: 0 0 6px var(--accent); }
+        100% { color: var(--text-dim); text-shadow: none; }
+    }
+
+    /* Action Buttons */
+    .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .action-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 8px 4px;
+        background: var(--surface); color: var(--text); border: 2px solid var(--card-border);
+        border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    }
+    .action-btn:hover { background: #22224a; border-color: var(--accent); }
+    .action-btn:active { transform: scale(0.94); }
+    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* Interactions */
+    .interactions {
+        background: var(--card); border: 2px solid var(--card-border);
+        border-radius: 8px; padding: 14px; margin-bottom: 16px; text-align: center;
+    }
+    .interactions h3 {
+        font-family: 'Press Start 2P', monospace; font-size: 9px;
+        color: var(--text-dim); margin-bottom: 10px; letter-spacing: 1px;
+    }
+    .interact-btns { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .interact-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 10px 16px;
+        background: #1a1032; color: #c4a0ff; border: 2px solid #3a2a5a;
+        border-radius: 4px; cursor: pointer; transition: all 0.15s;
+    }
+    .interact-btn:hover { background: #2a1a4a; border-color: #8a5cf5; }
+    .interact-btn:active { transform: scale(0.94); }
+    .interact-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Inspector */
+    .inspector {
+        background: var(--card); border: 2px solid var(--card-border);
+        border-radius: 8px; overflow: hidden; margin-bottom: 24px;
+    }
+    .inspector-toggle {
+        width: 100%; padding: 12px 16px; background: none; border: none;
+        color: var(--text-dim); font-family: 'Press Start 2P', monospace;
+        font-size: 9px; cursor: pointer; text-align: left;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .inspector-toggle:hover { color: var(--text); }
+    .inspector-toggle .arrow { display: inline-block; transition: transform 0.2s; font-size: 8px; }
+    .inspector-toggle .arrow.open { transform: rotate(90deg); }
+    .inspector-body { display: none; padding: 0 16px 16px; }
+    .inspector-body.open { display: block; }
+
+    .triple-display { margin-bottom: 12px; }
+    .triple-display h4 { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--text-dim); margin-bottom: 6px; }
+    .triples-list { display: flex; flex-wrap: wrap; gap: 4px; }
+    .triple-chip {
+        font-size: 10px; padding: 3px 6px; border-radius: 3px;
+        background: #1a1a2a; border: 1px solid #2a2a3a;
+    }
+    .triple-chip.mode { border-color: #4a6aff; color: #8ab4ff; }
+    .triple-chip.action { border-color: #ff8a4a; color: #ffb88a; }
+    .triple-chip.state { border-color: #3a3a5a; color: #b0b0c0; }
+    .triple-chip.output { border-color: #2aaa7a; color: #6adaba; }
+    .triple-chip.changed { border-color: var(--yellow); color: var(--yellow); }
+
+    .action-log { max-height: 180px; overflow-y: auto; font-size: 11px; line-height: 1.6; }
+    .action-log h4 { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--text-dim); margin-bottom: 6px; }
+    .log-entry { color: var(--text-dim); margin-bottom: 2px; }
+    .log-pet { color: var(--accent); }
+    .log-action { color: #ff8a4a; }
+    .log-change { color: var(--yellow); }
+
+    footer {
+        text-align: center; padding: 8px 0 24px; font-size: 10px; color: var(--text-dim);
+    }
+    </style>
+</head>
+<body>
+
+<div id="loading">
+    <div class="spinner"></div>
+    <h2>PET SIMULATOR</h2>
+    <p>Loading neural network (28,357 parameters)...</p>
+</div>
+
+<div id="app">
+    <header>
+        <h1>PET SIMULATOR</h1>
+        <div class="subtitle">
+            Every state change predicted by a <span>28K-param transformer</span>.<br>
+            No game logic. No if-statements. Just learned world dynamics.
+        </div>
+    </header>
+
+    <div class="top-bar">
+        <button class="top-btn" onclick="resetGame()">RESET</button>
+        <button class="top-btn" id="decay-toggle" onclick="toggleDecay()">AUTO-DECAY: OFF</button>
+    </div>
+
+    <div class="pets-row" id="pets-row"></div>
+
+    <div class="interactions">
+        <h3>INTERACTIONS</h3>
+        <div class="interact-btns">
+            <button class="interact-btn" onclick="doInteraction('play_with')">PLAY TOGETHER</button>
+            <button class="interact-btn" onclick="doInteraction('cuddle')">CUDDLE</button>
+            <button class="interact-btn" onclick="doInteraction('compete')">COMPETE</button>
+        </div>
+    </div>
+
+    <div class="inspector">
+        <button class="inspector-toggle" onclick="toggleInspector()">
+            <span class="arrow" id="inspector-arrow">&#9654;</span>
+            UNDER THE HOOD
+        </button>
+        <div class="inspector-body" id="inspector-body">
+            <div class="triple-display">
+                <h4>LAST INPUT (STATE_T)</h4>
+                <div class="triples-list" id="input-triples"></div>
+            </div>
+            <div class="triple-display">
+                <h4>MODEL OUTPUT (STATE_T+1)</h4>
+                <div class="triples-list" id="output-triples"></div>
+            </div>
+            <div class="action-log">
+                <h4>LOG</h4>
+                <div id="log-entries"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Triple World Model &middot; 28K params &middot; 37 tokens &middot; 2-layer transformer
+    </footer>
+</div>
+
+<script>
+// ============================================================
+// Triple World Model — Pure JS Inference Engine
+// ============================================================
+
+class TripleWorldModel {
+    constructor(weights) {
+        this.w = weights;
+        this.cfg = weights.config;
+        this.vocab = weights.vocab;
+        this.id2token = weights.id2token;
+    }
+
+    layerNorm(x, weight, bias) {
+        const d = x.length, eps = 1e-5;
+        let mean = 0;
+        for (let i = 0; i < d; i++) mean += x[i];
+        mean /= d;
+        let v = 0;
+        for (let i = 0; i < d; i++) v += (x[i] - mean) ** 2;
+        v /= d;
+        const s = Math.sqrt(v + eps);
+        const out = new Float32Array(d);
+        for (let i = 0; i < d; i++) out[i] = (x[i] - mean) / s * weight[i] + bias[i];
+        return out;
+    }
+
+    matvec(M, v) {
+        const rows = M.length, cols = v.length;
+        const out = new Float32Array(rows);
+        for (let i = 0; i < rows; i++) {
+            let s = 0;
+            const row = M[i];
+            for (let j = 0; j < cols; j++) s += row[j] * v[j];
+            out[i] = s;
+        }
+        return out;
+    }
+
+    addVec(a, b) {
+        const out = new Float32Array(a.length);
+        for (let i = 0; i < a.length; i++) out[i] = a[i] + b[i];
+        return out;
+    }
+
+    softmax(x) {
+        let max = -Infinity;
+        for (let i = 0; i < x.length; i++) if (x[i] > max) max = x[i];
+        const exp = new Float32Array(x.length);
+        let sum = 0;
+        for (let i = 0; i < x.length; i++) { exp[i] = Math.exp(x[i] - max); sum += exp[i]; }
+        for (let i = 0; i < x.length; i++) exp[i] /= sum;
+        return exp;
+    }
+
+    embed(tokenIds) {
+        const T = tokenIds.length, d = this.cfg.d_model;
+        const encoded = [], raw = [];
+        for (let t = 0; t < T; t++) {
+            const tok = this.w.embeddings.token[tokenIds[t]];
+            const pos = this.w.embeddings.triple_pos[Math.floor(t / 3)];
+            const role = this.w.embeddings.role[t % 3];
+            const r = new Float32Array(d), e = new Float32Array(d);
+            for (let j = 0; j < d; j++) { r[j] = tok[j]; e[j] = tok[j] + pos[j] + role[j]; }
+            raw.push(r);
+            encoded.push(e);
+        }
+        return { encoded, raw };
+    }
+
+    selfAttention(x, layer, padMask) {
+        const T = x.length, d = this.cfg.d_model, nH = this.cfg.n_heads, dH = d / nH;
+        const scale = Math.sqrt(dH);
+
+        const qkv = new Array(T);
+        for (let t = 0; t < T; t++)
+            qkv[t] = this.addVec(this.matvec(layer.attn_in_proj_weight, x[t]), layer.attn_in_proj_bias);
+
+        const out = new Array(T);
+        for (let t = 0; t < T; t++) out[t] = new Float32Array(d);
+
+        for (let h = 0; h < nH; h++) {
+            const qO = h * dH, kO = d + h * dH, vO = 2 * d + h * dH;
+            for (let i = 0; i < T; i++) {
+                const scores = new Float32Array(T);
+                for (let j = 0; j < T; j++) {
+                    if (padMask[j]) { scores[j] = -1e9; continue; }
+                    let dot = 0;
+                    for (let k = 0; k < dH; k++) dot += qkv[i][qO + k] * qkv[j][kO + k];
+                    scores[j] = dot / scale;
+                }
+                const attn = this.softmax(scores);
+                for (let k = 0; k < dH; k++) {
+                    let s = 0;
+                    for (let j = 0; j < T; j++) s += attn[j] * qkv[j][vO + k];
+                    out[i][qO + k] = s;
+                }
+            }
+        }
+        return out.map(o => this.addVec(this.matvec(layer.attn_out_proj_weight, o), layer.attn_out_proj_bias));
+    }
+
+    feedforward(x, layer) {
+        let h = this.addVec(this.matvec(layer.ff_linear1_weight, x), layer.ff_linear1_bias);
+        for (let i = 0; i < h.length; i++) if (h[i] < 0) h[i] = 0;
+        return this.addVec(this.matvec(layer.ff_linear2_weight, h), layer.ff_linear2_bias);
+    }
+
+    transformerLayer(x, li, padMask) {
+        const layer = this.w.layers[li], d = this.cfg.d_model;
+        const n1 = x.map(xi => this.layerNorm(xi, layer.norm1_weight, layer.norm1_bias));
+        const a = this.selfAttention(n1, layer, padMask);
+        const r1 = x.map((xi, i) => { const o = new Float32Array(d); for (let j = 0; j < d; j++) o[j] = xi[j] + a[i][j]; return o; });
+        const n2 = r1.map(xi => this.layerNorm(xi, layer.norm2_weight, layer.norm2_bias));
+        const f = n2.map(xi => this.feedforward(xi, layer));
+        return r1.map((xi, i) => { const o = new Float32Array(d); for (let j = 0; j < d; j++) o[j] = xi[j] + f[i][j]; return o; });
+    }
+
+    predict(tokenIds) {
+        const { encoded, raw } = this.embed(tokenIds);
+        const padMask = tokenIds.map(id => id === 0);
+        let x = encoded;
+        for (let i = 0; i < this.cfg.n_layers; i++) x = this.transformerLayer(x, i, padMask);
+        return x.map((xi, t) => {
+            const ln = this.layerNorm(xi, this.w.decoder.ln_weight, this.w.decoder.ln_bias);
+            const d = this.cfg.d_model;
+            const sk = new Float32Array(d);
+            for (let j = 0; j < d; j++) sk[j] = ln[j] + raw[t][j];
+            const logits = this.addVec(this.matvec(this.w.decoder.head_weight, sk), this.w.decoder.head_bias);
+            let mI = 0, mV = logits[0];
+            for (let i = 1; i < logits.length; i++) if (logits[i] > mV) { mV = logits[i]; mI = i; }
+            return mI;
+        });
+    }
+
+    encodeTriples(triples) {
+        const maxT = this.cfg.max_triples, ids = new Array(maxT * 3).fill(0);
+        for (let i = 0; i < triples.length && i < maxT; i++)
+            for (let j = 0; j < 3; j++) ids[i * 3 + j] = this.vocab[triples[i][j]] || 0;
+        return ids;
+    }
+
+    decodeTriples(ids) {
+        const triples = [];
+        for (let i = 0; i < ids.length; i += 3)
+            if (ids[i] !== 0 && ids[i+1] !== 0 && ids[i+2] !== 0)
+                triples.push([this.id2token[String(ids[i])], this.id2token[String(ids[i+1])], this.id2token[String(ids[i+2])]]);
+        return triples;
+    }
+
+    advance(inputTriples) {
+        return this.decodeTriples(this.predict(this.encodeTriples(inputTriples)));
+    }
+}
+
+
+// ============================================================
+// Game State & Logic
+// ============================================================
+
+let model = null;
+
+const PETS = ['Buddy', 'Luna'];
+const ATTRS = ['hunger', 'energy', 'mood', 'cleanliness'];
+const SOLO_ACTIONS = ['feed', 'play', 'bathe', 'nap', 'pet', 'walk', 'ignore'];
+
+const VALUE_ORDER = {
+    hunger: ['full', 'hungry', 'starving'], energy: ['rested', 'tired', 'exhausted'],
+    mood: ['happy', 'content', 'sad'], cleanliness: ['clean', 'messy', 'dirty'],
+};
+
+const VALUE_LEVEL = {};
+for (const [attr, vals] of Object.entries(VALUE_ORDER))
+    for (let i = 0; i < vals.length; i++) VALUE_LEVEL[vals[i]] = 3 - i;
+
+const LEVEL_COLOR = { 3: 'var(--green)', 2: 'var(--yellow)', 1: 'var(--red)' };
+
+const SPRITES = {
+    Buddy: {
+        folder: 'Dog Brown',
+        idle: { happy: 'PANTING or EXCITED.gif', content: 'SNIFFING.gif', sad: 'Transition from STANDING to LAYING.gif' },
+        actions: {
+            feed: 'EATING.gif', play: 'BARKING while RUNNING.gif', bathe: 'SNIFFING.gif',
+            nap: 'Transition from STANDING to LAYING.gif', pet: 'PANTING or EXCITED.gif',
+            walk: 'WALKING.gif', ignore: 'Transition from STANDING to LAYING.gif',
+            play_with: 'BARKING while RUNNING.gif', cuddle: 'PANTING or EXCITED.gif', compete: 'BARKING while RUNNING.gif',
+        },
+    },
+    Luna: {
+        folder: 'Cat Black',
+        idle: { happy: 'IDLE.gif', content: 'OBSERVING.gif', sad: 'SLEEPING.gif' },
+        actions: {
+            feed: 'EATING.gif', play: 'WALKING.gif', bathe: 'LICKING.gif',
+            nap: 'SLEEPING.gif', pet: 'IDLE.gif', walk: 'WALKING.gif',
+            ignore: 'OBSERVING.gif', play_with: 'WALKING.gif', cuddle: 'IDLE.gif', compete: 'WALKING.gif',
+        },
+    },
+};
+
+function spriteUrl(pet, gif) {
+    return 'resources/' + encodeURIComponent(SPRITES[pet].folder) + '/Examples/' + encodeURIComponent(gif);
+}
+
+let gameState = {};
+let busy = false;
+let decayOn = false;
+let decayInterval = null;
+
+function defaultState() {
+    return {
+        Buddy: { hunger: 'full', energy: 'rested', mood: 'happy', cleanliness: 'clean' },
+        Luna:  { hunger: 'full', energy: 'rested', mood: 'happy', cleanliness: 'clean' },
+    };
+}
+
+function stateTriples(pet) {
+    return ATTRS.map(a => [pet, a, gameState[pet][a]]);
+}
+
+function updateFromResult(result) {
+    const changes = {};
+    for (const [entity, attr, val] of result) {
+        if (gameState[entity] && ATTRS.includes(attr) && gameState[entity][attr] !== val) {
+            if (!changes[entity]) changes[entity] = {};
+            changes[entity][attr] = { from: gameState[entity][attr], to: val };
+            gameState[entity][attr] = val;
+        }
+    }
+    return changes;
+}
+
+function doAction(pet, action) {
+    if (busy || !model) return;
+    busy = true;
+    setButtonsDisabled(true);
+
+    const other = PETS.find(p => p !== pet);
+    const inputTriples = [
+        ['#mode', 'type', 'advance'],
+        ...stateTriples(pet),
+        ...stateTriples(other),
+        [pet, 'action', action],
+    ];
+
+    setSprite(pet, SPRITES[pet].actions[action]);
+    const result = model.advance(inputTriples);
+    const changes = updateFromResult(result);
+
+    addLogEntry(pet, action, changes);
+    updateInspector(inputTriples, result, changes);
+    renderAllStats();
+
+    setTimeout(() => { setIdleSprite(pet); busy = false; setButtonsDisabled(false); }, 1200);
+}
+
+function doInteraction(interaction) {
+    if (busy || !model) return;
+    busy = true;
+    setButtonsDisabled(true);
+
+    const [pet1, pet2] = PETS;
+    const inputTriples = [
+        ['#mode', 'type', 'advance'],
+        ...stateTriples(pet1), ...stateTriples(pet2),
+        [pet1, 'action', interaction], [pet2, 'action', interaction],
+    ];
+
+    for (const pet of PETS) setSprite(pet, SPRITES[pet].actions[interaction]);
+    const result = model.advance(inputTriples);
+    const changes = updateFromResult(result);
+
+    addLogEntry(pet1 + '+' + pet2, interaction, changes);
+    updateInspector(inputTriples, result, changes);
+    renderAllStats();
+
+    setTimeout(() => { for (const pet of PETS) setIdleSprite(pet); busy = false; setButtonsDisabled(false); }, 1200);
+}
+
+function resetGame() {
+    gameState = defaultState();
+    renderAll();
+    clearChildren(document.getElementById('log-entries'));
+    clearChildren(document.getElementById('input-triples'));
+    clearChildren(document.getElementById('output-triples'));
+    const placeholder = el('span', { className: 'triple-chip state' }, 'perform an action to see triples');
+    document.getElementById('input-triples').appendChild(placeholder);
+}
+
+function toggleDecay() {
+    decayOn = !decayOn;
+    const btn = document.getElementById('decay-toggle');
+    btn.textContent = 'AUTO-DECAY: ' + (decayOn ? 'ON' : 'OFF');
+    btn.classList.toggle('active', decayOn);
+    if (decayOn) {
+        decayInterval = setInterval(() => {
+            if (!busy) doAction(PETS[Math.floor(Math.random() * PETS.length)], 'ignore');
+        }, 12000);
+    } else {
+        clearInterval(decayInterval);
+        decayInterval = null;
+    }
+}
+
+// ============================================================
+// DOM Helpers (safe, no innerHTML for dynamic content)
+// ============================================================
+
+function el(tag, attrs, textContent) {
+    const e = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'className') e.className = v;
+        else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+        else e.setAttribute(k, v);
+    }
+    if (textContent != null) e.textContent = textContent;
+    return e;
+}
+
+function clearChildren(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+// ============================================================
+// Rendering
+// ============================================================
+
+function buildPetCard(pet) {
+    const card = el('div', { className: 'pet-card', id: 'card-' + pet });
+
+    const name = el('div', { className: 'pet-name' }, pet.toUpperCase());
+    card.appendChild(name);
+
+    const spriteWrap = el('div', { className: 'sprite-container' });
+    const img = el('img', { id: 'sprite-' + pet, alt: pet });
+    img.src = spriteUrl(pet, SPRITES[pet].idle.happy);
+    spriteWrap.appendChild(img);
+    card.appendChild(spriteWrap);
+
+    const stats = el('div', { className: 'stats' });
+    for (const attr of ATTRS) {
+        const row = el('div', { className: 'stat-row' });
+        row.dataset.pet = pet;
+        row.dataset.attr = attr;
+
+        const label = el('span', { className: 'stat-label' }, attr === 'cleanliness' ? 'clean' : attr);
+        row.appendChild(label);
+
+        const bar = el('div', { className: 'stat-bar' });
+        for (let s = 1; s <= 3; s++) {
+            const seg = el('div', { className: 'stat-segment' });
+            seg.dataset.seg = String(s);
+            bar.appendChild(seg);
+        }
+        row.appendChild(bar);
+
+        const valSpan = el('span', { className: 'stat-value' });
+        valSpan.dataset.pet = pet;
+        valSpan.dataset.attr = attr;
+        row.appendChild(valSpan);
+
+        stats.appendChild(row);
+    }
+    card.appendChild(stats);
+
+    const actions = el('div', { className: 'actions' });
+    for (const a of SOLO_ACTIONS) {
+        const btn = el('button', { className: 'action-btn' }, a.toUpperCase());
+        btn.addEventListener('click', () => doAction(pet, a));
+        actions.appendChild(btn);
+    }
+    card.appendChild(actions);
+
+    return card;
+}
+
+function renderAll() {
+    for (const pet of PETS) setIdleSprite(pet);
+    renderAllStats();
+}
+
+function renderAllStats() {
+    for (const pet of PETS) {
+        for (const attr of ATTRS) {
+            const val = gameState[pet][attr];
+            const level = VALUE_LEVEL[val];
+            const color = LEVEL_COLOR[level];
+            const row = document.querySelector('.stat-row[data-pet="' + pet + '"][data-attr="' + attr + '"]');
+            if (!row) continue;
+            row.querySelectorAll('.stat-segment').forEach((seg, i) => {
+                seg.style.background = (i < level) ? color : 'var(--bar-empty)';
+            });
+            const valEl = row.querySelector('.stat-value');
+            const old = valEl.textContent;
+            valEl.textContent = val;
+            if (old && old !== val) {
+                valEl.classList.add('changed');
+                setTimeout(() => valEl.classList.remove('changed'), 600);
+            }
+        }
+    }
+}
+
+function setSprite(pet, gif) {
+    document.getElementById('sprite-' + pet).src = spriteUrl(pet, gif);
+}
+
+function setIdleSprite(pet) {
+    const mood = gameState[pet].mood;
+    setSprite(pet, SPRITES[pet].idle[mood] || SPRITES[pet].idle.content);
+}
+
+function setButtonsDisabled(disabled) {
+    document.querySelectorAll('.action-btn, .interact-btn').forEach(b => b.disabled = disabled);
+}
+
+// --- Inspector ---
+
+function toggleInspector() {
+    document.getElementById('inspector-body').classList.toggle('open');
+    document.getElementById('inspector-arrow').classList.toggle('open');
+}
+
+function makeTripleChip(triple, cssClass) {
+    return el('span', { className: 'triple-chip ' + cssClass }, '[' + triple.join(', ') + ']');
+}
+
+function updateInspector(inputTriples, outputTriples, changes) {
+    const changedKeys = new Set();
+    for (const pet of Object.keys(changes))
+        for (const attr of Object.keys(changes[pet]))
+            changedKeys.add(pet + ':' + attr);
+
+    const inputEl = document.getElementById('input-triples');
+    clearChildren(inputEl);
+    for (const t of inputTriples) {
+        let cls = 'state';
+        if (t[0] === '#mode') cls = 'mode';
+        else if (t[1] === 'action') cls = 'action';
+        inputEl.appendChild(makeTripleChip(t, cls));
+        inputEl.appendChild(document.createTextNode(' '));
+    }
+
+    const outputEl = document.getElementById('output-triples');
+    clearChildren(outputEl);
+    for (const t of outputTriples) {
+        const cls = changedKeys.has(t[0] + ':' + t[1]) ? 'changed' : 'output';
+        outputEl.appendChild(makeTripleChip(t, cls));
+        outputEl.appendChild(document.createTextNode(' '));
+    }
+}
+
+function addLogEntry(petLabel, action, changes) {
+    const entry = el('div', { className: 'log-entry' });
+
+    const petSpan = el('span', { className: 'log-pet' }, petLabel);
+    entry.appendChild(petSpan);
+    entry.appendChild(document.createTextNode(': '));
+
+    const actSpan = el('span', { className: 'log-action' }, action);
+    entry.appendChild(actSpan);
+
+    const changeParts = [];
+    for (const [pet, attrs] of Object.entries(changes))
+        for (const [attr, { from, to }] of Object.entries(attrs))
+            changeParts.push(pet + '.' + attr + ': ' + from + ' -> ' + to);
+
+    if (changeParts.length > 0) {
+        entry.appendChild(document.createTextNode(' -> '));
+        const chg = el('span', { className: 'log-change' }, changeParts.join(', '));
+        entry.appendChild(chg);
+    } else {
+        entry.appendChild(document.createTextNode(' -> no changes'));
+    }
+
+    const logEl = document.getElementById('log-entries');
+    logEl.insertBefore(entry, logEl.firstChild);
+
+    // Keep max 30 entries
+    while (logEl.children.length > 30) logEl.removeChild(logEl.lastChild);
+}
+
+
+// ============================================================
+// Init
+// ============================================================
+
+async function init() {
+    try {
+        const resp = await fetch('model_weights.json');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const weights = await resp.json();
+        model = new TripleWorldModel(weights);
+
+        const petsRow = document.getElementById('pets-row');
+        for (const pet of PETS) petsRow.appendChild(buildPetCard(pet));
+
+        gameState = defaultState();
+        renderAll();
+
+        // Set initial inspector placeholder
+        const placeholder = el('span', { className: 'triple-chip state' }, 'perform an action to see triples');
+        document.getElementById('input-triples').appendChild(placeholder);
+
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('app').classList.add('visible');
+    } catch (e) {
+        const loading = document.getElementById('loading');
+        clearChildren(loading);
+
+        const h = el('h2', { className: 'pixel-font' }, 'Failed to load');
+        h.style.cssText = 'color: var(--red); font-size: 12px;';
+        loading.appendChild(h);
+
+        const p1 = el('p', {}, 'Could not load model_weights.json');
+        p1.style.cssText = 'color: var(--text-dim); margin-top: 12px;';
+        loading.appendChild(p1);
+
+        const p2 = el('p');
+        p2.style.cssText = 'color: var(--text-dim); margin-top: 8px; font-size: 11px;';
+        p2.appendChild(document.createTextNode('Run: '));
+        p2.appendChild(el('code', {}, 'python export_weights.py'));
+        p2.appendChild(document.createElement('br'));
+        p2.appendChild(document.createTextNode('Then: '));
+        p2.appendChild(el('code', {}, 'python -m http.server 8000'));
+        loading.appendChild(p2);
+
+        const p3 = el('p', {}, e.message);
+        p3.style.cssText = 'color: var(--red); margin-top: 12px; font-size: 11px;';
+        loading.appendChild(p3);
+    }
+}
+
+init();
+</script>
+</body>
+</html>
