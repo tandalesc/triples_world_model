@@ -128,7 +128,7 @@ transparent to it.
          ▼               EXPANDER (output, per slot)
      3×N × 256d          ─────────────────
   ┌──────┴───────┐
-  │  Length Head  │──→ predicted token count (e.g., 4)
+  │  Length Head │──→  predicted token count (e.g., 4)
   │  (256 params)│     used for truncation at inference
   └──────────────┘
 
@@ -152,14 +152,14 @@ transparent to it.
   │   └────────┬────────┘                       │       │
   │            │                                │       │
   │            ▼              W-space memory    │       │
-  │   ┌─────────────────┐    (3 × 256d)        │       │
-  │   │  adaLN-Zero     │◄─────────────────────┤       │
+  │   ┌─────────────────┐    (3 × 256d)         │       │
+  │   │  adaLN-Zero     │◄──────────────────────┤       │
   │   │  Cross-Attention│    attends to triple  │       │
   │   └────────┬────────┘    slot context       │       │
   │            │                                │       │
   │            ▼                                │       │
   │   ┌─────────────────┐                       │       │
-  │   │  adaLN-Zero     │◄─────────────────────┘       │
+  │   │  adaLN-Zero     │◄──────────────────────┘       │
   │   │  FFN            │                               │
   │   └────────┬────────┘                               │
   │            │                                        │
@@ -168,19 +168,19 @@ transparent to it.
   │            │                                        │
   │   ×1-3 layers (depth = denoiser depth)              │
   └─────────────────────────────────────────────────────┘
-         │
-         ▼
-  ┌──────────────────┐
-  │  Nearest-Neighbor│   cosine similarity against
-  │  Lookup          │   frozen BPE embedding table
-  │                  │   → closest token per position
-  └──────┬───────────┘
-         │
-         ▼
-  [to, be, help, ful]   Truncate to length head prediction
-         │
-         ▼
-  "to be helpful"       Detokenize
+               │
+               ▼
+        ┌──────────────────┐
+        │  Nearest-Neighbor│   cosine similarity against
+        │  Lookup          │   frozen BPE embedding table
+        │                  │   → closest token per position
+        └──────┬───────────┘
+               │
+               ▼
+        [to, be, help, ful]   Truncate to length head prediction
+               │
+               ▼
+        "to be helpful"       Detokenize
 ```
 
 ### Key design choices
