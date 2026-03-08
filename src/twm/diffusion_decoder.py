@@ -183,30 +183,24 @@ class AdaLNZeroLayer(nn.Module):
         """
         Args:
             x: (B, T, d_model) token representations
-            context: (B, context_dim) conditioning vector (per-triple)
+            context: (B, T, context_dim) per-position conditioning
             memory: (B, K, d_model) cross-attention keys/values (optional)
         """
         B, T, D = x.shape
 
-        # Get all adaLN parameters at once
-        params = self.adaln_proj(context)  # (B, d_model * n_params)
+        # Get per-position adaLN parameters
+        params = self.adaln_proj(context)  # (B, T, d_model * n_params)
         if self.use_cross_attention:
-            params = params.view(B, 9, D)
-            gamma1, beta1, alpha1 = params[:, 0], params[:, 1], params[:, 2]
-            gamma2, beta2, alpha2 = params[:, 3], params[:, 4], params[:, 5]
-            gamma3, beta3, alpha3 = params[:, 6], params[:, 7], params[:, 8]
+            params = params.view(B, T, 9, D)
+            gamma1, beta1, alpha1 = params[:, :, 0], params[:, :, 1], params[:, :, 2]
+            gamma2, beta2, alpha2 = params[:, :, 3], params[:, :, 4], params[:, :, 5]
+            gamma3, beta3, alpha3 = params[:, :, 6], params[:, :, 7], params[:, :, 8]
         else:
-            params = params.view(B, 6, D)
-            gamma1, beta1, alpha1 = params[:, 0], params[:, 1], params[:, 2]
-            gamma3, beta3, alpha3 = params[:, 3], params[:, 4], params[:, 5]
+            params = params.view(B, T, 6, D)
+            gamma1, beta1, alpha1 = params[:, :, 0], params[:, :, 1], params[:, :, 2]
+            gamma3, beta3, alpha3 = params[:, :, 3], params[:, :, 4], params[:, :, 5]
 
-        # Unsqueeze for broadcasting: (B, D) -> (B, 1, D)
-        gamma1 = gamma1.unsqueeze(1)
-        beta1 = beta1.unsqueeze(1)
-        alpha1 = alpha1.unsqueeze(1)
-        gamma3 = gamma3.unsqueeze(1)
-        beta3 = beta3.unsqueeze(1)
-        alpha3 = alpha3.unsqueeze(1)
+        # gamma/beta/alpha are (B, T, D) — already per-position
 
         # Self-attention with adaLN-Zero
         x_norm = self.norm1(x) * (1 + gamma1) + beta1
@@ -215,9 +209,6 @@ class AdaLNZeroLayer(nn.Module):
 
         # Cross-attention with adaLN-Zero (if enabled)
         if self.use_cross_attention and memory is not None:
-            gamma2 = gamma2.unsqueeze(1)
-            beta2 = beta2.unsqueeze(1)
-            alpha2 = alpha2.unsqueeze(1)
             x_norm = self.norm2(x) * (1 + gamma2) + beta2
             ca_out, _ = self.cross_attn(x_norm, memory, memory)
             x = x + alpha2 * ca_out
@@ -326,11 +317,14 @@ class DiffusionDecoder(nn.Module):
 
         # Denoising layers
         if use_adaln:
-            # adaLN-Zero: custom layers with adaptive normalization
+            # adaLN-Zero: position-augmented conditioning
+            # Context = W-space conditioning (input_dim) + position embedding (d_model)
+            # Position routes through the clean adaLN pathway, immune to noise
+            adaln_context_dim = input_dim + d_model
             self.layers = nn.ModuleList([
                 AdaLNZeroLayer(
                     d_model=d_model, n_heads=n_heads,
-                    context_dim=input_dim, d_ff=d_ff,
+                    context_dim=adaln_context_dim, d_ff=d_ff,
                     dropout=dropout,
                     use_cross_attention=use_cross_attention,
                 )
@@ -385,8 +379,13 @@ class DiffusionDecoder(nn.Module):
             memory = self.project_context(triple_context)
 
         if self.use_adaln:
+            # Build per-position context: concat W-space conditioning + position embedding
+            B, T, D = x.shape
+            pos = self.pos_emb(torch.arange(T, device=x.device))  # (T, d_model)
+            ctx = triple_context.unsqueeze(1).expand(B, T, -1)    # (B, T, input_dim)
+            ctx = torch.cat([ctx, pos.unsqueeze(0).expand(B, -1, -1)], dim=-1)  # (B, T, input_dim + d_model)
             for layer in self.layers:
-                x = layer(x, triple_context, memory)
+                x = layer(x, ctx, memory)
         else:
             for layer in self.layers:
                 if self.use_film:
