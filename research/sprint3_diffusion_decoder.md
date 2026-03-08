@@ -5,6 +5,118 @@
 > "Encoder" refers to the **compressor** (BPE tokens → latent). See
 > [architecture.md](architecture.md) for the full terminology map.
 
+## Expander Architecture
+
+The expander reconstructs BPE tokens from the dynamics core's 256d latent vectors
+via iterative denoising. Here's the full data flow:
+
+```
+                         COMPRESSOR (input)
+                         ─────────────────
+  "to be helpful"        BPE tokenize: [to, be, help, ful]
+       │
+       ▼
+  ┌──────────────┐
+  │ Frozen BPE   │       Look up frozen token embeddings
+  │ Embeddings   │       (shared with expander)
+  └──────┬───────┘
+         ▼
+  ┌──────────────┐
+  │ 2L Self-Attn │       Contextualize within slot
+  └──────┬───────┘
+         ▼
+  ┌──────────────┐
+  │ Role Pool    │       Cross-attn with learned query
+  │ (query)      │       → single 256d vector
+  └──────┬───────┘
+         │
+         ▼
+     1 × 256d            One vector per triple slot
+         │                (entity, attr, value each get one)
+         │
+─────────┼───────────────────────────────────────────────
+         │
+         ▼
+  ┌──────────────┐
+  │  Dynamics    │       TransformerEncoder over all slots
+  │   Core       │       (frozen or trainable)
+  │  256d → 256d │       Attends across all triple positions
+  └──────┬───────┘
+         │
+─────────┼───────────────────────────────────────────────
+         │
+         ▼               EXPANDER (output)
+     1 × 256d            ─────────────────
+  ┌──────┴───────┐
+  │  Length Head  │──→ predicted token count (e.g., 4)
+  │  (256 params)│     used for truncation at inference
+  └──────────────┘
+
+  Per denoising step (T=50 steps at inference):
+  ┌─────────────────────────────────────────────────────┐
+  │                                                     │
+  │   x_noisy = sqrt(α) · x_clean + sqrt(1-α) · noise  │
+  │   (at training: random t, at inference: t=1→0)      │
+  │                                                     │
+  │        x_noisy (S positions, 256d each)             │
+  │              │                                      │
+  │              ▼                                      │
+  │   ┌────────────────────┐                            │
+  │   │ + Position Emb     │  (noise-free, via adaLN)   │
+  │   └────────┬───────────┘                            │
+  │            │                                        │
+  │            ▼              conditioning from         │
+  │   ┌─────────────────┐    dynamics (256d)            │
+  │   │  adaLN-Zero     │◄──────────────────────┐       │
+  │   │  Self-Attention │    modulates γ,β,gate │       │
+  │   └────────┬────────┘                       │       │
+  │            │                                │       │
+  │            ▼              W-space memory    │       │
+  │   ┌─────────────────┐    (3 × 256d)        │       │
+  │   │  adaLN-Zero     │◄─────────────────────┤       │
+  │   │  Cross-Attention│    attends to triple  │       │
+  │   └────────┬────────┘    slot context       │       │
+  │            │                                │       │
+  │            ▼                                │       │
+  │   ┌─────────────────┐                       │       │
+  │   │  adaLN-Zero     │◄─────────────────────┘       │
+  │   │  FFN            │                               │
+  │   └────────┬────────┘                               │
+  │            │                                        │
+  │            ▼                                        │
+  │      x_pred (predicted clean embeddings)            │
+  │            │                                        │
+  │   ×1-3 layers (depth = denoiser depth)              │
+  └─────────────────────────────────────────────────────┘
+         │
+         ▼
+  ┌──────────────────┐
+  │  Nearest-Neighbor│   cosine similarity against
+  │  Lookup          │   frozen BPE embedding table
+  │                  │   → closest token per position
+  └──────┬───────────┘
+         │
+         ▼
+  [to, be, help, ful]   Truncate to length head prediction
+         │
+         ▼
+  "to be helpful"       Detokenize
+```
+
+### Key design choices visible in the diagram
+
+- **Frozen BPE embeddings** are shared between compressor and expander.
+  The expander's NN lookup searches the same table the compressor reads from.
+- **Position routes through adaLN**, not through the noisy input. At high noise,
+  positional embeddings added to x_noisy would be buried. adaLN is noise-free.
+- **Cross-attention** connects each denoising position to the W-space conditioning
+  (the dynamics output for that triple slot). This is where the expander learns
+  *what* to reconstruct.
+- **adaLN-Zero** modulates *how* to reconstruct — the gate starts at zero
+  (identity init) and gradually turns on during training.
+- **x0-prediction**: the denoiser predicts the clean embedding directly (not the noise).
+  MSE loss in embedding space. At inference, predicted embeddings are decoded via NN lookup.
+
 ## Summary
 
 Built a continuous diffusion decoder that reconstructs natural language from TWM's compressed triple representations. Started with discrete masked diffusion, iterated through 12 major design problems, arrived at a BPE compressor/expander architecture achieving 81.1% exact match on 10K examples.
