@@ -80,8 +80,9 @@ class DiffusionWorldModel(nn.Module):
         self.ln_f = nn.LayerNorm(config.d_model)
         self.attr_head = nn.Linear(config.d_model, sizes["attr"])
 
-        # Length predictor: how many real BPE tokens per slot (entity, value)
-        self.length_head = nn.Linear(config.d_model * 3, 2)
+        # Length predictor: how many real BPE tokens per slot
+        # Applied per-role to 256d latent vectors (entity/value separately)
+        self.length_head = nn.Linear(config.d_model, 1)
 
         decoder_kwargs = dict(
             twm_dim=config.d_model,
@@ -211,22 +212,30 @@ class DiffusionWorldModel(nn.Module):
 
         return {"attr": self.attr_head(attr_pooled)}
 
-    def forward_lengths(self, latent: torch.Tensor) -> torch.Tensor:
-        """Predict entity/value token lengths from triple context.
+    def forward_lengths(self, latent: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Predict entity/value token lengths from per-role latent vectors.
 
-        Returns: (B, M, 2) raw regression values (entity_len, value_len)
+        Returns:
+            entity_lengths: (B, M) raw regression values
+            value_lengths: (B, M) raw regression values
         """
-        triple_ctx = self._extract_triple_context(latent)  # (B, M, 3*d_model)
-        return self.length_head(triple_ctx)
+        M = self.config.max_triples
+        device = latent.device
+        e_idx = torch.arange(0, M * 3, 3, device=device)
+        v_idx = torch.arange(2, M * 3, 3, device=device)
+        ent_pred = self.length_head(latent[:, e_idx]).squeeze(-1)  # (B, M)
+        val_pred = self.length_head(latent[:, v_idx]).squeeze(-1)  # (B, M)
+        return ent_pred, val_pred
 
     @torch.no_grad()
     def predict_lengths(self, latent: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Predict and round entity/value lengths, clamped to [1, max_seq_len]."""
+        """Predict and round entity/value token lengths, clamped to [1, max_seq_len]."""
         max_len = self._get_decoder("entity").max_seq_len
-        raw = self.forward_lengths(latent)  # (B, M, 2)
-        ent_lens = raw[:, :, 0].round().long().clamp(1, max_len)
-        val_lens = raw[:, :, 1].round().long().clamp(1, max_len)
-        return ent_lens, val_lens
+        ent_raw, val_raw = self.forward_lengths(latent)
+        return (
+            ent_raw.round().long().clamp(1, max_len),
+            val_raw.round().long().clamp(1, max_len),
+        )
 
     def _forward_diffusion(
         self,

@@ -212,15 +212,14 @@ def compute_loss(
             metrics["proj_acc_value"] = val_aux_m["proj_acc"]
 
     # Length prediction: how many real BPE tokens per entity/value slot
-    length_pred = model.forward_lengths(latent)  # (B, M, 2)
+    ent_len_pred, val_len_pred = model.forward_lengths(latent)  # (B, M) each
     ent_real = (entity_token_ids != 0).sum(dim=-1).float()  # (B, M)
     val_real = (value_token_ids != 0).sum(dim=-1).float()  # (B, M)
-    length_target = torch.stack([ent_real, val_real], dim=-1)  # (B, M, 2)
-    # Only compute on non-pad triples
     valid_mask = ~tgt_pad  # (B, M)
     if valid_mask.any():
-        length_loss = F.mse_loss(
-            length_pred[valid_mask], length_target[valid_mask],
+        length_loss = (
+            F.mse_loss(ent_len_pred[valid_mask], ent_real[valid_mask])
+            + F.mse_loss(val_len_pred[valid_mask], val_real[valid_mask])
         )
     else:
         length_loss = torch.tensor(0.0, device=latent.device)
