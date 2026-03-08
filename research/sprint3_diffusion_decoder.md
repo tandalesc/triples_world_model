@@ -43,7 +43,7 @@ Phase 2+ measured generation from scratch (0% visible tokens). Numbers are not d
 | Run | Decoder | Encoder | Val Exact | Val Tok | Ent Exact | Params |
 |-----|---------|---------|:-:|:-:|:-:|-------:|
 | v13 sentence-enc | 1L, 256d | Sentence-transformer | 0% | 34% | 0% | ~6.5M |
-| v14 compress (WebNLG) | 3L, 256d | BPE compressor 2L | **100%** | **100%** | **100%** | ~12M |
+| v13 identity (WebNLG) | 1L, 256d | BPE compressor 2L | **100%** | **100%** | **100%** | ~10M |
 | v15a 1L (ATOMIC) | 1L, 256d | BPE compressor 2L | 55.1% | 80.5% | 62.0% | ~10M |
 | v15b 2L (ATOMIC) | 2L, 256d | BPE compressor 2L | 71.1% | 89.4% | 63.3% | ~11M |
 | v15c 3L (ATOMIC) | 3L, 256d | BPE compressor 2L | **81.1%** | **93.4%** | **75.5%** | ~12M |
