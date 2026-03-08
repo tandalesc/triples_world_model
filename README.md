@@ -302,55 +302,23 @@ Frontier models produce semantically reasonable but wrong values — they have
 the commonsense knowledge but can't match annotation conventions without
 training. TWM learns the mapping directly.
 
-### Diffusion Decoder Results (ATOMIC 10K)
+### Decoder Scaling
 
-#### Phase 1: Discrete Masking
+| Denoiser Depth | Exact Match | Token Accuracy | Entity Exact | Params |
+|----------------|:-----------:|:--------------:|:------------:|-------:|
+| 1L, 256d | 55.1% | 80.5% | 62.0% | ~10M |
+| 2L, 256d | 71.1% | 89.4% | 63.3% | ~11M |
+| **3L, 256d** | **81.1%** | **93.4%** | **75.5%** | **~12M** |
 
-| Run | Denoiser | Data | Pretrained | Peak Test Val Tok | Test Attr |
-|-----|----------|------|:---:|:-:|:-:|
-| 1L/128d | 1L, 128d | 2K | No | 37.2% | 72% |
-| 1L/128d | 1L, 128d | 10K | No | 42.7% | 74% |
-| 2L/256d | 2L, 256d | 10K | Yes (frozen) | 48.6% | 76% |
-| 1L/128d | 1L, 128d | 10K | Yes (frozen) | 47.0% | 76% |
+Each denoiser layer adds a refinement pass — gains concentrate on medium and long phrases. Short phrases (1-3 BPE tokens) hit 100% at all depths.
 
-#### Phase 2: Continuous Noise (gen_val_tok — generation from scratch)
+### Key Takeaways
 
-| Run | Change | gen_val_tok | gen_val_exact | Notes |
-|-----|--------|:-:|:-:|-------|
-| v6 baseline | Cross-attn only | 14.2% | 0% | Peaked epoch 10, flatlined |
-| v6 FiLM | + FiLM conditioning | 15.8% | 0% | Slow climb, still below ceiling |
-| v7 adaLN | + adaLN-Zero | 17.4% | 0% | Higher peak, same decline pattern |
-| v9 cosine | Continuous noise (cosine schedule) | 20.0% | 0% | First run without conditioning collapse |
-| v9 alpha_min | + alpha_min=0.01, importance sampling | 21.0% | 0% | Stable at ~21%, no decline |
-| v10 unified | Unified decoder, 6.5M params | 21.7% | 0% | Matched quality at half parameters |
-
-#### Phase 3: Compressor/Expander Identity
-
-| Run | Decoder | Encoder | Val Exact | Val Tok | Ent Exact | Params |
-|-----|---------|---------|:-:|:-:|:-:|-------:|
-| v13 sentence-enc | 1L, 256d | Sentence-transformer | 0% | 34% | 0% | ~6.5M |
-| v14 compress (WebNLG) | 3L, 256d | BPE compressor 2L | **100%** | **100%** | **100%** | ~12M |
-| v15a 1L (ATOMIC) | 1L, 256d | BPE compressor 2L | 55.1% | 80.5% | 62.0% | ~10M |
-| v15b 2L (ATOMIC) | 2L, 256d | BPE compressor 2L | 71.1% | 89.4% | 63.3% | ~11M |
-| v15c 3L (ATOMIC) | 3L, 256d | BPE compressor 2L | **81.1%** | **93.4%** | **75.5%** | ~12M |
-
-##### Per-length breakdown (v15c 3L, best run)
-
-| Phrase Length | Exact Match | Examples |
-|--------------|:-:|:-:|
-| Short (1-3 BPE tokens) | 100% | 125 |
-| Medium (4-6 BPE tokens) | 89% | 222 |
-| Long (7+ BPE tokens) | 46% | 114 |
-
-### Key Findings
-
-- **Discrete → continuous noise** eliminated the masking discontinuity and conditioning collapse
-- **Frozen embeddings** are required — trainable embeddings collapse under any smooth loss
-- **alpha_min > 0** prevents the singularity at t=1.0 that caused a loss cliff
-- **Joint encoder-decoder training** via compressor/expander was the breakthrough — sentence encoder hit 34%, compressor hit 81%
+- **Joint encoder-decoder training** via compressor/expander was the breakthrough — sentence encoder hit 34%, BPE compressor hit 81%
 - **Decoder depth scales predictably**: +16% exact match per layer (1L→2L), diminishing after
-- **Integrated length head** (256 params) solved the pad truncation problem perfectly
 - **28K param dynamics core** runs a live pet simulator with multi-entity interactions — no game logic, no if-statements, just learned world dynamics
+
+Full experiment progression and 12-entry problem/solution log: [`research/sprint3_diffusion_decoder.md`](research/sprint3_diffusion_decoder.md)
 
 ## Key Design Decisions
 
