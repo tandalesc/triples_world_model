@@ -2,6 +2,18 @@
 
 Papers and systems referenced during TWM development.
 
+## Origin
+
+TWM emerged from exploring JEPA-style world models, MoE expert specialization, and temporal knowledge graph forecasting. The insight was reductive: strip away every architectural novelty until you're left with the minimal testable claim — a vanilla transformer over decomposed triple tokens can learn compositional state dynamics.
+
+Related but distinct from existing work:
+- **Temporal KG forecasting** (RE-NET, TiRGN, TANGO): GNNs over discrete entity IDs with fixed vocabularies
+- **KG embeddings** (TransE, RotatE): static scoring, not dynamics
+- **JEPA**: continuous latent space, not structured tokens
+- **Standard LLMs**: learn dynamics implicitly without compositional token structure
+
+The gap TWM tests: vanilla transformer + decomposed triple tokens + state prediction.
+
 ## Architecture
 
 | Reference | Year | What We Used |
