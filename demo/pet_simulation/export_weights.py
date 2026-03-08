@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Export pet_sim_v2 model weights to JSON for browser inference.
+"""Export pet_sim_v3 model weights to JSON for browser inference.
 
 Run once:  python export_weights.py
-Creates:   model_weights.json (~280KB)
+Creates:   model_weights.json
 """
 
 import json
@@ -25,7 +25,7 @@ def to_list(t, decimals=6):
 
 
 def main():
-    wm = WorldModel(str(ROOT / "results" / "pet_sim_v2"), device="cpu")
+    wm = WorldModel(str(ROOT / "results" / "pet_sim_v3"), device="cpu")
     sd = wm.model.state_dict()
 
     weights = {

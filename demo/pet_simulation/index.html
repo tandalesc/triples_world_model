@@ -8,769 +8,711 @@
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     :root {
-        --bg: #0a0a1a;
-        --card: #141428;
-        --card-border: #2a2a4a;
-        --surface: #1a1a32;
-        --text: #e8e8f0;
-        --text-dim: #6a6a8a;
-        --accent: #6c5ce7;
-        --green: #00b894;
-        --yellow: #fdcb6e;
-        --red: #e17055;
+        --bg: #0a0a1a; --card: #141428; --card-border: #2a2a4a; --surface: #1a1a32;
+        --text: #e8e8f0; --text-dim: #6a6a8a; --accent: #6c5ce7;
+        --green: #00b894; --green2: #55c9a6; --yellow: #fdcb6e; --red: #e17055;
         --bar-empty: #1a1a2a;
     }
-
-    body {
-        background: var(--bg);
-        color: var(--text);
-        font-family: 'Courier New', 'Consolas', monospace;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .pixel-font { font-family: 'Press Start 2P', monospace; }
+    body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace;
+           min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+    .pf { font-family: 'Press Start 2P', monospace; }
 
     /* Loading */
-    #loading {
-        position: fixed; inset: 0; background: var(--bg);
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        z-index: 100; transition: opacity 0.4s;
-    }
+    #loading { position: fixed; inset: 0; background: var(--bg); display: flex;
+               flex-direction: column; align-items: center; justify-content: center;
+               z-index: 100; transition: opacity 0.4s; }
     #loading.hidden { opacity: 0; pointer-events: none; }
     #loading h2 { font-family: 'Press Start 2P', monospace; font-size: 14px; margin-bottom: 16px; }
     #loading p { color: var(--text-dim); font-size: 13px; }
-    .spinner {
-        width: 32px; height: 32px; border: 3px solid var(--card-border);
-        border-top-color: var(--accent); border-radius: 50%;
-        animation: spin 0.8s linear infinite; margin-bottom: 20px;
-    }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--card-border);
+               border-top-color: var(--accent); border-radius: 50%;
+               animation: spin 0.8s linear infinite; margin-bottom: 20px; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Layout */
-    #app { display: none; width: 100%; max-width: 740px; padding: 16px; }
+    #app { display: none; width: 100%; max-width: 900px; padding: 16px; }
     #app.visible { display: block; }
-
-    header { text-align: center; padding: 20px 0 12px; }
-    header h1 { font-family: 'Press Start 2P', monospace; font-size: 18px; letter-spacing: 2px; margin-bottom: 8px; }
-    header .subtitle { color: var(--text-dim); font-size: 11px; line-height: 1.6; }
-    header .subtitle span { color: var(--accent); font-family: 'Press Start 2P', monospace; font-size: 9px; }
-
-    .top-bar { display: flex; justify-content: center; gap: 12px; margin: 12px 0 20px; }
-    .top-btn {
-        font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 8px 14px;
-        background: var(--surface); color: var(--text-dim); border: 2px solid var(--card-border);
-        border-radius: 4px; cursor: pointer; transition: all 0.15s;
-    }
+    header { text-align: center; padding: 16px 0 8px; }
+    header h1 { font-family: 'Press Start 2P', monospace; font-size: 16px; letter-spacing: 2px; margin-bottom: 6px; }
+    header .sub { color: var(--text-dim); font-size: 11px; line-height: 1.6; }
+    header .sub span { color: var(--accent); font-family: 'Press Start 2P', monospace; font-size: 9px; }
+    .top-bar { display: flex; justify-content: center; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; }
+    .top-btn { font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 7px 12px;
+               background: var(--surface); color: var(--text-dim); border: 2px solid var(--card-border);
+               border-radius: 4px; cursor: pointer; transition: all 0.15s; }
     .top-btn:hover { border-color: var(--accent); color: var(--text); }
-    .top-btn.active { border-color: var(--accent); color: var(--accent); background: #1a1a3a; }
+    .top-btn.active { border-color: var(--accent); color: var(--accent); }
 
-    /* Pet Cards */
-    .pets-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-    @media (max-width: 520px) { .pets-row { grid-template-columns: 1fr; } }
+    /* Pet grid */
+    .pets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+                 gap: 14px; margin-bottom: 14px; }
+    .pet-card { background: var(--card); border: 2px solid var(--card-border);
+                border-radius: 8px; padding: 14px; text-align: center; }
+    .pet-name { font-family: 'Press Start 2P', monospace; font-size: 11px; margin-bottom: 10px; letter-spacing: 1px; }
 
-    .pet-card {
-        background: var(--card); border: 2px solid var(--card-border);
-        border-radius: 8px; padding: 16px; text-align: center;
-    }
-    .pet-name { font-family: 'Press Start 2P', monospace; font-size: 12px; margin-bottom: 12px; letter-spacing: 1px; }
-
-    .sprite-container {
-        width: 140px; height: 140px; margin: 0 auto 14px;
-        position: relative; display: flex; align-items: flex-end; justify-content: center;
-    }
-    .sprite-container img { max-width: 100%; max-height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
-    .sprite-container::after {
-        content: ''; position: absolute; bottom: 0; width: 70%; height: 10px;
-        background: radial-gradient(ellipse, rgba(0,0,0,0.35) 0%, transparent 70%); z-index: -1;
-    }
+    /* Sprite canvas */
+    .sprite-wrap { width: 128px; height: 128px; margin: 0 auto 10px; position: relative; }
+    .sprite-wrap canvas { width: 128px; height: 128px; image-rendering: pixelated; image-rendering: crisp-edges; }
+    .sprite-wrap::after { content: ''; position: absolute; bottom: 2px; left: 50%;
+        transform: translateX(-50%); width: 70%; height: 8px;
+        background: radial-gradient(ellipse, rgba(0,0,0,0.3) 0%, transparent 70%); z-index: -1; }
+    .voc-bubble { position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+        font-family: 'Press Start 2P', monospace; font-size: 10px; color: #fff;
+        background: rgba(100,80,200,0.85); padding: 4px 8px; border-radius: 6px;
+        animation: vocFade 1.5s ease-out forwards; pointer-events: none; white-space: nowrap; z-index: 10; }
+    @keyframes vocFade { 0% { opacity: 1; transform: translateX(-50%) translateY(0); }
+        100% { opacity: 0; transform: translateX(-50%) translateY(-16px); } }
 
     /* Stats */
-    .stats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-    .stat-row { display: flex; align-items: center; gap: 8px; }
-    .stat-label {
-        font-size: 9px; font-family: 'Press Start 2P', monospace;
-        color: var(--text-dim); width: 70px; text-align: right; text-transform: uppercase;
-    }
-    .stat-bar { display: flex; gap: 3px; flex: 1; }
-    .stat-segment {
-        height: 14px; flex: 1; border-radius: 2px;
-        background: var(--bar-empty); transition: background 0.4s;
-    }
-    .stat-value { font-size: 10px; color: var(--text-dim); width: 72px; text-align: left; }
-    .stat-value.changed { color: var(--text); animation: flash 0.6s ease-out; }
-    @keyframes flash {
-        0% { color: #fff; text-shadow: 0 0 6px var(--accent); }
-        100% { color: var(--text-dim); text-shadow: none; }
-    }
+    .stats { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+    .stat-row { display: flex; align-items: center; gap: 6px; }
+    .stat-label { font-family: 'Press Start 2P', monospace; font-size: 7px; color: var(--text-dim);
+                  width: 58px; text-align: right; text-transform: uppercase; }
+    .stat-bar { display: flex; gap: 2px; flex: 1; }
+    .stat-seg { height: 12px; flex: 1; border-radius: 2px; background: var(--bar-empty); transition: background 0.4s; }
+    .stat-val { font-size: 9px; color: var(--text-dim); width: 68px; text-align: left; transition: color 0.3s; }
+    .stat-val.flash { color: #fff; text-shadow: 0 0 6px var(--accent); }
 
-    /* Action Buttons */
-    .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-    .action-btn {
-        font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 8px 4px;
-        background: var(--surface); color: var(--text); border: 2px solid var(--card-border);
-        border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
-    }
-    .action-btn:hover { background: #22224a; border-color: var(--accent); }
-    .action-btn:active { transform: scale(0.94); }
-    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    /* Action buttons */
+    .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .act-btn { font-family: 'Press Start 2P', monospace; font-size: 6px; padding: 7px 2px;
+               background: var(--surface); color: var(--text); border: 2px solid var(--card-border);
+               border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+    .act-btn:hover { background: #22224a; border-color: var(--accent); }
+    .act-btn:active { transform: scale(0.94); }
+    .act-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+    /* Add pet card */
+    .add-card { display: flex; flex-direction: column; align-items: center; justify-content: center;
+                border-style: dashed; min-height: 200px; cursor: default; }
+    .add-card .add-title { font-family: 'Press Start 2P', monospace; font-size: 9px;
+                           color: var(--text-dim); margin-bottom: 12px; }
+    .add-card .add-pets { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+    .add-pet-btn { font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 8px 12px;
+                   background: var(--surface); color: var(--accent); border: 2px solid #3a2a5a;
+                   border-radius: 4px; cursor: pointer; transition: all 0.15s; }
+    .add-pet-btn:hover { background: #2a1a4a; border-color: var(--accent); }
 
     /* Interactions */
-    .interactions {
-        background: var(--card); border: 2px solid var(--card-border);
-        border-radius: 8px; padding: 14px; margin-bottom: 16px; text-align: center;
-    }
-    .interactions h3 {
-        font-family: 'Press Start 2P', monospace; font-size: 9px;
-        color: var(--text-dim); margin-bottom: 10px; letter-spacing: 1px;
-    }
+    .interactions { background: var(--card); border: 2px solid var(--card-border); border-radius: 8px;
+                    padding: 12px; margin-bottom: 14px; text-align: center; }
+    .interactions.hidden { display: none; }
+    .interactions h3 { font-family: 'Press Start 2P', monospace; font-size: 8px;
+                       color: var(--text-dim); margin-bottom: 8px; }
+    .pair-select { display: flex; gap: 8px; justify-content: center; align-items: center;
+                   margin-bottom: 8px; font-size: 11px; }
+    .pair-select select { font-family: monospace; font-size: 11px; padding: 4px 8px;
+        background: var(--surface); color: var(--text); border: 1px solid var(--card-border);
+        border-radius: 4px; }
     .interact-btns { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-    .interact-btn {
-        font-family: 'Press Start 2P', monospace; font-size: 8px; padding: 10px 16px;
-        background: #1a1032; color: #c4a0ff; border: 2px solid #3a2a5a;
-        border-radius: 4px; cursor: pointer; transition: all 0.15s;
-    }
-    .interact-btn:hover { background: #2a1a4a; border-color: #8a5cf5; }
-    .interact-btn:active { transform: scale(0.94); }
-    .interact-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .int-btn { font-family: 'Press Start 2P', monospace; font-size: 7px; padding: 9px 14px;
+               background: #1a1032; color: #c4a0ff; border: 2px solid #3a2a5a;
+               border-radius: 4px; cursor: pointer; transition: all 0.15s; }
+    .int-btn:hover { background: #2a1a4a; border-color: #8a5cf5; }
+    .int-btn:active { transform: scale(0.94); }
+    .int-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
     /* Inspector */
-    .inspector {
-        background: var(--card); border: 2px solid var(--card-border);
-        border-radius: 8px; overflow: hidden; margin-bottom: 24px;
-    }
-    .inspector-toggle {
-        width: 100%; padding: 12px 16px; background: none; border: none;
-        color: var(--text-dim); font-family: 'Press Start 2P', monospace;
-        font-size: 9px; cursor: pointer; text-align: left;
-        display: flex; align-items: center; gap: 8px;
-    }
-    .inspector-toggle:hover { color: var(--text); }
-    .inspector-toggle .arrow { display: inline-block; transition: transform 0.2s; font-size: 8px; }
-    .inspector-toggle .arrow.open { transform: rotate(90deg); }
-    .inspector-body { display: none; padding: 0 16px 16px; }
-    .inspector-body.open { display: block; }
-
-    .triple-display { margin-bottom: 12px; }
-    .triple-display h4 { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--text-dim); margin-bottom: 6px; }
-    .triples-list { display: flex; flex-wrap: wrap; gap: 4px; }
-    .triple-chip {
-        font-size: 10px; padding: 3px 6px; border-radius: 3px;
-        background: #1a1a2a; border: 1px solid #2a2a3a;
-    }
-    .triple-chip.mode { border-color: #4a6aff; color: #8ab4ff; }
-    .triple-chip.action { border-color: #ff8a4a; color: #ffb88a; }
-    .triple-chip.state { border-color: #3a3a5a; color: #b0b0c0; }
-    .triple-chip.output { border-color: #2aaa7a; color: #6adaba; }
-    .triple-chip.changed { border-color: var(--yellow); color: var(--yellow); }
-
-    .action-log { max-height: 180px; overflow-y: auto; font-size: 11px; line-height: 1.6; }
-    .action-log h4 { font-family: 'Press Start 2P', monospace; font-size: 8px; color: var(--text-dim); margin-bottom: 6px; }
+    .inspector { background: var(--card); border: 2px solid var(--card-border);
+                 border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+    .insp-toggle { width: 100%; padding: 10px 14px; background: none; border: none;
+                   color: var(--text-dim); font-family: 'Press Start 2P', monospace; font-size: 8px;
+                   cursor: pointer; text-align: left; display: flex; align-items: center; gap: 8px; }
+    .insp-toggle:hover { color: var(--text); }
+    .insp-toggle .arr { display: inline-block; transition: transform 0.2s; font-size: 7px; }
+    .insp-toggle .arr.open { transform: rotate(90deg); }
+    .insp-body { display: none; padding: 0 14px 14px; }
+    .insp-body.open { display: block; }
+    .triple-sec { margin-bottom: 10px; }
+    .triple-sec h4 { font-family: 'Press Start 2P', monospace; font-size: 7px; color: var(--text-dim); margin-bottom: 5px; }
+    .triples-list { display: flex; flex-wrap: wrap; gap: 3px; }
+    .tc { font-size: 9px; padding: 2px 5px; border-radius: 3px; background: #1a1a2a; border: 1px solid #2a2a3a; }
+    .tc.mode { border-color: #4a6aff; color: #8ab4ff; }
+    .tc.action { border-color: #ff8a4a; color: #ffb88a; }
+    .tc.state { border-color: #3a3a5a; color: #b0b0c0; }
+    .tc.output { border-color: #2aaa7a; color: #6adaba; }
+    .tc.changed { border-color: var(--yellow); color: var(--yellow); }
+    .tc.voc { border-color: #c060ff; color: #d8a0ff; }
+    .action-log { max-height: 150px; overflow-y: auto; font-size: 10px; line-height: 1.5; }
+    .action-log h4 { font-family: 'Press Start 2P', monospace; font-size: 7px; color: var(--text-dim); margin-bottom: 5px; }
     .log-entry { color: var(--text-dim); margin-bottom: 2px; }
-    .log-pet { color: var(--accent); }
-    .log-action { color: #ff8a4a; }
-    .log-change { color: var(--yellow); }
+    .lp { color: var(--accent); } .la { color: #ff8a4a; } .lc { color: var(--yellow); } .lv { color: #d8a0ff; }
 
-    footer {
-        text-align: center; padding: 8px 0 24px; font-size: 10px; color: var(--text-dim);
-    }
+    footer { text-align: center; padding: 4px 0 20px; font-size: 10px; color: var(--text-dim); }
     </style>
 </head>
 <body>
-
-<div id="loading">
-    <div class="spinner"></div>
-    <h2>PET SIMULATOR</h2>
-    <p>Loading neural network (28,357 parameters)...</p>
-</div>
-
+<div id="loading"><div class="spinner"></div><h2>PET SIMULATOR</h2>
+    <p id="load-status">Loading neural network...</p></div>
 <div id="app">
-    <header>
-        <h1>PET SIMULATOR</h1>
-        <div class="subtitle">
-            Every state change predicted by a <span>28K-param transformer</span>.<br>
-            No game logic. No if-statements. Just learned world dynamics.
-        </div>
-    </header>
-
+    <header><h1>PET SIMULATOR</h1>
+        <div class="sub">Every state change predicted by a <span id="param-count">~35K-param</span> transformer. No game logic. Just learned dynamics.</div></header>
     <div class="top-bar">
         <button class="top-btn" onclick="resetGame()">RESET</button>
-        <button class="top-btn" id="decay-toggle" onclick="toggleDecay()">AUTO-DECAY: OFF</button>
+        <button class="top-btn" id="decay-btn" onclick="toggleDecay()">AUTO-DECAY: OFF</button>
     </div>
-
-    <div class="pets-row" id="pets-row"></div>
-
-    <div class="interactions">
+    <div class="pets-grid" id="pets-grid"></div>
+    <div class="interactions hidden" id="interact-sec">
         <h3>INTERACTIONS</h3>
+        <div class="pair-select" id="pair-select"></div>
         <div class="interact-btns">
-            <button class="interact-btn" onclick="doInteraction('play_with')">PLAY TOGETHER</button>
-            <button class="interact-btn" onclick="doInteraction('cuddle')">CUDDLE</button>
-            <button class="interact-btn" onclick="doInteraction('compete')">COMPETE</button>
+            <button class="int-btn" onclick="doInteraction('play_with')">PLAY TOGETHER</button>
+            <button class="int-btn" onclick="doInteraction('cuddle')">CUDDLE</button>
+            <button class="int-btn" onclick="doInteraction('compete')">COMPETE</button>
         </div>
     </div>
-
     <div class="inspector">
-        <button class="inspector-toggle" onclick="toggleInspector()">
-            <span class="arrow" id="inspector-arrow">&#9654;</span>
-            UNDER THE HOOD
-        </button>
-        <div class="inspector-body" id="inspector-body">
-            <div class="triple-display">
-                <h4>LAST INPUT (STATE_T)</h4>
-                <div class="triples-list" id="input-triples"></div>
-            </div>
-            <div class="triple-display">
-                <h4>MODEL OUTPUT (STATE_T+1)</h4>
-                <div class="triples-list" id="output-triples"></div>
-            </div>
-            <div class="action-log">
-                <h4>LOG</h4>
-                <div id="log-entries"></div>
-            </div>
+        <button class="insp-toggle" onclick="toggleInspector()">
+            <span class="arr" id="insp-arr">&#9654;</span> UNDER THE HOOD</button>
+        <div class="insp-body" id="insp-body">
+            <div class="triple-sec"><h4>INPUT (STATE_T)</h4><div class="triples-list" id="inp-triples"></div></div>
+            <div class="triple-sec"><h4>OUTPUT (STATE_T+1)</h4><div class="triples-list" id="out-triples"></div></div>
+            <div class="action-log"><h4>LOG</h4><div id="log-entries"></div></div>
         </div>
     </div>
-
-    <footer>
-        Triple World Model &middot; 28K params &middot; 37 tokens &middot; 2-layer transformer
-    </footer>
+    <footer id="footer">Triple World Model</footer>
 </div>
 
 <script>
 // ============================================================
-// Triple World Model — Pure JS Inference Engine
+// Sprite Animator — canvas-based, 8fps, loop or play-once-hold
 // ============================================================
-
-class TripleWorldModel {
-    constructor(weights) {
-        this.w = weights;
-        this.cfg = weights.config;
-        this.vocab = weights.vocab;
-        this.id2token = weights.id2token;
+class SpriteAnimator {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.img = null; this.cols = 0; this.row = 0;
+        this.frame = 0; this.loop = true; this.done = false;
+        this.onDone = null;
     }
-
-    layerNorm(x, weight, bias) {
-        const d = x.length, eps = 1e-5;
-        let mean = 0;
-        for (let i = 0; i < d; i++) mean += x[i];
-        mean /= d;
-        let v = 0;
-        for (let i = 0; i < d; i++) v += (x[i] - mean) ** 2;
-        v /= d;
-        const s = Math.sqrt(v + eps);
-        const out = new Float32Array(d);
-        for (let i = 0; i < d; i++) out[i] = (x[i] - mean) / s * weight[i] + bias[i];
-        return out;
+    setSheet(img, row, loop, onDone) {
+        this.img = img;
+        this.cols = Math.floor(img.naturalWidth / 32);
+        this.row = Math.min(row, Math.floor(img.naturalHeight / 32) - 1);
+        this.frame = 0; this.loop = loop; this.done = false; this.onDone = onDone || null;
     }
-
-    matvec(M, v) {
-        const rows = M.length, cols = v.length;
-        const out = new Float32Array(rows);
-        for (let i = 0; i < rows; i++) {
-            let s = 0;
-            const row = M[i];
-            for (let j = 0; j < cols; j++) s += row[j] * v[j];
-            out[i] = s;
+    tick() {
+        if (!this.img || this.done) { this.drawCurrent(); return; }
+        this.drawCurrent();
+        if (this.loop) {
+            this.frame = (this.frame + 1) % this.cols;
+        } else {
+            if (this.frame < this.cols - 1) this.frame++;
+            else { this.done = true; if (this.onDone) this.onDone(); }
         }
-        return out;
     }
-
-    addVec(a, b) {
-        const out = new Float32Array(a.length);
-        for (let i = 0; i < a.length; i++) out[i] = a[i] + b[i];
-        return out;
+    drawCurrent() {
+        if (!this.img) return;
+        this.ctx.clearRect(0, 0, 32, 32);
+        this.ctx.drawImage(this.img, this.frame * 32, this.row * 32, 32, 32, 0, 0, 32, 32);
     }
+}
 
-    softmax(x) {
-        let max = -Infinity;
-        for (let i = 0; i < x.length; i++) if (x[i] > max) max = x[i];
-        const exp = new Float32Array(x.length);
-        let sum = 0;
-        for (let i = 0; i < x.length; i++) { exp[i] = Math.exp(x[i] - max); sum += exp[i]; }
-        for (let i = 0; i < x.length; i++) exp[i] /= sum;
-        return exp;
+// Global animation loop at 8fps
+const animators = {};
+let lastAnimTime = 0;
+function animLoop(ts) {
+    requestAnimationFrame(animLoop);
+    if (ts - lastAnimTime < 125) return; // 8fps
+    lastAnimTime = ts;
+    for (const a of Object.values(animators)) a.tick();
+}
+requestAnimationFrame(animLoop);
+
+// ============================================================
+// Triple World Model — Pure JS Inference (same as v1)
+// ============================================================
+class TWM {
+    constructor(w) { this.w = w; this.cfg = w.config; this.vocab = w.vocab; this.id2token = w.id2token; }
+    ln(x, wt, b) {
+        const d = x.length, eps = 1e-5; let m = 0;
+        for (let i = 0; i < d; i++) m += x[i]; m /= d;
+        let v = 0; for (let i = 0; i < d; i++) v += (x[i] - m) ** 2; v /= d;
+        const s = Math.sqrt(v + eps), o = new Float32Array(d);
+        for (let i = 0; i < d; i++) o[i] = (x[i] - m) / s * wt[i] + b[i]; return o;
     }
-
-    embed(tokenIds) {
-        const T = tokenIds.length, d = this.cfg.d_model;
-        const encoded = [], raw = [];
+    mv(M, v) {
+        const o = new Float32Array(M.length);
+        for (let i = 0; i < M.length; i++) { let s = 0; for (let j = 0; j < v.length; j++) s += M[i][j] * v[j]; o[i] = s; }
+        return o;
+    }
+    av(a, b) { const o = new Float32Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] + b[i]; return o; }
+    sm(x) {
+        let mx = -Infinity; for (let i = 0; i < x.length; i++) if (x[i] > mx) mx = x[i];
+        const e = new Float32Array(x.length); let s = 0;
+        for (let i = 0; i < x.length; i++) { e[i] = Math.exp(x[i] - mx); s += e[i]; }
+        for (let i = 0; i < x.length; i++) e[i] /= s; return e;
+    }
+    embed(ids) {
+        const T = ids.length, d = this.cfg.d_model, enc = [], raw = [];
         for (let t = 0; t < T; t++) {
-            const tok = this.w.embeddings.token[tokenIds[t]];
-            const pos = this.w.embeddings.triple_pos[Math.floor(t / 3)];
-            const role = this.w.embeddings.role[t % 3];
-            const r = new Float32Array(d), e = new Float32Array(d);
-            for (let j = 0; j < d; j++) { r[j] = tok[j]; e[j] = tok[j] + pos[j] + role[j]; }
-            raw.push(r);
-            encoded.push(e);
-        }
-        return { encoded, raw };
+            const tk = this.w.embeddings.token[ids[t]], p = this.w.embeddings.triple_pos[Math.floor(t/3)], r = this.w.embeddings.role[t%3];
+            const rv = new Float32Array(d), ev = new Float32Array(d);
+            for (let j = 0; j < d; j++) { rv[j] = tk[j]; ev[j] = tk[j] + p[j] + r[j]; }
+            raw.push(rv); enc.push(ev);
+        } return { enc, raw };
     }
-
-    selfAttention(x, layer, padMask) {
-        const T = x.length, d = this.cfg.d_model, nH = this.cfg.n_heads, dH = d / nH;
-        const scale = Math.sqrt(dH);
-
-        const qkv = new Array(T);
-        for (let t = 0; t < T; t++)
-            qkv[t] = this.addVec(this.matvec(layer.attn_in_proj_weight, x[t]), layer.attn_in_proj_bias);
-
-        const out = new Array(T);
-        for (let t = 0; t < T; t++) out[t] = new Float32Array(d);
-
+    attn(x, L, pm) {
+        const T = x.length, d = this.cfg.d_model, nH = this.cfg.n_heads, dH = d / nH, sc = Math.sqrt(dH);
+        const qkv = []; for (let t = 0; t < T; t++) qkv.push(this.av(this.mv(L.attn_in_proj_weight, x[t]), L.attn_in_proj_bias));
+        const out = []; for (let t = 0; t < T; t++) out.push(new Float32Array(d));
         for (let h = 0; h < nH; h++) {
-            const qO = h * dH, kO = d + h * dH, vO = 2 * d + h * dH;
+            const qO = h*dH, kO = d+h*dH, vO = 2*d+h*dH;
             for (let i = 0; i < T; i++) {
-                const scores = new Float32Array(T);
-                for (let j = 0; j < T; j++) {
-                    if (padMask[j]) { scores[j] = -1e9; continue; }
-                    let dot = 0;
-                    for (let k = 0; k < dH; k++) dot += qkv[i][qO + k] * qkv[j][kO + k];
-                    scores[j] = dot / scale;
-                }
-                const attn = this.softmax(scores);
-                for (let k = 0; k < dH; k++) {
-                    let s = 0;
-                    for (let j = 0; j < T; j++) s += attn[j] * qkv[j][vO + k];
-                    out[i][qO + k] = s;
-                }
+                const s = new Float32Array(T);
+                for (let j = 0; j < T; j++) { if (pm[j]) { s[j] = -1e9; continue; } let dot=0; for (let k=0;k<dH;k++) dot+=qkv[i][qO+k]*qkv[j][kO+k]; s[j]=dot/sc; }
+                const a = this.sm(s);
+                for (let k = 0; k < dH; k++) { let v=0; for (let j=0;j<T;j++) v+=a[j]*qkv[j][vO+k]; out[i][qO+k]=v; }
             }
         }
-        return out.map(o => this.addVec(this.matvec(layer.attn_out_proj_weight, o), layer.attn_out_proj_bias));
+        return out.map(o => this.av(this.mv(L.attn_out_proj_weight, o), L.attn_out_proj_bias));
     }
-
-    feedforward(x, layer) {
-        let h = this.addVec(this.matvec(layer.ff_linear1_weight, x), layer.ff_linear1_bias);
+    ff(x, L) {
+        let h = this.av(this.mv(L.ff_linear1_weight, x), L.ff_linear1_bias);
         for (let i = 0; i < h.length; i++) if (h[i] < 0) h[i] = 0;
-        return this.addVec(this.matvec(layer.ff_linear2_weight, h), layer.ff_linear2_bias);
+        return this.av(this.mv(L.ff_linear2_weight, h), L.ff_linear2_bias);
     }
-
-    transformerLayer(x, li, padMask) {
-        const layer = this.w.layers[li], d = this.cfg.d_model;
-        const n1 = x.map(xi => this.layerNorm(xi, layer.norm1_weight, layer.norm1_bias));
-        const a = this.selfAttention(n1, layer, padMask);
-        const r1 = x.map((xi, i) => { const o = new Float32Array(d); for (let j = 0; j < d; j++) o[j] = xi[j] + a[i][j]; return o; });
-        const n2 = r1.map(xi => this.layerNorm(xi, layer.norm2_weight, layer.norm2_bias));
-        const f = n2.map(xi => this.feedforward(xi, layer));
-        return r1.map((xi, i) => { const o = new Float32Array(d); for (let j = 0; j < d; j++) o[j] = xi[j] + f[i][j]; return o; });
+    layer(x, li, pm) {
+        const L = this.w.layers[li], d = this.cfg.d_model;
+        const n1 = x.map(v => this.ln(v, L.norm1_weight, L.norm1_bias));
+        const a = this.attn(n1, L, pm);
+        const r1 = x.map((v,i) => { const o=new Float32Array(d); for(let j=0;j<d;j++) o[j]=v[j]+a[i][j]; return o; });
+        const n2 = r1.map(v => this.ln(v, L.norm2_weight, L.norm2_bias));
+        const f = n2.map(v => this.ff(v, L));
+        return r1.map((v,i) => { const o=new Float32Array(d); for(let j=0;j<d;j++) o[j]=v[j]+f[i][j]; return o; });
     }
-
-    predict(tokenIds) {
-        const { encoded, raw } = this.embed(tokenIds);
-        const padMask = tokenIds.map(id => id === 0);
-        let x = encoded;
-        for (let i = 0; i < this.cfg.n_layers; i++) x = this.transformerLayer(x, i, padMask);
-        return x.map((xi, t) => {
-            const ln = this.layerNorm(xi, this.w.decoder.ln_weight, this.w.decoder.ln_bias);
-            const d = this.cfg.d_model;
-            const sk = new Float32Array(d);
-            for (let j = 0; j < d; j++) sk[j] = ln[j] + raw[t][j];
-            const logits = this.addVec(this.matvec(this.w.decoder.head_weight, sk), this.w.decoder.head_bias);
-            let mI = 0, mV = logits[0];
-            for (let i = 1; i < logits.length; i++) if (logits[i] > mV) { mV = logits[i]; mI = i; }
-            return mI;
+    predict(ids) {
+        const { enc, raw } = this.embed(ids); const pm = ids.map(i => i===0);
+        let x = enc; for (let i = 0; i < this.cfg.n_layers; i++) x = this.layer(x, i, pm);
+        return x.map((v,t) => {
+            const l = this.ln(v, this.w.decoder.ln_weight, this.w.decoder.ln_bias);
+            const d = this.cfg.d_model, sk = new Float32Array(d);
+            for (let j=0;j<d;j++) sk[j]=l[j]+raw[t][j];
+            const lg = this.av(this.mv(this.w.decoder.head_weight, sk), this.w.decoder.head_bias);
+            let mi=0,mv=lg[0]; for(let i=1;i<lg.length;i++) if(lg[i]>mv){mv=lg[i];mi=i;} return mi;
         });
     }
-
-    encodeTriples(triples) {
-        const maxT = this.cfg.max_triples, ids = new Array(maxT * 3).fill(0);
-        for (let i = 0; i < triples.length && i < maxT; i++)
-            for (let j = 0; j < 3; j++) ids[i * 3 + j] = this.vocab[triples[i][j]] || 0;
+    encTriples(triples) {
+        const mt = this.cfg.max_triples, ids = new Array(mt*3).fill(0);
+        for (let i=0;i<triples.length&&i<mt;i++) for(let j=0;j<3;j++) ids[i*3+j]=this.vocab[triples[i][j]]||0;
         return ids;
     }
-
-    decodeTriples(ids) {
-        const triples = [];
-        for (let i = 0; i < ids.length; i += 3)
-            if (ids[i] !== 0 && ids[i+1] !== 0 && ids[i+2] !== 0)
-                triples.push([this.id2token[String(ids[i])], this.id2token[String(ids[i+1])], this.id2token[String(ids[i+2])]]);
-        return triples;
+    decTriples(ids) {
+        const t=[]; for(let i=0;i<ids.length;i+=3) if(ids[i]&&ids[i+1]&&ids[i+2])
+            t.push([this.id2token[ids[i]],this.id2token[ids[i+1]],this.id2token[ids[i+2]]]); return t;
     }
-
-    advance(inputTriples) {
-        return this.decodeTriples(this.predict(this.encodeTriples(inputTriples)));
-    }
+    advance(triples) { return this.decTriples(this.predict(this.encTriples(triples))); }
 }
 
-
 // ============================================================
-// Game State & Logic
+// Game Constants
 // ============================================================
-
 let model = null;
-
-const PETS = ['Buddy', 'Luna'];
-const ATTRS = ['hunger', 'energy', 'mood', 'cleanliness'];
+const ALL_PETS = ['Buddy', 'Luna', 'Max', 'Daisy', 'Rocky'];
+const ATTRS = ['hunger', 'energy', 'mood', 'cleanliness', 'boredom', 'anger'];
 const SOLO_ACTIONS = ['feed', 'play', 'bathe', 'nap', 'pet', 'walk', 'ignore'];
-
+const ATTR_SHORT = { hunger: 'HUNGER', energy: 'ENERGY', mood: 'MOOD', cleanliness: 'CLEAN', boredom: 'BORED', anger: 'ANGER' };
 const VALUE_ORDER = {
-    hunger: ['full', 'hungry', 'starving'], energy: ['rested', 'tired', 'exhausted'],
-    mood: ['happy', 'content', 'sad'], cleanliness: ['clean', 'messy', 'dirty'],
+    hunger: ['stuffed','full','hungry','starving'], energy: ['energized','rested','tired','exhausted'],
+    mood: ['ecstatic','happy','content','sad'], cleanliness: ['spotless','clean','messy','dirty'],
+    boredom: ['entertained','engaged','bored','restless'], anger: ['calm','annoyed','angry','furious'],
+};
+const VALUE_LEVEL = {}; for (const [a,vs] of Object.entries(VALUE_ORDER)) for (let i=0;i<vs.length;i++) VALUE_LEVEL[vs[i]]=4-i;
+const LEVEL_CLR = { 4: 'var(--green)', 3: 'var(--green2)', 2: 'var(--yellow)', 1: 'var(--red)' };
+
+const PET_CFG = {
+    Buddy: { folder: 'Dog Brown', prefix: 'BROWN_DOG', species: 'dog' },
+    Luna:  { folder: 'Cat Black', prefix: 'BLACK_CAT', species: 'cat' },
+    Max:   { folder: 'Dog White', prefix: 'WHITE_DOG', species: 'dog' },
+    Daisy: { folder: 'Cat Milky', prefix: 'MILKY_CAT', species: 'cat' },
+    Rocky: { folder: 'Dog Small', prefix: 'SMALL_DOG', species: 'dog' },
+};
+const SHEETS = {
+    dog: ['EATING','LAYING','PLAYFUL','RUNNING','SITTING','SLEEPING','SNIFFING','STANDING','WALKING'],
+    cat: ['EATING','LAYING','LICKING','OBSERVING','RUNNING','SITTING','SLEEPING','STANDING','WALKING'],
 };
 
-const VALUE_LEVEL = {};
-for (const [attr, vals] of Object.entries(VALUE_ORDER))
-    for (let i = 0; i < vals.length; i++) VALUE_LEVEL[vals[i]] = 3 - i;
-
-const LEVEL_COLOR = { 3: 'var(--green)', 2: 'var(--yellow)', 1: 'var(--red)' };
-
-const SPRITES = {
-    Buddy: {
-        folder: 'Dog Brown',
-        idle: { happy: 'PANTING or EXCITED.gif', content: 'SNIFFING.gif', sad: 'Transition from STANDING to LAYING.gif' },
-        actions: {
-            feed: 'EATING.gif', play: 'BARKING while RUNNING.gif', bathe: 'SNIFFING.gif',
-            nap: 'Transition from STANDING to LAYING.gif', pet: 'PANTING or EXCITED.gif',
-            walk: 'WALKING.gif', ignore: 'Transition from STANDING to LAYING.gif',
-            play_with: 'BARKING while RUNNING.gif', cuddle: 'PANTING or EXCITED.gif', compete: 'BARKING while RUNNING.gif',
-        },
-    },
-    Luna: {
-        folder: 'Cat Black',
-        idle: { happy: 'IDLE.gif', content: 'OBSERVING.gif', sad: 'SLEEPING.gif' },
-        actions: {
-            feed: 'EATING.gif', play: 'WALKING.gif', bathe: 'LICKING.gif',
-            nap: 'SLEEPING.gif', pet: 'IDLE.gif', walk: 'WALKING.gif',
-            ignore: 'OBSERVING.gif', play_with: 'WALKING.gif', cuddle: 'IDLE.gif', compete: 'WALKING.gif',
-        },
-    },
+// Action -> sprite sheet + row (0-indexed)
+const ACT_ANIM = {
+    dog: { feed:{s:'EATING',r:0}, play:{s:'PLAYFUL',r:0}, bathe:{s:'SNIFFING',r:0},
+           nap:{s:'SLEEPING',r:0}, pet:{s:'SITTING',r:4}, walk:{s:'WALKING',r:0},
+           ignore:{s:'LAYING',r:1}, bark:{s:'RUNNING',r:1}, play_with:{s:'PLAYFUL',r:0},
+           cuddle:{s:'SITTING',r:1}, compete:{s:'RUNNING',r:0} },
+    cat: { feed:{s:'EATING',r:0}, play:{s:'RUNNING',r:0}, bathe:{s:'LICKING',r:0},
+           nap:{s:'SLEEPING',r:0}, pet:{s:'STANDING',r:0}, walk:{s:'WALKING',r:0},
+           ignore:{s:'LAYING',r:1}, meow:{s:'OBSERVING',r:0}, play_with:{s:'RUNNING',r:0},
+           cuddle:{s:'SITTING',r:1}, compete:{s:'RUNNING',r:0} },
+};
+const IDLE_ANIM = {
+    dog: { ecstatic:{s:'STANDING',r:1}, happy:{s:'STANDING',r:0}, content:{s:'SNIFFING',r:0}, sad:{s:'LAYING',r:1} },
+    cat: { ecstatic:{s:'STANDING',r:0}, happy:{s:'STANDING',r:0}, content:{s:'OBSERVING',r:0}, sad:{s:'SLEEPING',r:0} },
 };
 
-function spriteUrl(pet, gif) {
-    return 'resources/' + encodeURIComponent(SPRITES[pet].folder) + '/Examples/' + encodeURIComponent(gif);
+// Sprite sheet image cache: spriteImgs[pet][sheetName] = Image
+const spriteImgs = {};
+
+function sheetUrl(pet, sheet) {
+    const c = PET_CFG[pet];
+    return 'resources/' + encodeURIComponent(c.folder) + '/SpriteSheets/' + c.prefix + '_' + sheet + '.png';
 }
 
+function preloadSprites() {
+    const promises = [];
+    for (const pet of ALL_PETS) {
+        spriteImgs[pet] = {};
+        const sp = PET_CFG[pet].species;
+        for (const sheet of SHEETS[sp]) {
+            const img = new Image();
+            const p = new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+            img.src = sheetUrl(pet, sheet);
+            spriteImgs[pet][sheet] = img;
+            promises.push(p);
+        }
+    }
+    return Promise.all(promises);
+}
+
+// ============================================================
+// Game State
+// ============================================================
+let activePets = [];
 let gameState = {};
 let busy = false;
 let decayOn = false;
 let decayInterval = null;
 
-function defaultState() {
-    return {
-        Buddy: { hunger: 'full', energy: 'rested', mood: 'happy', cleanliness: 'clean' },
-        Luna:  { hunger: 'full', energy: 'rested', mood: 'happy', cleanliness: 'clean' },
-    };
+function freshState() {
+    return { hunger:'full', energy:'rested', mood:'happy', cleanliness:'clean', boredom:'engaged', anger:'calm' };
 }
-
-function stateTriples(pet) {
-    return ATTRS.map(a => [pet, a, gameState[pet][a]]);
-}
+function stateTriples(pet) { return ATTRS.map(a => [pet, a, gameState[pet][a]]); }
 
 function updateFromResult(result) {
-    const changes = {};
-    for (const [entity, attr, val] of result) {
-        if (gameState[entity] && ATTRS.includes(attr) && gameState[entity][attr] !== val) {
-            if (!changes[entity]) changes[entity] = {};
-            changes[entity][attr] = { from: gameState[entity][attr], to: val };
-            gameState[entity][attr] = val;
+    const changes = {}, vocs = {};
+    for (const [ent, attr, val] of result) {
+        if (attr === 'action' && (val === 'bark' || val === 'meow')) {
+            vocs[ent] = val;
+        } else if (gameState[ent] && ATTRS.includes(attr) && gameState[ent][attr] !== val) {
+            if (!changes[ent]) changes[ent] = {};
+            changes[ent][attr] = { from: gameState[ent][attr], to: val };
+            gameState[ent][attr] = val;
         }
     }
-    return changes;
+    return { changes, vocs };
 }
 
+// ============================================================
+// Actions
+// ============================================================
 function doAction(pet, action) {
     if (busy || !model) return;
-    busy = true;
-    setButtonsDisabled(true);
-
-    const other = PETS.find(p => p !== pet);
-    const inputTriples = [
-        ['#mode', 'type', 'advance'],
-        ...stateTriples(pet),
-        ...stateTriples(other),
-        [pet, 'action', action],
-    ];
-
-    setSprite(pet, SPRITES[pet].actions[action]);
-    const result = model.advance(inputTriples);
-    const changes = updateFromResult(result);
-
-    addLogEntry(pet, action, changes);
-    updateInspector(inputTriples, result, changes);
-    renderAllStats();
-
-    setTimeout(() => { setIdleSprite(pet); busy = false; setButtonsDisabled(false); }, 1200);
+    busy = true; setDisabled(true);
+    const inp = [['#mode','type','advance'], ...stateTriples(pet), [pet,'action',action]];
+    playActionAnim(pet, action);
+    const result = model.advance(inp);
+    const { changes, vocs } = updateFromResult(result);
+    showVocs(vocs);
+    addLog(pet, action, changes, vocs);
+    updateInspector(inp, result, changes);
+    renderStats();
+    setTimeout(() => { setIdleAnim(pet); busy = false; setDisabled(false); }, 1200);
 }
 
 function doInteraction(interaction) {
-    if (busy || !model) return;
-    busy = true;
-    setButtonsDisabled(true);
-
-    const [pet1, pet2] = PETS;
-    const inputTriples = [
-        ['#mode', 'type', 'advance'],
-        ...stateTriples(pet1), ...stateTriples(pet2),
-        [pet1, 'action', interaction], [pet2, 'action', interaction],
-    ];
-
-    for (const pet of PETS) setSprite(pet, SPRITES[pet].actions[interaction]);
-    const result = model.advance(inputTriples);
-    const changes = updateFromResult(result);
-
-    addLogEntry(pet1 + '+' + pet2, interaction, changes);
-    updateInspector(inputTriples, result, changes);
-    renderAllStats();
-
-    setTimeout(() => { for (const pet of PETS) setIdleSprite(pet); busy = false; setButtonsDisabled(false); }, 1200);
+    if (busy || !model || activePets.length < 2) return;
+    const pet1 = getInteractPet(0), pet2 = getInteractPet(1);
+    if (pet1 === pet2) return;
+    busy = true; setDisabled(true);
+    const inp = [['#mode','type','advance'], ...stateTriples(pet1), ...stateTriples(pet2),
+                 [pet1,'action',interaction], [pet2,'action',interaction]];
+    playActionAnim(pet1, interaction); playActionAnim(pet2, interaction);
+    const result = model.advance(inp);
+    const { changes, vocs } = updateFromResult(result);
+    showVocs(vocs);
+    addLog(pet1+'+'+pet2, interaction, changes, vocs);
+    updateInspector(inp, result, changes);
+    renderStats();
+    setTimeout(() => { setIdleAnim(pet1); setIdleAnim(pet2); busy = false; setDisabled(false); }, 1200);
 }
 
 function resetGame() {
-    gameState = defaultState();
-    renderAll();
+    activePets = ['Buddy'];
+    gameState = {}; for (const p of ALL_PETS) gameState[p] = freshState();
     clearChildren(document.getElementById('log-entries'));
-    clearChildren(document.getElementById('input-triples'));
-    clearChildren(document.getElementById('output-triples'));
-    const placeholder = el('span', { className: 'triple-chip state' }, 'perform an action to see triples');
-    document.getElementById('input-triples').appendChild(placeholder);
+    clearChildren(document.getElementById('inp-triples'));
+    clearChildren(document.getElementById('out-triples'));
+    rebuildUI();
+}
+
+function addPet(pet) {
+    if (activePets.includes(pet) || activePets.length >= 5) return;
+    activePets.push(pet);
+    rebuildUI();
+}
+
+function removePet(pet) {
+    if (activePets.length <= 1) return;
+    activePets = activePets.filter(p => p !== pet);
+    delete animators[pet];
+    rebuildUI();
 }
 
 function toggleDecay() {
     decayOn = !decayOn;
-    const btn = document.getElementById('decay-toggle');
-    btn.textContent = 'AUTO-DECAY: ' + (decayOn ? 'ON' : 'OFF');
-    btn.classList.toggle('active', decayOn);
+    const b = document.getElementById('decay-btn');
+    b.textContent = 'AUTO-DECAY: ' + (decayOn ? 'ON' : 'OFF');
+    b.classList.toggle('active', decayOn);
     if (decayOn) {
         decayInterval = setInterval(() => {
-            if (!busy) doAction(PETS[Math.floor(Math.random() * PETS.length)], 'ignore');
+            if (!busy && activePets.length > 0) doAction(activePets[Math.floor(Math.random()*activePets.length)], 'ignore');
         }, 12000);
-    } else {
-        clearInterval(decayInterval);
-        decayInterval = null;
+    } else { clearInterval(decayInterval); decayInterval = null; }
+}
+
+// ============================================================
+// Sprite helpers
+// ============================================================
+function playActionAnim(pet, action) {
+    const sp = PET_CFG[pet].species;
+    const anim = ACT_ANIM[sp][action];
+    if (!anim || !animators[pet]) return;
+    const img = spriteImgs[pet][anim.s];
+    if (img) animators[pet].setSheet(img, anim.r, false, null);
+}
+function setIdleAnim(pet) {
+    if (!animators[pet] || !gameState[pet]) return;
+    const sp = PET_CFG[pet].species, mood = gameState[pet].mood;
+    const anim = IDLE_ANIM[sp][mood] || IDLE_ANIM[sp].content;
+    const img = spriteImgs[pet][anim.s];
+    if (img) animators[pet].setSheet(img, anim.r, true, null);
+}
+function showVocs(vocs) {
+    for (const [pet, sound] of Object.entries(vocs)) {
+        const wrap = document.querySelector('#card-'+pet+' .sprite-wrap');
+        if (!wrap) continue;
+        const sp = PET_CFG[pet].species;
+        const actAnim = ACT_ANIM[sp][sound];
+        if (actAnim && animators[pet]) {
+            const img = spriteImgs[pet][actAnim.s];
+            if (img) animators[pet].setSheet(img, actAnim.r, false, () => setIdleAnim(pet));
+        }
+        const bub = el('div', { className: 'voc-bubble' }, sound === 'bark' ? 'WOOF!' : 'MEOW!');
+        wrap.appendChild(bub);
+        setTimeout(() => { if (bub.parentNode) bub.parentNode.removeChild(bub); }, 1500);
     }
 }
 
 // ============================================================
-// DOM Helpers (safe, no innerHTML for dynamic content)
+// DOM Helpers
 // ============================================================
-
-function el(tag, attrs, textContent) {
+function el(tag, attrs, text) {
     const e = document.createElement(tag);
-    if (attrs) for (const [k, v] of Object.entries(attrs)) {
-        if (k === 'className') e.className = v;
-        else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-        else e.setAttribute(k, v);
+    if (attrs) for (const [k,v] of Object.entries(attrs)) {
+        if (k === 'className') e.className = v; else e.setAttribute(k, v);
     }
-    if (textContent != null) e.textContent = textContent;
-    return e;
+    if (text != null) e.textContent = text; return e;
 }
+function clearChildren(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+function setDisabled(d) { document.querySelectorAll('.act-btn,.int-btn').forEach(b => b.disabled = d); }
 
-function clearChildren(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
+function getInteractPet(idx) {
+    if (activePets.length === 2) return activePets[idx];
+    const sel = document.getElementById('pair-sel-' + idx);
+    return sel ? sel.value : activePets[idx];
 }
 
 // ============================================================
-// Rendering
+// Build UI
 // ============================================================
+function rebuildUI() {
+    const grid = document.getElementById('pets-grid');
+    clearChildren(grid);
+    for (const pet of activePets) grid.appendChild(buildPetCard(pet));
+    if (activePets.length < 5) grid.appendChild(buildAddCard());
+    for (const pet of activePets) setIdleAnim(pet);
+    renderStats();
+    // Interactions
+    const isec = document.getElementById('interact-sec');
+    isec.classList.toggle('hidden', activePets.length < 2);
+    buildPairSelect();
+    // Footer
+    if (model) document.getElementById('footer').textContent =
+        'Triple World Model \u00B7 ' + Object.keys(model.vocab).length + ' tokens \u00B7 ' +
+        model.cfg.d_model + '-dim \u00B7 ' + model.cfg.n_layers + ' layers';
+}
 
 function buildPetCard(pet) {
     const card = el('div', { className: 'pet-card', id: 'card-' + pet });
-
-    const name = el('div', { className: 'pet-name' }, pet.toUpperCase());
-    card.appendChild(name);
-
-    const spriteWrap = el('div', { className: 'sprite-container' });
-    const img = el('img', { id: 'sprite-' + pet, alt: pet });
-    img.src = spriteUrl(pet, SPRITES[pet].idle.happy);
-    spriteWrap.appendChild(img);
-    card.appendChild(spriteWrap);
-
+    // Header with name + remove btn
+    const hdr = el('div', { className: 'pet-name' });
+    hdr.appendChild(document.createTextNode(pet.toUpperCase()));
+    if (activePets.length > 1) {
+        const rm = el('span', { className: '' }, ' \u00D7');
+        rm.style.cssText = 'cursor:pointer;color:var(--text-dim);font-size:14px;margin-left:8px;';
+        rm.addEventListener('click', () => removePet(pet));
+        hdr.appendChild(rm);
+    }
+    card.appendChild(hdr);
+    // Canvas
+    const wrap = el('div', { className: 'sprite-wrap' });
+    const canvas = el('canvas'); canvas.width = 32; canvas.height = 32;
+    canvas.id = 'canvas-' + pet;
+    wrap.appendChild(canvas);
+    card.appendChild(wrap);
+    animators[pet] = new SpriteAnimator(canvas);
+    // Stats
     const stats = el('div', { className: 'stats' });
     for (const attr of ATTRS) {
         const row = el('div', { className: 'stat-row' });
-        row.dataset.pet = pet;
-        row.dataset.attr = attr;
-
-        const label = el('span', { className: 'stat-label' }, attr === 'cleanliness' ? 'clean' : attr);
-        row.appendChild(label);
-
+        row.dataset.pet = pet; row.dataset.attr = attr;
+        row.appendChild(el('span', { className: 'stat-label' }, ATTR_SHORT[attr]));
         const bar = el('div', { className: 'stat-bar' });
-        for (let s = 1; s <= 3; s++) {
-            const seg = el('div', { className: 'stat-segment' });
-            seg.dataset.seg = String(s);
-            bar.appendChild(seg);
-        }
+        for (let s = 0; s < 4; s++) { const seg = el('div', { className: 'stat-seg' }); seg.dataset.seg = s; bar.appendChild(seg); }
         row.appendChild(bar);
-
-        const valSpan = el('span', { className: 'stat-value' });
-        valSpan.dataset.pet = pet;
-        valSpan.dataset.attr = attr;
-        row.appendChild(valSpan);
-
+        const vspan = el('span', { className: 'stat-val' }); vspan.dataset.pet = pet; vspan.dataset.attr = attr;
+        row.appendChild(vspan);
         stats.appendChild(row);
     }
     card.appendChild(stats);
-
-    const actions = el('div', { className: 'actions' });
+    // Actions
+    const acts = el('div', { className: 'actions' });
     for (const a of SOLO_ACTIONS) {
-        const btn = el('button', { className: 'action-btn' }, a.toUpperCase());
+        const btn = el('button', { className: 'act-btn' }, a.toUpperCase());
         btn.addEventListener('click', () => doAction(pet, a));
-        actions.appendChild(btn);
+        acts.appendChild(btn);
     }
-    card.appendChild(actions);
-
+    card.appendChild(acts);
     return card;
 }
 
-function renderAll() {
-    for (const pet of PETS) setIdleSprite(pet);
-    renderAllStats();
+function buildAddCard() {
+    const card = el('div', { className: 'pet-card add-card' });
+    card.appendChild(el('div', { className: 'add-title' }, '+ ADD PET'));
+    const btns = el('div', { className: 'add-pets' });
+    for (const pet of ALL_PETS) {
+        if (activePets.includes(pet)) continue;
+        const b = el('button', { className: 'add-pet-btn' }, pet.toUpperCase());
+        b.addEventListener('click', () => addPet(pet));
+        btns.appendChild(b);
+    }
+    card.appendChild(btns);
+    return card;
 }
 
-function renderAllStats() {
-    for (const pet of PETS) {
+function buildPairSelect() {
+    const wrap = document.getElementById('pair-select');
+    clearChildren(wrap);
+    if (activePets.length <= 2) return;
+    for (let idx = 0; idx < 2; idx++) {
+        const sel = el('select', { id: 'pair-sel-' + idx });
+        for (const p of activePets) {
+            const opt = el('option', { value: p }, p);
+            if (p === activePets[idx]) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        wrap.appendChild(sel);
+        if (idx === 0) wrap.appendChild(el('span', {}, ' \u00D7 '));
+    }
+}
+
+function renderStats() {
+    for (const pet of activePets) {
         for (const attr of ATTRS) {
-            const val = gameState[pet][attr];
-            const level = VALUE_LEVEL[val];
-            const color = LEVEL_COLOR[level];
-            const row = document.querySelector('.stat-row[data-pet="' + pet + '"][data-attr="' + attr + '"]');
+            const val = gameState[pet][attr], level = VALUE_LEVEL[val], clr = LEVEL_CLR[level];
+            const row = document.querySelector('.stat-row[data-pet="'+pet+'"][data-attr="'+attr+'"]');
             if (!row) continue;
-            row.querySelectorAll('.stat-segment').forEach((seg, i) => {
-                seg.style.background = (i < level) ? color : 'var(--bar-empty)';
-            });
-            const valEl = row.querySelector('.stat-value');
-            const old = valEl.textContent;
-            valEl.textContent = val;
-            if (old && old !== val) {
-                valEl.classList.add('changed');
-                setTimeout(() => valEl.classList.remove('changed'), 600);
-            }
+            row.querySelectorAll('.stat-seg').forEach((seg, i) => { seg.style.background = i < level ? clr : 'var(--bar-empty)'; });
+            const ve = row.querySelector('.stat-val');
+            const old = ve.textContent; ve.textContent = val;
+            if (old && old !== val) { ve.classList.add('flash'); setTimeout(() => ve.classList.remove('flash'), 500); }
         }
     }
 }
 
-function setSprite(pet, gif) {
-    document.getElementById('sprite-' + pet).src = spriteUrl(pet, gif);
-}
-
-function setIdleSprite(pet) {
-    const mood = gameState[pet].mood;
-    setSprite(pet, SPRITES[pet].idle[mood] || SPRITES[pet].idle.content);
-}
-
-function setButtonsDisabled(disabled) {
-    document.querySelectorAll('.action-btn, .interact-btn').forEach(b => b.disabled = disabled);
-}
-
-// --- Inspector ---
-
+// ============================================================
+// Inspector
+// ============================================================
 function toggleInspector() {
-    document.getElementById('inspector-body').classList.toggle('open');
-    document.getElementById('inspector-arrow').classList.toggle('open');
+    document.getElementById('insp-body').classList.toggle('open');
+    document.getElementById('insp-arr').classList.toggle('open');
 }
-
-function makeTripleChip(triple, cssClass) {
-    return el('span', { className: 'triple-chip ' + cssClass }, '[' + triple.join(', ') + ']');
-}
-
-function updateInspector(inputTriples, outputTriples, changes) {
-    const changedKeys = new Set();
-    for (const pet of Object.keys(changes))
-        for (const attr of Object.keys(changes[pet]))
-            changedKeys.add(pet + ':' + attr);
-
-    const inputEl = document.getElementById('input-triples');
-    clearChildren(inputEl);
-    for (const t of inputTriples) {
-        let cls = 'state';
-        if (t[0] === '#mode') cls = 'mode';
-        else if (t[1] === 'action') cls = 'action';
-        inputEl.appendChild(makeTripleChip(t, cls));
-        inputEl.appendChild(document.createTextNode(' '));
+function makeChip(triple, cls) { return el('span', { className: 'tc ' + cls }, '[' + triple.join(', ') + ']'); }
+function updateInspector(inp, out, changes) {
+    const ck = new Set();
+    for (const p of Object.keys(changes)) for (const a of Object.keys(changes[p])) ck.add(p+':'+a);
+    const ie = document.getElementById('inp-triples'); clearChildren(ie);
+    for (const t of inp) {
+        let c = 'state'; if (t[0]==='#mode') c='mode'; else if (t[1]==='action') c='action';
+        ie.appendChild(makeChip(t, c)); ie.appendChild(document.createTextNode(' '));
     }
-
-    const outputEl = document.getElementById('output-triples');
-    clearChildren(outputEl);
-    for (const t of outputTriples) {
-        const cls = changedKeys.has(t[0] + ':' + t[1]) ? 'changed' : 'output';
-        outputEl.appendChild(makeTripleChip(t, cls));
-        outputEl.appendChild(document.createTextNode(' '));
+    const oe = document.getElementById('out-triples'); clearChildren(oe);
+    for (const t of out) {
+        let c = 'output';
+        if (t[1]==='action'&&(t[2]==='bark'||t[2]==='meow')) c = 'voc';
+        else if (ck.has(t[0]+':'+t[1])) c = 'changed';
+        oe.appendChild(makeChip(t, c)); oe.appendChild(document.createTextNode(' '));
     }
 }
-
-function addLogEntry(petLabel, action, changes) {
+function addLog(who, action, changes, vocs) {
     const entry = el('div', { className: 'log-entry' });
-
-    const petSpan = el('span', { className: 'log-pet' }, petLabel);
-    entry.appendChild(petSpan);
+    entry.appendChild(el('span', { className: 'lp' }, who));
     entry.appendChild(document.createTextNode(': '));
-
-    const actSpan = el('span', { className: 'log-action' }, action);
-    entry.appendChild(actSpan);
-
-    const changeParts = [];
-    for (const [pet, attrs] of Object.entries(changes))
-        for (const [attr, { from, to }] of Object.entries(attrs))
-            changeParts.push(pet + '.' + attr + ': ' + from + ' -> ' + to);
-
-    if (changeParts.length > 0) {
-        entry.appendChild(document.createTextNode(' -> '));
-        const chg = el('span', { className: 'log-change' }, changeParts.join(', '));
-        entry.appendChild(chg);
-    } else {
-        entry.appendChild(document.createTextNode(' -> no changes'));
-    }
-
-    const logEl = document.getElementById('log-entries');
-    logEl.insertBefore(entry, logEl.firstChild);
-
-    // Keep max 30 entries
-    while (logEl.children.length > 30) logEl.removeChild(logEl.lastChild);
+    entry.appendChild(el('span', { className: 'la' }, action));
+    const parts = [];
+    for (const [p, as] of Object.entries(changes))
+        for (const [a, {from, to}] of Object.entries(as)) parts.push(p+'.'+a+': '+from+'->'+to);
+    const vocParts = [];
+    for (const [p, s] of Object.entries(vocs)) vocParts.push(p + ' ' + (s==='bark'?'WOOFs':'MEOWs'));
+    if (parts.length) { entry.appendChild(document.createTextNode(' \u2192 ')); entry.appendChild(el('span',{className:'lc'},parts.join(', '))); }
+    if (vocParts.length) { entry.appendChild(document.createTextNode(' ')); entry.appendChild(el('span',{className:'lv'},vocParts.join(', '))); }
+    if (!parts.length && !vocParts.length) entry.appendChild(document.createTextNode(' \u2192 no changes'));
+    const log = document.getElementById('log-entries');
+    log.insertBefore(entry, log.firstChild);
+    while (log.children.length > 40) log.removeChild(log.lastChild);
 }
-
 
 // ============================================================
 // Init
 // ============================================================
-
 async function init() {
+    const status = document.getElementById('load-status');
     try {
+        status.textContent = 'Loading neural network...';
         const resp = await fetch('model_weights.json');
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const weights = await resp.json();
-        model = new TripleWorldModel(weights);
+        model = new TWM(weights);
 
-        const petsRow = document.getElementById('pets-row');
-        for (const pet of PETS) petsRow.appendChild(buildPetCard(pet));
+        status.textContent = 'Loading sprites...';
+        await preloadSprites();
 
-        gameState = defaultState();
-        renderAll();
+        const pc = document.getElementById('param-count');
+        // Estimate param count from weights
+        let nParams = 0;
+        const count = (arr) => { if (Array.isArray(arr[0])) return arr.length * arr[0].length; return arr.length; };
+        nParams += count(weights.embeddings.token) + count(weights.embeddings.triple_pos) + count(weights.embeddings.role);
+        for (const L of weights.layers) for (const v of Object.values(L)) nParams += count(v);
+        for (const v of Object.values(weights.decoder)) nParams += count(v);
+        pc.textContent = (nParams/1000).toFixed(0) + 'K-param';
 
-        // Set initial inspector placeholder
-        const placeholder = el('span', { className: 'triple-chip state' }, 'perform an action to see triples');
-        document.getElementById('input-triples').appendChild(placeholder);
+        activePets = ['Buddy'];
+        gameState = {}; for (const p of ALL_PETS) gameState[p] = freshState();
+        rebuildUI();
 
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('app').classList.add('visible');
     } catch (e) {
-        const loading = document.getElementById('loading');
-        clearChildren(loading);
-
-        const h = el('h2', { className: 'pixel-font' }, 'Failed to load');
-        h.style.cssText = 'color: var(--red); font-size: 12px;';
-        loading.appendChild(h);
-
-        const p1 = el('p', {}, 'Could not load model_weights.json');
-        p1.style.cssText = 'color: var(--text-dim); margin-top: 12px;';
-        loading.appendChild(p1);
-
-        const p2 = el('p');
-        p2.style.cssText = 'color: var(--text-dim); margin-top: 8px; font-size: 11px;';
-        p2.appendChild(document.createTextNode('Run: '));
-        p2.appendChild(el('code', {}, 'python export_weights.py'));
-        p2.appendChild(document.createElement('br'));
-        p2.appendChild(document.createTextNode('Then: '));
-        p2.appendChild(el('code', {}, 'python -m http.server 8000'));
-        loading.appendChild(p2);
-
-        const p3 = el('p', {}, e.message);
-        p3.style.cssText = 'color: var(--red); margin-top: 12px; font-size: 11px;';
-        loading.appendChild(p3);
+        const ld = document.getElementById('loading');
+        clearChildren(ld);
+        ld.appendChild(el('h2', { className: 'pf', style: 'color:var(--red);font-size:12px' }, 'Failed to load'));
+        const p = el('p', { style: 'color:var(--text-dim);margin-top:12px;font-size:11px' });
+        p.appendChild(document.createTextNode('Run: ')); p.appendChild(el('code', {}, 'python export_weights.py'));
+        p.appendChild(document.createElement('br'));
+        p.appendChild(document.createTextNode('Then: ')); p.appendChild(el('code', {}, 'python -m http.server 8000'));
+        ld.appendChild(p);
+        ld.appendChild(el('p', { style: 'color:var(--red);margin-top:8px;font-size:11px' }, e.message));
     }
 }
-
 init();
 </script>
 </body>

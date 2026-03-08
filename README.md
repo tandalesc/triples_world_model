@@ -2,8 +2,8 @@
 
 > A state machine that discovers its own states. Learns transition rules from
 > examples instead of specifications. Resolves variable interactions through
-> attention rather than exponential enumeration. Fits in as little as 80K
-> parameters. And teaches itself new behaviors at runtime.
+> attention rather than exponential enumeration. Fits in 29K parameters and
+> runs client-side in 303 KB of JavaScript.
 
 A minimal world model that learns temporal state dynamics over structured
 (entity, attribute, value) triples using a vanilla transformer encoder.
@@ -61,6 +61,32 @@ Key findings:
 
 See [results/README.md](results/README.md) for full experiment progression
 (8 runs) and analysis.
+
+### Browser Demo: Pet Simulator
+
+A live demo running TWM Mini entirely client-side — pure JavaScript transformer
+inference, no server, no WASM, no WebGPU. The model weights ship as a 303 KB
+JSON file.
+
+The pet simulator models multi-pet dynamics: 6 attributes × 4 levels, conditional
+cross-state effects (playing when exhausted drops mood, cats hate baths),
+energy-based competition, and vocalization triggers (bark/meow). All learned
+from 11K generated training examples by a 29K parameter model.
+
+| Model | Profile | Params | Weights | Inference | Comp Gen | Seen |
+|-------|---------|-------:|--------:|:---------:|:--------:|:----:|
+| TWM Base | 256d/4L/4H | 4.5M | 17 MB | ~0.3ms | 0.748 | 0.778 |
+| TWM Mini | 32d/2L/2H | 29K | 303 KB | ~0.5ms | 0.989 | 1.000 |
+| TWM Micro | 16d/1L/2H | 4K | ~5 KB | <0.1ms | 0.671 | 0.640 |
+
+Notes:
+- Inference times measured on CPU (M-series Mac). Browser JS adds ~2-5x overhead.
+- Base/Micro F1 on 3-domain combined dataset (1,371 examples). Mini exact match
+  on pet sim domain (11K examples, 6 attrs, conditional effects).
+- Micro params shown for domain-specific vocab. On the 3-domain benchmark, Micro
+  is 80K params due to larger vocabulary and embedding tables.
+
+Try it: `cd demo/pet_simulation && python -m http.server 8080`
 
 ## How It Works
 
