@@ -2,8 +2,8 @@
 
 > A state machine that discovers its own states. Learns transition rules from
 > examples instead of specifications. Resolves variable interactions through
-> attention rather than exponential enumeration. Fits in 29K parameters and
-> runs client-side in 303 KB of JavaScript.
+> attention rather than exponential enumeration. Scales down to as few as
+> 4K parameters (Micro) and runs client-side in 303 KB of JavaScript.
 
 A minimal world model that learns temporal state dynamics over structured
 (entity, attribute, value) triples using a vanilla transformer encoder.
@@ -104,12 +104,15 @@ Output: predicted next state
   (Buddy, mood, content)                    <- unchanged
 ```
 
-- **Mode conditioning**: `(#mode, type, advance)` is a regular triple prepended to
-  input — no architectural changes needed, the transformer learns to use it as context
+- **Mode conditioning**: a mode triple like `(#mode, type, advance)` is prepended
+  to input as a regular triple — no architectural changes needed, the transformer
+  learns to condition its behavior on it. During training, `identity` mode
+  (state_t -> state_t) is used alongside `advance` to validate reconstruction.
+  The same mechanism extends to other modes (e.g., `query` for state interrogation)
+  — it's just training data.
 - **Set-to-set prediction** (not autoregressive) — triples have no natural order
 - **Input residual**: most of the world persists, model only learns the delta
-- **Padding mask** for variable-length triple sets (up to 16 triples)
-- Base uses GloVe 300d pretrained embeddings; Mini/Micro use learned embeddings
+- **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
 
 ## Quick Start
 
@@ -168,10 +171,10 @@ Additional flags:
 uv run python -m twm.serve \
   --checkpoint results/my_run --interactive
 
-# Single prediction
+# Single prediction (prepend mode triple for models trained with mode conditioning)
 uv run python -m twm.serve \
   --checkpoint results/my_run \
-  --input '[["glass","state","full"],["alice","state","thirsty"]]'
+  --input '[["#mode","type","advance"],["glass","state","full"],["alice","state","thirsty"]]'
 ```
 
 ### Rebuilding from scratch
@@ -355,8 +358,14 @@ training. TWM learns the mapping directly.
   is its own token. Compositionality comes from structure, not embedding space.
 - **Set-to-set, not autoregressive.** Parallel prediction of all output
   positions. Closer to BERT than GPT.
-- **GloVe with real names.** Entity tokens are real words (`alice`, `bob`,
-  `glass`, `campfire`) with distinct pretrained embeddings. Compound tokens
-  like `person_a` get near-identical vectors and break entity disambiguation.
+- **Embedding-agnostic.** TWM doesn't prescribe a preferred embedding space.
+  Early experiments used GloVe 300d pretrained embeddings for the closed-vocab
+  benchmark, but Mini/Micro use learned embeddings from scratch. When used as
+  part of an encoder/decoder chain, the encoder and decoder provide the vector
+  space and TWM learns to operate within it through training. The latest
+  open-vocabulary results (81.1% exact match) use BPE tokenization on both
+  encoder and decoder for greater expressibility — though note this is with
+  an identity transfer function (pure reconstruction), not yet with world
+  dynamics active.
 - **Input residual.** Most of the world persists between timesteps. The model
   only needs to learn what changes.
