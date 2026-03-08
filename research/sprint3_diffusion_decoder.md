@@ -1,4 +1,9 @@
-# Sprint 3: Diffusion Decoder
+# Sprint 3: Diffusion Decoder (Expander)
+
+> **Terminology note:** This log predates our standardized naming. "Decoder" here
+> refers to what we now call the **expander** (latent → BPE tokens via denoising).
+> "Encoder" refers to the **compressor** (BPE tokens → latent). See
+> [architecture.md](architecture.md) for the full terminology map.
 
 ## Summary
 

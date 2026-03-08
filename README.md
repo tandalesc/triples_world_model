@@ -81,6 +81,32 @@ Try it: `cd demo/pet_simulation && python -m http.server 8080`
 
 ## How It Works
 
+At the center is the **dynamics core** — a transformer that processes triples
+in latent space. You can use it directly with a fixed token set (pet sim,
+benchmarks), or wrap it with a **compressor/expander** for open-vocabulary
+and other use cases:
+
+```
+  Direct (fixed token set)              With I/O wrappers (open-vocab)
+  ────────────────────────              ─────────────────────────────
+  token IDs → Encoder                  BPE text → Compressor
+                  │                                    │
+                  ▼                                    ▼
+             ┌──────────┐                        ┌──────────┐
+             │ Dynamics │                        │ Dynamics │
+             │  (core)  │                        │  (core)  │
+             └────┬─────┘                        └────┬─────┘
+                  │                                    │
+                  ▼                                    ▼
+         Decoder → logits               Expander → BPE text
+                                        (iterative denoising)
+```
+
+The dynamics core sees the same shaped input either way — `(B, max_triples × 3, d_model)`
+latent tensors. The I/O layers are interchangeable.
+
+### Example (closed-vocab, pet sim)
+
 ```
 Input: mode triple + current state + action
 
@@ -94,8 +120,7 @@ Tokenized (3 tokens per triple):
   [#mode] [type] [advance] [Buddy] [hunger] [hungry] ...
   + positional encoding: (triple_index, role: entity/attr/value)
 
-  -> Transformer encoder (2 layers, 2 heads, 32-dim for Mini)
-  -> Linear head per position -> predicted output tokens
+  → Encoder → Dynamics (2L/2H/32d) → Decoder
 
 Output: predicted state
 
@@ -104,15 +129,14 @@ Output: predicted state
   (Buddy, mood, content)                    <- unchanged
 ```
 
-- **Mode conditioning**: a mode triple like `(#mode, type, advance)` is prepended
-  to input as a regular triple — no architectural changes needed, the transformer
-  learns to condition its behavior on it. During training, `identity` mode
-  (state_t -> state_t) is used alongside `advance` to validate reconstruction.
-  The same mechanism extends to other modes (e.g., `query` for state interrogation)
-  — it's just training data.
+- **Mode conditioning**: `(#mode, type, advance)` is prepended as a regular triple —
+  no architecture changes needed. `identity` mode (input → same output) validates
+  reconstruction. Other modes (e.g., `query`) are just training data.
 - **Set-to-set prediction** (not autoregressive) — triples have no natural order
 - **Input residual**: most of the state persists, model only learns the delta
 - **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
+
+Full architecture details and file map: [`research/architecture.md`](research/architecture.md)
 
 ## Quick Start
 
@@ -270,19 +294,12 @@ results/
 | Test comp | 2,243 | Held-out pet × action combos (Daisy, Rocky) |
 | Test seen | 699 | Seen combos, unseen states |
 
-## Diffusion Decoder (Open-Vocabulary)
+## Open-Vocabulary Results (ATOMIC 2020)
 
-Extends TWM to handle open-vocabulary value prediction using ATOMIC 2020
-commonsense triples, where values are free-text phrases ("to be helpful",
-"embarrassed") instead of a small closed vocabulary.
-
-### Architecture
-
-The decoder uses a compressor/expander pipeline:
-- **Compressor**: BPE tokenizer + learned compression to fixed-width latent per triple slot
-- **Expander**: Transformer decoder that reconstructs BPE tokens from latent
-- **Dynamics**: Frozen pretrained TWM encoder operates on compressed latents
-- **Length head**: Per-slot length prediction (256 params) for variable-length output
+Extends TWM to handle free-text values ("to be helpful", "embarrassed") using
+the open-vocab pipeline: **compressor** (BPE → 256d latent per slot) →
+**dynamics** (frozen TWM core) → **expander** (256d → BPE via iterative denoising).
+A **length head** (256 params) predicts token count per slot for truncation.
 
 ### TWM vs. Frontier LLMs on ATOMIC Triple Prediction
 
@@ -302,7 +319,7 @@ Frontier models produce semantically reasonable but wrong values — they have
 the commonsense knowledge but can't match annotation conventions without
 training. TWM learns the mapping directly.
 
-### Decoder Scaling
+### Expander Scaling
 
 | Denoiser Depth | Exact Match | Token Accuracy | Entity Exact | Params |
 |----------------|:-----------:|:--------------:|:------------:|-------:|
@@ -314,8 +331,8 @@ Each denoiser layer adds a refinement pass — gains concentrate on medium and l
 
 ### Key Takeaways
 
-- **Joint encoder-decoder training** via compressor/expander was the breakthrough — sentence encoder hit 34%, BPE compressor hit 81%
-- **Decoder depth scales predictably**: +16% exact match per layer (1L→2L), diminishing after
+- **Joint compressor/expander training** was the breakthrough — sentence encoder hit 34%, BPE compressor hit 81%
+- **Expander depth scales predictably**: +16% exact match per layer (1L→2L), diminishing after
 - **28K param dynamics core** runs a live pet simulator with multi-entity interactions — no game logic, no if-statements, just learned world dynamics
 
 Full experiment progression and 12-entry problem/solution log: [`research/sprint3_diffusion_decoder.md`](research/sprint3_diffusion_decoder.md)
@@ -326,14 +343,12 @@ Full experiment progression and 12-entry problem/solution log: [`research/sprint
   is its own token. Compositionality comes from structure, not embedding space.
 - **Set-to-set, not autoregressive.** Parallel prediction of all output
   positions. Closer to BERT than GPT.
-- **Embedding-agnostic.** TWM doesn't prescribe a preferred embedding space.
-  Early experiments used GloVe 300d pretrained embeddings for the closed-vocab
-  benchmark, but Mini/Micro use learned embeddings from scratch. When used as
-  part of an encoder/decoder chain, the encoder and decoder provide the vector
-  space and TWM learns to operate within it through training. The latest
-  open-vocabulary results (81.1% exact match) use BPE tokenization on both
-  encoder and decoder for greater expressibility — though note this is with
-  an identity transfer function (pure reconstruction), not yet with world
-  dynamics active.
+- **Embedding-agnostic.** The dynamics core doesn't prescribe a preferred
+  embedding space. Closed-vocab models use learned embeddings from scratch.
+  The open-vocab pipeline uses a BPE compressor/expander pair that provides
+  the vector space — the dynamics core learns to operate within it through
+  training. The 81.1% exact match result uses BPE on both compressor and
+  expander with an identity transfer function (pure reconstruction), not yet
+  with world dynamics active.
 - **Input residual.** Most of the state persists across transformations. The
   model only needs to learn what changes.
