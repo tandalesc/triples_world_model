@@ -63,31 +63,7 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 
 ## Project Structure
 
-```
-├── CLAUDE.md
-├── README.md
-├── src/twm/
-│   ├── config.py            # ModelConfig with profiles
-│   ├── modules.py           # TripleEncoder, TransformerDynamics, TripleDecoder
-│   ├── model.py             # TripleWorldModel (closed-vocab wrapper)
-│   ├── compressor.py        # TripleCompressor (open-vocab input)
-│   ├── diffusion_decoder.py # DiffusionDecoder / expander (open-vocab output)
-│   ├── diffusion_model.py   # DiffusionWorldModel (open-vocab wrapper)
-│   ├── dataset.py           # Triple dataset + collation
-│   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
-│   ├── train.py             # Training loop
-│   ├── eval.py              # Evaluation + attention visualization
-│   ├── serve.py             # Inference server
-│   └── vocab.py             # Vocabulary builder
-├── scripts/                 # Training and plotting scripts
-├── data/                    # Training data (JSONL triple pairs)
-├── demo/pet_simulation/     # Client-side JS inference demo
-└── research/                # Architecture docs, references, experiment logs
-    ├── architecture.md      # Full architecture with diagrams
-    ├── references.md        # Papers and systems referenced
-    ├── theoretical_foundations.md  # Geometric framework
-    └── sprint3_diffusion_decoder.md  # Experiment log + expander diagram
-```
+See [`research/architecture.md`](research/architecture.md#project-structure) for the full file map.
 
 ## Key Results
 

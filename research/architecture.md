@@ -219,14 +219,31 @@ The dynamics core is the world model. The I/O layers are interchangeable interfa
 A pet sim TWM and an ATOMIC TWM share the same dynamics architecture — only the
 I/O differs.
 
-## File Map
+## Project Structure
 
 ```
-src/twm/
-├── modules.py          # TripleEncoder, TransformerDynamics, TripleDecoder
-├── model.py            # TripleWorldModel (closed-vocab wrapper)
-├── compressor.py       # TripleCompressor (open-vocab input)
-├── diffusion_decoder.py # DiffusionDecoder (open-vocab output / expander)
-├── diffusion_model.py  # DiffusionWorldModel (open-vocab wrapper)
-└── config.py           # ModelConfig with profiles (base/mini/micro/atomic)
+├── CLAUDE.md
+├── README.md
+├── src/twm/
+│   ├── config.py            # ModelConfig with profiles (base/mini/micro/atomic)
+│   ├── modules.py           # TripleEncoder, TransformerDynamics, TripleDecoder
+│   ├── model.py             # TripleWorldModel (closed-vocab wrapper)
+│   ├── compressor.py        # TripleCompressor (open-vocab input)
+│   ├── diffusion_decoder.py # DiffusionDecoder / expander (open-vocab output)
+│   ├── diffusion_model.py   # DiffusionWorldModel (open-vocab wrapper)
+│   ├── dataset.py           # Triple dataset + collation
+│   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
+│   ├── train.py             # Training loop
+│   ├── eval.py              # Evaluation + attention visualization
+│   ├── serve.py             # Inference server
+│   └── vocab.py             # Vocabulary builder
+├── scripts/                 # Training and plotting scripts
+├── data/                    # Training data (JSONL triple pairs)
+├── demo/pet_simulation/     # Client-side JS inference demo (303 KB)
+├── results/                 # Checkpoints, logs, plots per experiment
+└── research/                # Architecture docs, references, experiment logs
+    ├── architecture.md      # This file
+    ├── references.md        # Papers and systems referenced
+    ├── theoretical_foundations.md  # Geometric framework
+    └── sprint3_diffusion_decoder.md  # Experiment log
 ```
