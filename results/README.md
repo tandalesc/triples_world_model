@@ -14,6 +14,10 @@ results/
   08_context_dependent/      Context-dependent attention test [CANONICAL]
   comparisons/               Cross-model comparisons (LLM, MLP, charts)
   family_benchmark/          Model family scaling experiments (Sprint 2)
+  pet_sim_v2/, pet_sim_v3/   Pet simulator model checkpoints
+  atomic_*/                  ATOMIC 2020 training runs (Sprint 3)
+  t5_*/, t5v2_*/             Tokenizer experiments (Sprint 3)
+  seq2seq_2k_ce/             Seq2seq baseline (Sprint 3)
 ```
 
 Each run directory contains: `config.json`, `train_log.jsonl`, `vocab.json`,
@@ -131,6 +135,54 @@ Trained 7 variants on the combined dataset (1,371 train examples) for 500 epochs
 ### Training Curves
 
 ![Training Curves](family_benchmark/plots/training_curves.png)
+
+---
+
+## Open-Vocabulary / Diffusion Expander (Sprint 3)
+
+Extends TWM to handle free-text values via a compressor/expander architecture,
+tested on ATOMIC 2020 commonsense triples.
+
+### Expander Scaling (ATOMIC 10K, identity mode)
+
+| Denoiser Depth | Exact Match | Token Accuracy | Entity Exact | Params |
+|----------------|:-----------:|:--------------:|:------------:|-------:|
+| 1L, 256d | 55.1% | 80.5% | 62.0% | ~10M |
+| 2L, 256d | 71.1% | 89.4% | 63.3% | ~11M |
+| **3L, 256d** | **81.1%** | **93.4%** | **75.5%** | **~12M** |
+
+### TWM vs. Frontier LLMs on ATOMIC Triple Prediction
+
+5-shot prompted frontier models on the same test set.
+
+| Model | Relation Accuracy | Exact Value Match |
+|-------|:-:|:-:|
+| Claude Opus 4.6 | 4-6/8 | 2/8 |
+| Gemini 3 Pro | 5-7/8 | 0-1/8 |
+| GPT 5.4 Thinking | 6-8/8 | 0-1/8 |
+| **TWM 3L/256d** (ours) | **100% attr** | **81.1% exact** |
+
+### Key Findings
+
+1. **Joint compressor/expander training** was the breakthrough — sentence encoder
+   hit 34% exact match, BPE compressor hit 81%.
+2. **Expander depth scales predictably**: +16% exact match per layer (1L→2L).
+3. **Frozen BPE embeddings required** — trainable embeddings collapse under
+   continuous noise.
+4. **Length head** (256 params) solved variable-length output truncation perfectly.
+
+Full experiment log with 12 problem/solution entries:
+[`../research/sprint3_diffusion_decoder.md`](../research/sprint3_diffusion_decoder.md)
+
+### Result directories
+
+```
+results/
+  atomic_*/                  ATOMIC training runs (2K-10K subsets)
+  seq2seq_2k_ce/             Seq2seq baseline
+  t5_*/                      T5 tokenizer experiments
+  t5v2_*/                    Domain-specific BPE experiments
+```
 
 ---
 
