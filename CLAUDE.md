@@ -2,113 +2,111 @@
 
 ## What This Is
 
-A minimal world model that learns temporal state dynamics over structured triples using a vanilla transformer. The core hypothesis: if you decompose world states into (entity, relation, value) triples and treat each component as a separate token, a small transformer can learn state transition dynamics that generalize compositionally to novel entity-state combinations it never saw in training.
+A minimal world model that learns state dynamics over structured (entity, attribute, value) triples using a vanilla transformer. The core claim: a small transformer over decomposed triple tokens can learn compositional state transformations that generalize to novel entity-state combinations never seen in training — and it needs cross-position attention to do it.
 
-This is a research prototype. The primary question is whether compositional generalization emerges — i.e., is this a world model or just compression.
+Compositional generalization is confirmed. The current focus is extending to open-vocabulary values via a compressor/expander architecture.
 
 ## Architecture
 
+At the center is the **dynamics core** — a transformer that processes triples in latent space. You can use it directly with a fixed token set, or wrap it with a **compressor/expander** for open-vocabulary and other use cases.
+
 ```
-State at time t (set of triples):
-  (glass, state, full), (person, state, thirsty)
-
-Tokenized (3 tokens per triple):
-  [glass] [state] [full] [person] [state] [thirsty]
-  + positional encoding marking triple boundaries
-    (triple_index, role: entity/relation/value)
-
-  → Small transformer encoder (4 layers, 4 heads, 128-dim)
-  → Linear output head (128 → vocab_size) per position
-  → Predicted next-state tokens
-
-Target:
-  [glass] [state] [empty] [person] [state] [satisfied]
-
-Loss: cross-entropy per position
+  Direct (fixed token set)              With I/O wrappers (open-vocab)
+  ────────────────────────              ─────────────────────────────
+  token IDs → Encoder                  BPE text → Compressor
+                  │                                    │
+                  ▼                                    ▼
+             ┌──────────┐                        ┌──────────┐
+             │ Dynamics │                        │ Dynamics │
+             │  (core)  │                        │  (core)  │
+             └────┬─────┘                        └────┬─────┘
+                  │                                    │
+                  ▼                                    ▼
+         Decoder → logits               Expander → BPE text
+                                        (iterative denoising)
 ```
 
-- Learned token embeddings: `nn.Embedding(vocab_size, 128)`
-- Learned positional embeddings encoding (which_triple, which_role)
-- Attention mask handles variable number of triples, padded to max_triples (16)
-- ~3M parameters total, trainable on a single GPU in minutes
+The dynamics core sees the same shaped input either way: `(B, max_triples × 3, d_model)`.
+
+### Terminology
+
+| Term | What It Is | Code |
+|------|-----------|------|
+| **Dynamics** | Transformer core. The world model. | `TransformerDynamics` |
+| **Encoder/Decoder** | Thin wrappers for fixed-vocab I/O | `TripleEncoder`, `TripleDecoder` |
+| **Compressor** | BPE tokens → 256d latent per slot | `TripleCompressor` |
+| **Expander** | 256d latent → BPE tokens via denoising | `DiffusionDecoder` |
+| **Denoiser** | Transformer layers inside the expander | (internal to `DiffusionDecoder`) |
+
+### Mode Conditioning
+
+A mode triple `(#mode, type, advance)` is prepended as a regular triple — no architecture changes. The transformer learns to condition on it. Modes are just training data:
+- `advance`: predict state after transformation
+- `identity`: predict same state (validates reconstruction)
+- Future: `query`, `instruct`, etc.
 
 ## Key Design Decisions
 
-- **Decomposed triples, not sentence embeddings.** Each entity/relation/value is its own token. "full" and "empty" are different tokens, not similar sentences. Compositionality comes from structure, not embedding space geometry.
-- **One advance function.** There is one physics, one set of dynamics. Multiple representational spaces were considered and rejected — the transformer's attention heads can learn whatever factoring is useful.
-- **Set-to-set, not autoregressive.** Input triples have no natural ordering. This is parallel prediction of next-state, not sequential generation. Closer to BERT than GPT.
-- **No pretrained embeddings.** The vocabulary is small enough (likely 40-80 tokens for initial experiments) that learned embeddings from scratch are fine and avoid the semantic-similarity-vs-state-discrimination problem of sentence transformers.
+- **Decomposed triples, not sentence embeddings.** Each entity/attribute/value is its own token. Compositionality comes from structure, not embedding space.
+- **Set-to-set, not autoregressive.** Parallel prediction of all output positions. Closer to BERT than GPT.
+- **Embedding-agnostic.** The dynamics core doesn't prescribe an embedding space. Closed-vocab uses learned embeddings; open-vocab uses BPE compressor/expander.
+- **Input residual.** Most state persists across transformations. The model learns the delta.
 
-## Project Phases
+## Config Profiles
 
-### Phase 1: Handwritten Dataset (CURRENT)
-Build 50-100 state transition pairs by hand across 3-4 domains:
-- Kitchen physics (glass full → glass empty, food raw → food cooked)
-- Weather/environment (sky clear → sky cloudy → sky raining)
-- Social interactions (person lonely + person_b nearby → person social)
-- Simple mechanics (ball high + ball unsupported → ball low)
+| Profile | d_model | Layers | Heads | d_ff | Max Triples |
+|---------|--------:|-------:|------:|-----:|------------:|
+| base | 256 | 4 | 4 | 1024 | 8 |
+| mini | 32 | 2 | 2 | 128 | 8 |
+| micro | 16 | 1 | 2 | 32 | 8 |
+| atomic | 256 | 4 | 4 | 1024 | 12 |
 
-Each example: 2-4 input triples → 2-4 output triples.
+## Project Structure
 
-**Critical:** Hold out ~20 examples that recombine known entities with known states in combinations never seen in training. This is the compositional generalization test.
+```
+├── CLAUDE.md
+├── README.md
+├── src/twm/
+│   ├── config.py            # ModelConfig with profiles
+│   ├── modules.py           # TripleEncoder, TransformerDynamics, TripleDecoder
+│   ├── model.py             # TripleWorldModel (closed-vocab wrapper)
+│   ├── compressor.py        # TripleCompressor (open-vocab input)
+│   ├── diffusion_decoder.py # DiffusionDecoder / expander (open-vocab output)
+│   ├── diffusion_model.py   # DiffusionWorldModel (open-vocab wrapper)
+│   ├── dataset.py           # Triple dataset + collation
+│   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
+│   ├── train.py             # Training loop
+│   ├── eval.py              # Evaluation + attention visualization
+│   ├── serve.py             # Inference server
+│   └── vocab.py             # Vocabulary builder
+├── scripts/                 # Training and plotting scripts
+├── data/                    # Training data (JSONL triple pairs)
+├── demo/pet_simulation/     # Client-side JS inference demo
+└── research/                # Architecture docs, references, experiment logs
+    ├── architecture.md      # Full architecture with diagrams
+    ├── references.md        # Papers and systems referenced
+    ├── theoretical_foundations.md  # Geometric framework
+    └── sprint3_diffusion_decoder.md  # Experiment log + expander diagram
+```
 
-Data format (JSONL):
+## Key Results
+
+- **Compositional generalization**: 0.74 F1 on novel entity-state combos (3-domain benchmark)
+- **Context-dependent reasoning**: 0.978 F1 where output depends on other triples present
+- **Mini matches Base**: 178K params (25x smaller) gets identical context-dep F1
+- **Micro is viable**: 80K params (57x smaller), 0.91 context-dep F1
+- **Pet sim demo**: 29K params, 98.9% exact match, runs client-side in 303 KB JS
+- **Open-vocab**: 81.1% exact match on ATOMIC 10K with compressor/expander (identity mode)
+- **Beats frontier LLMs**: 100% attr accuracy vs 4-8/8 for Claude/Gemini/GPT on ATOMIC
+
+## Data Format
+
 ```json
 {"state_t": [["glass", "state", "full"], ["person", "state", "thirsty"]], "state_t+1": [["glass", "state", "empty"], ["person", "state", "satisfied"]]}
 ```
 
-### Phase 2: Model Implementation
-PyTorch model with:
-- Vocabulary builder: scan dataset, assign IDs to all unique tokens
-- Positional encoding scheme: learned embeddings for (triple_index, role)
-- TransformerEncoder: 4 layers, 4 heads, 128-dim, with padding mask
-- Output head: Linear(128, vocab_size) predicting token logits per position
-- Training loop: AdamW, lr=1e-4, cosine schedule, cross-entropy loss
-
-### Phase 3: Evaluation
-Three-tier eval:
-1. **Memorization** — accuracy on training set (should be ~100% after overfitting)
-2. **Compositional generalization** — accuracy on held-out novel combinations of seen entities/states. THIS IS THE ONLY TEST THAT MATTERS.
-3. **Copy baseline** — predict state_t+1 = state_t. Must beat this to demonstrate the model learns transitions, not just persistence.
-
-Report per-position accuracy and full-triple accuracy (all 3 components correct).
-Visualize attention patterns to see if the model learns causal structure (which input triples drive which output changes).
-
-### Phase 4 (Future): Scale Up
-- LLM-generated training data (triple extraction from temporal corpora)
-- Larger vocabularies, more domains
-- Variable output length (predict different number of triples than input via stop token)
-- Multi-step prediction (advance multiple times, check for drift)
-- Comparison against serialized-text baseline (same data, GPT-2 fine-tuned on text versions of the transitions)
-
-## File Structure
-```
-twm/
-├── CLAUDE.md          # this file
-├── data/
-│   ├── train.jsonl    # handwritten training pairs
-│   ├── test_comp.jsonl # held-out compositional generalization test
-│   └── test_seen.jsonl # held-out seen-combination test
-├── src/
-│   ├── vocab.py       # vocabulary builder from dataset
-│   ├── dataset.py     # PyTorch dataset + collation with padding
-│   ├── model.py       # TripleWorldModel
-│   ├── train.py       # training loop
-│   └── eval.py        # evaluation + attention visualization
-└── results/
-    └── ...
-```
+Test splits: `test_comp` (novel combos), `test_seen` (seen combos), `test_context` (cross-entity).
 
 ## Hardware
-Dual RTX 3090 homelab, but this model is so small a single GPU is overkill. CPU training might even be fine for Phase 1.
 
-## Context
-This emerged from exploring JEPA-style world models, MoE expert specialization, and temporal knowledge graph forecasting. The insight was reductive: strip away every architectural novelty until you're left with the minimal testable claim. That claim is: a vanilla transformer over decomposed triple tokens can learn compositional state dynamics. Everything else (scale, data pipelines, multi-step prediction, real-world applications) depends on whether that claim holds.
-
-Related but distinct from existing work:
-- Temporal KG forecasting (RE-NET, TiRGN, TANGO): uses GNNs over discrete entity IDs with fixed vocabularies
-- KG embeddings (TransE, RotatE): static scoring, not temporal dynamics
-- JEPA: operates in continuous latent space, not structured tokens
-- Standard LLMs: learn dynamics implicitly but without compositional token structure
-
-The gap this tests: vanilla transformer + decomposed triple tokens + temporal prediction. Simple enough to implement in an afternoon, novel enough that the result is interesting either way.
+Dual RTX 3090. Models are small enough that CPU training works for closed-vocab experiments.
