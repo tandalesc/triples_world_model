@@ -219,14 +219,56 @@ The dynamics core is the world model. The I/O layers are interchangeable interfa
 A pet sim TWM and an ATOMIC TWM share the same dynamics architecture — only the
 I/O differs.
 
-## File Map
+## Project Structure
 
 ```
 src/twm/
-├── modules.py          # TripleEncoder, TransformerDynamics, TripleDecoder
-├── model.py            # TripleWorldModel (closed-vocab wrapper)
-├── compressor.py       # TripleCompressor (open-vocab input)
-├── diffusion_decoder.py # DiffusionDecoder (open-vocab output / expander)
-├── diffusion_model.py  # DiffusionWorldModel (open-vocab wrapper)
-└── config.py           # ModelConfig with profiles (base/mini/micro/atomic)
+  config.py            Model config profiles (base, mini, micro, atomic)
+  model.py             Transformer world model (TripleWorldModel)
+  modules.py           Encoder, dynamics, decoder components
+  dataset.py           Triple transition dataset + collation
+  vocab.py             Token vocabulary builder (shared + role-split)
+  train.py             Training loop with eval, QAT support
+  metrics.py           Set-based F1, exact match, delta metrics
+  serve.py             Inference wrapper (WorldModel)
+  losses.py            Loss functions (CE, diffusion)
+  mlp_baseline.py      MLP baseline (no cross-position attention)
+  llm_bridge.py        LLM<->TWM bridge for structured reasoning
+  compressor.py        BPE compressor (open-vocab input)
+  diffusion_decoder.py Expander / denoiser (open-vocab output)
+  diffusion_model.py   Combined compressor + expander pipeline
+
+scripts/
+  generate_pet_sim.py         Pet simulator training data generator
+  benchmark_family.py         Train + eval all model variants
+  benchmark_llm.py            LLM benchmark with few-shot + semantic eval
+  train_v15_fresh.py          Compressor/expander identity training
+  convert_atomic.py           ATOMIC 2020 -> TWM triple format
+  build_pretrained_embeds.py  GloVe embedding initialization
+  run_mlp_baseline.py         Train + compare MLP vs transformer
+  inference_tool.py           Train-if-missing + inference CLI
+
+demo/
+  pet_simulation/             Browser-based pet simulator
+    index.html                Full app (TWM inference in pure JS)
+    export_weights.py         PyTorch -> JSON weight exporter
+    model_weights.json        Exported weights (~303 KB)
+
+data/
+  combined/                   Merged 3-domain dataset (1,371 train, 111 test)
+  pet_sim/                    Pet simulator dataset (11K train, 2.9K test)
+  atomic_*/                   ATOMIC 2020 subsets (2K-10K)
+
+results/
+  01-08_*/                    Numbered experiment runs with NOTES.md
+  family_benchmark/           Model family scaling experiments
+  pet_sim_v2/, pet_sim_v3/    Pet simulator model checkpoints
+  comparisons/                Cross-model comparison charts
+  README.md                   Full results summary and progression
+
+research/
+  architecture.md             This file
+  references.md               Papers and systems referenced
+  theoretical_foundations.md   Geometric framework
+  sprint3_diffusion_decoder.md Experiment log
 ```

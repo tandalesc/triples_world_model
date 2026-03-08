@@ -81,12 +81,13 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 │   └── vocab.py             # Vocabulary builder
 ├── scripts/                 # Training and plotting scripts
 ├── data/                    # Training data (JSONL triple pairs)
-├── demo/pet_simulation/     # Client-side JS inference demo
+├── demo/pet_simulation/     # Client-side JS inference demo (303 KB)
+├── results/                 # Checkpoints, logs, plots per experiment
 └── research/                # Architecture docs, references, experiment logs
     ├── architecture.md      # Full architecture with diagrams
     ├── references.md        # Papers and systems referenced
     ├── theoretical_foundations.md  # Geometric framework
-    └── sprint3_diffusion_decoder.md  # Experiment log + expander diagram
+    └── sprint3_diffusion_decoder.md  # Experiment log
 ```
 
 ## Key Results
