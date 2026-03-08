@@ -150,7 +150,15 @@
         <div class="sub">Every state change predicted by a <span id="param-count">~35K-param</span> transformer. No game logic. Just learned dynamics.</div></header>
     <div class="top-bar">
         <button class="top-btn" onclick="resetGame()">RESET</button>
-        <button class="top-btn" id="decay-btn" onclick="toggleDecay()">AUTO-DECAY: OFF</button>
+        <label class="top-btn" style="cursor:default">AUTO-DECAY:
+            <select id="decay-sel" onchange="setDecay(this.value)" style="margin-left:4px;background:#222;color:#eee;border:1px solid #555;border-radius:3px;padding:1px 4px;font-size:11px;">
+                <option value="0">OFF</option>
+                <option value="15">15s</option>
+                <option value="30" selected>30s</option>
+                <option value="60">60s</option>
+                <option value="120">2m</option>
+            </select>
+        </label>
     </div>
     <div class="pets-grid" id="pets-grid"></div>
     <div class="interactions hidden" id="interact-sec">
@@ -345,8 +353,8 @@ const ACT_ANIM = {
            cuddle:{s:'SITTING',r:1}, compete:{s:'RUNNING',r:0} },
 };
 const IDLE_ANIM = {
-    dog: { ecstatic:{s:'STANDING',r:1}, happy:{s:'STANDING',r:0}, content:{s:'SNIFFING',r:0}, sad:{s:'LAYING',r:1} },
-    cat: { ecstatic:{s:'STANDING',r:0}, happy:{s:'STANDING',r:0}, content:{s:'OBSERVING',r:0}, sad:{s:'SLEEPING',r:0} },
+    dog: { ecstatic:{s:'PLAYFUL',r:0}, happy:{s:'STANDING',r:0}, content:{s:'SNIFFING',r:0}, sad:{s:'LAYING',r:1} },
+    cat: { ecstatic:{s:'RUNNING',r:0}, happy:{s:'STANDING',r:0}, content:{s:'OBSERVING',r:0}, sad:{s:'SLEEPING',r:0} },
 };
 
 // Sprite sheet image cache: spriteImgs[pet][sheetName] = Image
@@ -379,7 +387,6 @@ function preloadSprites() {
 let activePets = [];
 let gameState = {};
 let busy = false;
-let decayOn = false;
 let decayInterval = null;
 
 function freshState() {
@@ -457,16 +464,14 @@ function removePet(pet) {
     rebuildUI();
 }
 
-function toggleDecay() {
-    decayOn = !decayOn;
-    const b = document.getElementById('decay-btn');
-    b.textContent = 'AUTO-DECAY: ' + (decayOn ? 'ON' : 'OFF');
-    b.classList.toggle('active', decayOn);
-    if (decayOn) {
+function setDecay(secs) {
+    if (decayInterval) { clearInterval(decayInterval); decayInterval = null; }
+    const ms = parseInt(secs) * 1000;
+    if (ms > 0) {
         decayInterval = setInterval(() => {
             if (!busy && activePets.length > 0) doAction(activePets[Math.floor(Math.random()*activePets.length)], 'ignore');
-        }, 12000);
-    } else { clearInterval(decayInterval); decayInterval = null; }
+        }, ms);
+    }
 }
 
 // ============================================================
@@ -698,6 +703,7 @@ async function init() {
         activePets = ['Buddy'];
         gameState = {}; for (const p of ALL_PETS) gameState[p] = freshState();
         rebuildUI();
+        setDecay(document.getElementById('decay-sel').value);
 
         document.getElementById('loading').classList.add('hidden');
         document.getElementById('app').classList.add('visible');
