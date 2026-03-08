@@ -82,23 +82,33 @@ Try it: `cd demo/pet_simulation && python -m http.server 8080`
 ## How It Works
 
 ```
-State at time t (set of triples):
-  (glass, state, full), (alice, state, thirsty), (bob, state, resting)
+Input: mode triple + current state + action
 
-Tokenized (3 tokens per triple, sorted alphabetically):
-  [alice] [state] [thirsty] [bob] [state] [resting] [glass] [state] [full]
+  (#mode, type, advance)                    <- mode conditioning
+  (Buddy, hunger, hungry)                   <- state triples
+  (Buddy, energy, rested)
+  (Buddy, mood, content)
+  (Buddy, action, feed)                     <- action triple
+
+Tokenized (3 tokens per triple):
+  [#mode] [type] [advance] [Buddy] [hunger] [hungry] ...
   + positional encoding: (triple_index, role: entity/attr/value)
 
-  -> Transformer encoder (4 layers, 4 heads, 256-dim)
-  -> Linear head per position -> predicted next-state tokens
+  -> Transformer encoder (2 layers, 2 heads, 32-dim for Mini)
+  -> Linear head per position -> predicted output tokens
 
-Predicted next state:
-  (glass, state, empty), (alice, state, satisfied), (bob, state, resting)
+Output: predicted next state
+
+  (Buddy, hunger, full)                     <- hunger improved
+  (Buddy, energy, rested)                   <- unchanged
+  (Buddy, mood, content)                    <- unchanged
 ```
 
-- Set-to-set prediction (not autoregressive) — triples have no natural order
-- Input residual: most of the world persists, model only learns the delta
-- Padding mask for variable-length triple sets (up to 8 triples)
+- **Mode conditioning**: `(#mode, type, advance)` is a regular triple prepended to
+  input — no architectural changes needed, the transformer learns to use it as context
+- **Set-to-set prediction** (not autoregressive) — triples have no natural order
+- **Input residual**: most of the world persists, model only learns the delta
+- **Padding mask** for variable-length triple sets (up to 16 triples)
 - Base uses GloVe 300d pretrained embeddings; Mini/Micro use learned embeddings
 
 ## Quick Start
@@ -121,7 +131,7 @@ uv run python -m twm.train \
 uv run python -m twm.train \
   --data-dir data/combined \
   --out-dir results/my_mini_run \
-  --d-model 32 --n-heads 2 --n-layers 2 --d-ff 128 \
+  --config mini \
   --epochs 500
 
 # Train the micro model (embedded / edge deployment)
@@ -140,11 +150,12 @@ uv run python -m twm.metrics \
 
 ### Config profiles
 
-| Profile | d_model | Layers | Heads | d_ff | Target |
-|---------|--------:|-------:|------:|-----:|--------|
-| `base` | 256 | 4 | 4 | 1024 | GPU training/inference |
-| `mini` | 32 | 2 | 2 | 128 | Browser / mobile deployment |
-| `micro` | 16 | 1 | 2 | 32 | ESP32 / edge deployment |
+| Profile | d_model | Layers | Heads | d_ff | Max Triples | Target |
+|---------|--------:|-------:|------:|-----:|------------:|--------|
+| `base` | 256 | 4 | 4 | 1024 | 8 | GPU training/inference |
+| `mini` | 32 | 2 | 2 | 128 | 8 | Browser / mobile deployment |
+| `micro` | 16 | 1 | 2 | 32 | 8 | ESP32 / edge deployment |
+| `atomic` | 256 | 4 | 4 | 1024 | 12 | ATOMIC 2020 (open-vocab) |
 
 Additional flags:
 - `--split-embeddings` — separate entity/attr/value embedding tables
