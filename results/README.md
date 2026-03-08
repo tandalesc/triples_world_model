@@ -77,7 +77,7 @@ TWM wins 15/30 examples the MLP gets wrong. MLP wins 0.
 ## Model Family Benchmark (Sprint 2)
 
 Scaling experiment: can TWM's attention advantage survive aggressive compression?
-Trained 6 variants on the combined dataset (1,371 train examples) for 500 epochs.
+Trained 7 variants on the combined dataset (1,371 train examples) for 500 epochs.
 
 ### Variants
 
@@ -85,6 +85,7 @@ Trained 6 variants on the combined dataset (1,371 train examples) for 500 epochs
 |-------|--------:|-------:|------:|-------:|-----------:|
 | Base (GloVe) | 256 | 4 | 4 | 4.5M | 17.3 MB |
 | Base Split | 256 | 4 | 4 | 4.5M | 17.0 MB |
+| Mini | 32 | 2 | 2 | 178K | 695 KB |
 | Micro | 16 | 1 | 2 | 80K | 311 KB |
 | Micro Split | 16 | 1 | 2 | 85K | 334 KB |
 | Micro Split+QAT | 16 | 1 | 2 | 85K | 334 KB |
@@ -99,21 +100,24 @@ Trained 6 variants on the combined dataset (1,371 train examples) for 500 epochs
 |-------|:---:|:---:|:---:|:---:|
 | Base (GloVe) | 0.748 | 0.778 | 0.978 | 1.000 |
 | Base Split | 0.745 | 0.760 | **0.989** | 1.000 |
-| Micro | **0.671** | 0.640 | **0.911** | 0.953 |
+| **Mini** | **0.714** | **0.777** | **0.978** | **0.999** |
+| Micro | 0.671 | 0.640 | 0.911 | 0.953 |
 | Micro Split | 0.633 | 0.668 | 0.822 | 0.955 |
 | Micro Split+QAT | 0.629 | 0.712 | 0.844 | 0.955 |
 | Micro QAT (shared) | 0.632 | 0.706 | 0.893 | 0.952 |
 
 ### Key Findings
 
-1. **Micro is viable.** 80K params (57x smaller than base) retains 0.91
+1. **Mini matches Base on context-dependent reasoning.** 178K params (25x
+   smaller) achieves identical 0.978 context F1. The sweet spot for deployment.
+2. **Micro is viable.** 80K params (57x smaller than base) retains 0.91
    context-dependent F1 — the attention mechanism works at 16d/2-head.
-2. **Split embeddings hurt at micro scale.** At 16d there aren't enough
+3. **Split embeddings hurt at micro scale.** At 16d there aren't enough
    dimensions for separate tables to learn useful representations. Split helps
    base (0.989 vs 0.978 context) but hurts micro (0.822 vs 0.911 context).
-3. **QAT is essentially free.** Micro QAT shared: 0.893 context F1 vs 0.911
+4. **QAT is essentially free.** Micro QAT shared: 0.893 context F1 vs 0.911
    plain — minimal degradation from simulated int8 quantization noise.
-4. **ESP32 target met.** With a domain-specific vocab (~50 tokens), micro
+5. **ESP32 target met.** With a domain-specific vocab (~50 tokens), micro
    achieves ~4.4K params / ~5 KB at int8. Attention advantage preserved.
 
 ### Final F1 Comparison

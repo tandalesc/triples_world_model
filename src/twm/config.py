@@ -14,6 +14,14 @@ PROFILES: dict[str, dict] = {
         "max_triples": 8,
         "dropout": 0.1,
     },
+    "mini": {
+        "d_model": 32,
+        "n_heads": 2,
+        "n_layers": 2,
+        "d_ff": 128,
+        "max_triples": 8,
+        "dropout": 0.1,
+    },
     "micro": {
         "d_model": 16,
         "n_heads": 2,

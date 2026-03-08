@@ -16,6 +16,7 @@ matplotlib.use("Agg")
 VARIANTS = {
     "twm_base": {"label": "Base (256d, GloVe)", "color": "#2196F3", "ls": "-"},
     "twm_base_split": {"label": "Base Split", "color": "#1565C0", "ls": "--"},
+    "twm_mini": {"label": "Mini (32d)", "color": "#E91E63", "ls": "-"},
     "twm_micro": {"label": "Micro (16d)", "color": "#FF9800", "ls": "-"},
     "twm_micro_split": {"label": "Micro Split", "color": "#E65100", "ls": "--"},
     "twm_micro_split_qat": {"label": "Micro Split+QAT", "color": "#9C27B0", "ls": ":"},
@@ -81,7 +82,7 @@ def plot_final_comparison(results_dir: Path, out_path: Path):
     fig, ax = plt.subplots(figsize=(14, 7))
     ax.set_title("TWM Model Family — Final F1 Comparison", fontsize=14, fontweight="bold")
 
-    bar_width = 0.15
+    bar_width = 0.12
     x_positions = list(range(len(SPLITS)))
 
     variant_names = []
@@ -162,8 +163,9 @@ def plot_efficiency(results_dir: Path, out_path: Path):
             points.append((params, f1, variant_name, style))
 
         # Sort by f1 within each param cluster for label offset stacking
-        micro_pts = sorted([p for p in points if p[0] < 200_000], key=lambda p: -p[1])
-        base_pts = sorted([p for p in points if p[0] >= 200_000], key=lambda p: -p[1])
+        micro_pts = sorted([p for p in points if p[0] < 100_000], key=lambda p: -p[1])
+        mid_pts = sorted([p for p in points if 100_000 <= p[0] < 500_000], key=lambda p: -p[1])
+        base_pts = sorted([p for p in points if p[0] >= 500_000], key=lambda p: -p[1])
 
         # Assign vertical offsets to avoid overlap within clusters
         def plot_cluster(cluster, base_offset_x, offsets_y):
@@ -180,6 +182,8 @@ def plot_efficiency(results_dir: Path, out_path: Path):
 
         # Micro cluster: spread labels to the right, stacked vertically
         plot_cluster(micro_pts, 12, [28, 14, 0, -14, -28, -42])
+        # Mini cluster: labels above
+        plot_cluster(mid_pts, 12, [18, -18])
         # Base cluster: spread labels to the left
         plot_cluster(base_pts, -12, [18, -18])
 
