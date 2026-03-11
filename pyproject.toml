@@ -11,6 +11,8 @@ dependencies = [
     "gensim>=4.4.0",
     "requests>=2.32.5",
     "sentence-transformers>=3.0",
+    "pandas>=3.0.1",
+    "pyarrow>=23.0.1",
 ]
 
 [build-system]

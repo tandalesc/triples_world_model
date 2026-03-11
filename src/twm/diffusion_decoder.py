@@ -117,8 +117,13 @@ class AdaLNZeroLayer(nn.Module):
     """Transformer layer with adaLN-Zero conditioning (DiT-style).
 
     Replaces standard LayerNorm with adaptive normalization where gamma/beta
-    come from a conditioning projection. Output gates (alpha) are zero-initialized
+    come from conditioning projections. Output gates (alpha) are zero-initialized
     so the layer starts as identity.
+
+    Supports multiple independent context signals — each gets its own projection
+    to gamma/beta/alpha, and the results are summed. This keeps signals like
+    timestep, conditioning, and position in separate channels so the network
+    doesn't have to disentangle an additive mixture.
 
     Supports optional cross-attention to projected memory tokens.
     """
@@ -127,7 +132,8 @@ class AdaLNZeroLayer(nn.Module):
         self,
         d_model: int,
         n_heads: int,
-        context_dim: int,
+        context_dim: int | None = None,
+        context_dims: list[int] | None = None,
         d_ff: int | None = None,
         dropout: float = 0.1,
         use_cross_attention: bool = True,
@@ -160,36 +166,60 @@ class AdaLNZeroLayer(nn.Module):
         )
         self.norm3 = nn.LayerNorm(d_model, elementwise_affine=False)
 
-        # adaLN projection: context -> (gamma, beta, gate) for each sub-layer
+        # adaLN projections: each context signal gets independent projection
+        # to (gamma, beta, gate) for each sub-layer.
         # With cross-attention: 3 sub-layers x 3 params = 9 outputs
         # Without: 2 sub-layers x 3 params = 6 outputs
-        n_params = 9 if use_cross_attention else 6
-        self.adaln_proj = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(context_dim, d_model * n_params),
-        )
-        # Zero-initialize so layer starts as identity
-        nn.init.zeros_(self.adaln_proj[-1].weight)
-        nn.init.zeros_(self.adaln_proj[-1].bias)
+        self._n_adaln_params = 9 if use_cross_attention else 6
+
+        # Resolve context_dim vs context_dims (backward compatible)
+        if context_dims is not None:
+            self._context_dims = context_dims
+        elif context_dim is not None:
+            self._context_dims = [context_dim]
+        else:
+            raise ValueError("Must provide context_dim or context_dims")
+
+        self.adaln_projs = nn.ModuleList()
+        for cdim in self._context_dims:
+            proj = nn.Sequential(
+                nn.SiLU(),
+                nn.Linear(cdim, d_model * self._n_adaln_params),
+            )
+            # Zero-initialize so layer starts as identity
+            nn.init.zeros_(proj[-1].weight)
+            nn.init.zeros_(proj[-1].bias)
+            self.adaln_projs.append(proj)
 
         self.d_model = d_model
 
     def forward(
         self,
         x: torch.Tensor,
-        context: torch.Tensor,
+        context: torch.Tensor | list[torch.Tensor],
         memory: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
             x: (B, T, d_model) token representations
-            context: (B, T, context_dim) per-position conditioning
+            context: (B, T, context_dim) single context, or list of
+                     (B, T, dim_i) tensors — one per independent signal
             memory: (B, K, d_model) cross-attention keys/values (optional)
         """
         B, T, D = x.shape
 
-        # Get per-position adaLN parameters
-        params = self.adaln_proj(context)  # (B, T, d_model * n_params)
+        # Compute adaLN parameters from each context signal independently
+        if isinstance(context, list):
+            contexts = context
+        else:
+            contexts = [context]
+
+        # Sum params from all signals
+        params = None
+        for ctx, proj in zip(contexts, self.adaln_projs):
+            p = proj(ctx)  # (B, T, d_model * n_params)
+            params = p if params is None else params + p
+
         if self.use_cross_attention:
             params = params.view(B, T, 9, D)
             gamma1, beta1, alpha1 = params[:, :, 0], params[:, :, 1], params[:, :, 2]
@@ -199,8 +229,6 @@ class AdaLNZeroLayer(nn.Module):
             params = params.view(B, T, 6, D)
             gamma1, beta1, alpha1 = params[:, :, 0], params[:, :, 1], params[:, :, 2]
             gamma3, beta3, alpha3 = params[:, :, 3], params[:, :, 4], params[:, :, 5]
-
-        # gamma/beta/alpha are (B, T, D) — already per-position
 
         # Self-attention with adaLN-Zero
         x_norm = self.norm1(x) * (1 + gamma1) + beta1
