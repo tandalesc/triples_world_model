@@ -6,26 +6,19 @@
     "text_compressor_layers": 3,
     "text_expander_layers": 3,
     "max_text_tokens": 64,
-    "dropout": 0.1,
-    "alpha_min": 0.01,
     "data_dir": "data/webnlg_multi",
     "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
-    "out_dir": "results/v19_mini64",
+    "out_dir": "results/v18_mini64",
     "batch_size": 64,
-    "denoise_steps": 10,
-    "aux_ce_weight": 0.1,
     "length_weight": 0.25,
-    "log_every": 10,
-    "diagnostic_every": 50,
     "stages": [
         {
             "name": "io",
             "dataset": "identity",
             "lr": 3e-4,
-            "max_examples": 15000,
             "phases": [
-                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 50},
-                {"t_min": 0.0, "t_max": 1.0, "bias_power": 1.0, "epochs": 800, "patience": 100}
+                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 0},
+                {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 100}
             ]
         },
         {
@@ -33,11 +26,9 @@
             "dataset": "qa",
             "freeze": ["compressor", "expander"],
             "lr": 3e-4,
-            "max_examples": 30000,
             "phases": [
                 {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 100}
             ]
         }
-    ],
-    "device": "cuda:1"
+    ]
 }
