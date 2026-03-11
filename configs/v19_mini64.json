@@ -24,8 +24,9 @@
             "lr": 3e-4,
             "max_examples": 15000,
             "phases": [
-                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 50},
-                {"t_min": 0.0, "t_max": 1.0, "bias_power": 1.0, "epochs": 800, "patience": 100}
+                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 100},
+                {"t_min": 0.4, "t_max": 1.0, "epochs": 400, "patience": 100, "metric": "exact"},
+                {"t_min": 0.0, "t_max": 1.0, "epochs": 800, "patience": 150, "metric": "exact"}
             ]
         },
         {
@@ -35,7 +36,7 @@
             "lr": 3e-4,
             "max_examples": 30000,
             "phases": [
-                {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 100}
+                {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 150}
             ]
         }
     ],
