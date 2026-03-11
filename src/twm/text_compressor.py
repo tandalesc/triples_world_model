@@ -62,12 +62,17 @@ class TextCompressor(nn.Module):
             d_model, n_heads, batch_first=True, dropout=dropout,
         )
 
+        # LayerNorm after cross-attention extraction
+        self.cross_ln = nn.LayerNorm(d_model)
+
         # Query self-attention: slots coordinate after extraction to avoid
         # redundancy (two entity queries attending to the same text region)
         # and ensure coverage (some text going unattended)
         self.query_self_attn = nn.MultiheadAttention(
             d_model, n_heads, batch_first=True, dropout=dropout,
         )
+        self.query_self_ln = nn.LayerNorm(d_model)
+
         self.query_ffn = nn.Sequential(
             nn.Linear(d_model, d_model * 4),
             nn.GELU(),
@@ -75,6 +80,7 @@ class TextCompressor(nn.Module):
             nn.Linear(d_model * 4, d_model),
             nn.Dropout(dropout),
         )
+        self.query_ffn_ln = nn.LayerNorm(d_model)
 
         # Role and triple position encoding for extraction queries
         self.role_emb = nn.Embedding(3, d_model)
@@ -127,14 +133,13 @@ class TextCompressor(nn.Module):
             value=x,
             key_padding_mask=text_pad_mask,
         )
+        extracted = self.cross_ln(extracted)
 
         # Query self-attention: slots coordinate to reduce redundancy
-        # and improve coverage. No internal LayerNorms — preserves magnitude
-        # information from extraction (strong vs weak matches). Only out_ln
-        # at the interface boundary normalizes for downstream consumers.
+        # and improve coverage.
         sa_out, _ = self.query_self_attn(extracted, extracted, extracted)
-        extracted = extracted + sa_out
-        extracted = extracted + self.query_ffn(extracted)
+        extracted = self.query_self_ln(extracted + sa_out)
+        extracted = self.query_ffn_ln(extracted + self.query_ffn(extracted))
 
         # Pad to max_triples * 3 if n_triples < max_triples
         if n_triples < self.max_triples:

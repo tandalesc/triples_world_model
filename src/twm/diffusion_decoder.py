@@ -181,14 +181,18 @@ class AdaLNZeroLayer(nn.Module):
             raise ValueError("Must provide context_dim or context_dims")
 
         self.adaln_projs = nn.ModuleList()
-        for cdim in self._context_dims:
+        for i, cdim in enumerate(self._context_dims):
             proj = nn.Sequential(
                 nn.SiLU(),
                 nn.Linear(cdim, d_model * self._n_adaln_params),
             )
-            # Zero-initialize so layer starts as identity
-            nn.init.zeros_(proj[-1].weight)
-            nn.init.zeros_(proj[-1].bias)
+            # First projection (conditioning) keeps default init — active from
+            # epoch 1, matching v18's single-projection behavior. Remaining
+            # projections (timestep, position) start at zero and activate as
+            # their gradients become useful.
+            if i > 0:
+                nn.init.zeros_(proj[-1].weight)
+                nn.init.zeros_(proj[-1].bias)
             self.adaln_projs.append(proj)
 
         self.d_model = d_model
