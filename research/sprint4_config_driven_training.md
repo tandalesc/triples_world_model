@@ -162,6 +162,38 @@ The local operators are not simple contractions or random noise — they show he
 
 In the pet sim, the dynamics core learned one main next-state prediction function, with pet identity acting mostly as a conditioning signal that slightly changes the shape of the flow rather than selecting entirely different dynamics. This is consistent with the architecture's design: decomposed triples let the transformer share structure across entities, and the input residual means the dynamics only needs to learn the delta.
 
+## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
+
+To sanity-check whether Mini is merely a larger Micro or actually learns a different latent organization, I ran a focused mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) and compared both families with the same analysis tooling.
+
+### Snapshot results
+
+- Micro (`results/cedric_mode_probe_v2_micro`): comp/context F1 ~0.91 with notably lower exact-match on hard splits.
+- Mini (`results/cedric_mode_probe_v2_mini`): 1.00 across F1/exact on current v2 splits.
+
+### Geometry interpretation
+
+- Micro shows stronger mode overlap/entanglement in post-dynamics latent projections.
+- Mini shows clearer regime organization and cleaner mode-conditioned transport.
+- Mode delta vector analysis (`mode_delta_vectors.png` + `mode_delta_stats.json`) indicates Mini operators are more coherent across states.
+
+### Exhaustive CPU sweep
+
+Enumerating the v2 state lattice is feasible on CPU for this scale. In exhaustive plots:
+
+- `results/cedric_mode_probe_v2_mini/analysis_exhaustive/pre_by_task.png`
+- `results/cedric_mode_probe_v2_mini/analysis_exhaustive/post_by_mode.png`
+
+PRE space exhibits clear task gradients; POST space shows substantial mode-dependent reshaping.
+
+### Transition-graph caveat
+
+A full graph including `user` did not close because predicted next states omit `user` in this setup. Reduced-state graph analysis over `(task, energy, focus, calendar, urgency, mode)` produced sparse connectivity with many local fixed regions (908 self-loops over 1620 states).
+
+### Recommendation
+
+Use Mini as the default policy-reasoning core for mode-conditioned assistant behavior; keep Micro as a footprint-first fallback.
+
 ## Current Config
 
 ```json
