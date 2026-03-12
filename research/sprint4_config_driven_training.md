@@ -191,6 +191,20 @@ Quantitatively (cosine similarity between mode delta vectors): Mini's inter-mode
 
 Micro's post-dynamics space is a mode-entangled soup — all four modes occupy the same region with heavy overlap. Mini shows clearer spatial separation, particularly for identity (blue) which maintains distinct positioning from the transformation modes.
 
+### Exhaustive Pre/Post Latent Sweep (Mini)
+
+To verify that the sampled probe visuals were not cherry-picked, I also projected an exhaustive lattice sweep on CPU for Mini.
+
+| PRE latent (task) | POST latent (mode) |
+|:-----------------:|:------------------:|
+| ![Exhaustive pre](../results/cedric_mode_probe_v2_mini/analysis_exhaustive/pre_by_task.png) | ![Exhaustive post](../results/cedric_mode_probe_v2_mini/analysis_exhaustive/post_by_mode.png) |
+
+The same pattern holds at lattice scale:
+- PRE encodings carry broad task gradients.
+- POST geometry is materially reshaped by mode-conditioned dynamics.
+
+This corroborates the micro-vs-mini probe: Mini's organization is a real geometric effect, not sampling noise.
+
 ### Takeaway
 
 Mini doesn't just have more capacity — it learns a qualitatively different latent organization. The dynamics core develops clean, mode-conditioned transport operators rather than an entangled approximation. Recommendation: use Mini as the default for mode-conditioned reasoning; keep Micro as footprint-first fallback.
