@@ -279,7 +279,8 @@ Once the bottleneck has real dimensionality from the VAE prior, these two comple
 - **Partial freeze relaxation**: unfreeze last compressor layer during dynamics. Superseded by the VAE approach which fixes geometry at the source.
 - **Scale up warmup modes**: 4-6 modes instead of 2. Useful for mode-reading but secondary to the structural fix.
 
-## Current Config
+<details>
+<summary>Current Config</summary>
 
 ```json
 {
@@ -336,3 +337,4 @@ Once the bottleneck has real dimensionality from the VAE prior, these two comple
     ]
 }
 ```
+</details>
