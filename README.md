@@ -91,9 +91,9 @@ Try it: `cd demo/pet_simulation && python -m http.server 8080`
 
 #### What the dynamics core actually learns
 
-![Dynamics latent space](research/sprint4_figures/latent_space.png)
+![Dynamics analysis](research/sprint4_figures/dynamics_analysis.png)
 
-Geometry analysis of the pet sim latent space (3,780 states, PCA to 3D) reveals the dynamics core learned a single shared next-state function — pet identity acts as a conditioning signal that adjusts the flow, not a selector for entirely different dynamics. The Jacobian eigenspectrum confirms nontrivial structure: a mix of expansive and contractive directions (mean |λ| ≈ 1.0), not simple contraction or noise. More graphs are included in sprint logs [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
+Geometry analysis of the pet sim dynamics core (28K params, 3,780 enumerated states). **Left**: 3D latent space (PCA, 68% variance) — per-pet clusters with pre→post flow lines show the core learned a shared next-state function with pet identity as a conditioning signal. **Center**: flow field (PC1 vs PC2) — displacement arrows show a dominant global transport direction with pet-specific offsets. **Right**: Jacobian eigenspectrum at a representative state — 305 expansive and 451 contractive directions (mean |λ| = 1.0), confirming nontrivial learned dynamics, not simple contraction or noise.
 
 See [analysis tools](#dynamics-analysis) below for notes on creating your own graphs from your TWMs.
 

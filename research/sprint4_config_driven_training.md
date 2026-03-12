@@ -35,23 +35,28 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 
 ## Bug Fixes & Findings
 
-### 1. adaLN Initialization Symmetry Breaking
+<details>
+<summary>1. adaLN Initialization Symmetry Breaking</summary>
 
 **Problem:** v19's factored adaLN has 3 projections (conditioning, timestep, position). All three were zero-initialized, creating a symmetry-breaking problem — the denoiser started with zero modulation from all sources, couldn't distinguish conditioning signal from noise.
 
 **Fix:** Warm-start the conditioning projection (index 0) with default Kaiming init. Timestep and position projections stay zero-init. The model starts in v18's single-projection optimization landscape and grows into v19's factored design.
 
 **File:** `src/twm/diffusion_decoder.py` — `AdaLNZeroLayer.__init__`
+</details>
 
-### 2. Compressor LayerNorms
+<details>
+<summary>2. Compressor LayerNorms</summary>
 
 **Problem:** Internal LayerNorms (`cross_ln`, `query_self_ln`, `query_ffn_ln`) were removed in v19 refactor. Without them, bottleneck vectors had inconsistent magnitudes, and the expander couldn't learn a stable mapping.
 
 **Fix:** Restored all three LayerNorms in the extraction pipeline.
 
 **File:** `src/twm/text_compressor.py`
+</details>
 
-### 3. Tokenizer Missing `?`
+<details>
+<summary>3. Tokenizer Missing `?`</summary>
 
 **Problem:** The BPE tokenizer was trained on declarative WebNLG sentences only. Questions (generated later by `generate_qa_dataset.py`) use `?`, which encoded as `<unk>` (id=2, zero embedding). 33.6% of identity_test examples had trailing `<unk>` — impossible to reconstruct.
 
@@ -65,16 +70,20 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 **Fix:** Added `initial_alphabet` to `BpeTrainer` in `prepare_webnlg_multimodal.py` ensuring `?` and other common punctuation always get vocab entries. Retrained tokenizer, regenerated all data. Result: 0/9614 test examples contain `<unk>`.
 
 **Files:** `scripts/prepare_webnlg_multimodal.py`, all data in `data/webnlg_multi/`
+</details>
 
-### 4. Stochastic Eval Mismatch
+<details>
+<summary>4. Stochastic Eval Mismatch</summary>
 
 **Problem:** `assess()` and `print_samples()` each called `model.generate()` independently. Generation starts from `torch.randn` noise, so the two calls produced different outputs. Metrics showed 89% exact but all 5 displayed samples were wrong — different random draws.
 
 **Fix:** `assess()` now returns generation results via `_gen` key. `print_samples()` accepts `gen_cache` parameter to reuse the same generation. Diagnostics now reflect exactly what the metrics measured.
 
 **File:** `src/twm/training_eval.py`, `src/twm/trainer.py`
+</details>
 
-### 5. Frozen Length Head During Dynamics
+<details>
+<summary>5. Frozen Length Head During Dynamics</summary>
 
 **Problem:** The length head is part of the expander. When `freeze: ["expander"]`, the length head freezes too. It was trained to predict length from identity bottlenecks (compressor outputs). Dynamics-transformed bottlenecks are out-of-distribution for the frozen length head.
 
@@ -85,26 +94,32 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 **Fix:** Auto-unfreeze the length head when the expander is frozen. Added to `_apply_freeze()` in `trainer.py`. Length head is tiny (~8K params), adapts quickly to transformed bottleneck distribution.
 
 **File:** `src/twm/trainer.py` — `_apply_freeze()`
+</details>
 
-### 6. Dynamics Core Capacity
+<details>
+<summary>6. Dynamics Core Capacity</summary>
 
 **Problem:** Mini profile gives 2 transformer layers for dynamics. Identity is trivial (near-identity residual), but question→answer requires restructuring the bottleneck — different word order, length, and content. 2 layers couldn't learn the mapping: qa tok_acc plateaued at 12% after 560 epochs.
 
 **Fix:** Added `dynamics_layers: 4` to config (top-level field, not per-stage). Doubles dynamics depth without touching frozen compressor/expander. IO checkpoint loads via shape-compatible partial loading; new dynamics layers stay randomly initialized.
+</details>
 
-### 7. ByteLevel BPE Position-Dependent Tokenization
+<details>
+<summary>7. ByteLevel BPE Position-Dependent Tokenization</summary>
 
 **Problem:** ByteLevel BPE with `add_prefix_space=False` tokenizes the same word differently depending on position. At sentence start (no `Ġ` prefix), `amdavad` → `['amdavad']` (1 token). Mid-sentence (with `Ġ` prefix), `amdavad` → `['Ġam', 'davad']` (2 tokens). The dynamics core has to learn that these different token sequences represent the same word — an unnecessary burden.
 
-**Scope:** Affects every QA pair where entities appear at different positions in question vs answer (essentially all of them).
+**Scope:** Affects every QA pair where entities appear at different position in question vs answer (essentially all of them).
 
 **Fix:** Changed `add_prefix_space=False` → `add_prefix_space=True` in `train_bpe()`. Now every word gets a consistent `Ġ` prefix regardless of position. Retrained tokenizer, regenerated all data.
 
 **Bonus:** Consistent prefix space lets BPE learn better merges. `ahmedabad` went from 3 tokens (`ah` + `med` + `abad`) to 1 token (`Ġahmedabad`). Shorter sequences = less work for the dynamics core.
 
 **File:** `scripts/prepare_webnlg_multimodal.py` — `train_bpe()`
+</details>
 
-## Architecture Notes
+<details>
+<summary>Architecture Notes</summary>
 
 ### Graduated t-Range Curriculum
 
@@ -130,38 +145,19 @@ During dynamics, the length head reads from the **post-dynamics** bottleneck, pr
 ### Natural MSE/CE Curriculum
 
 MSE dominates early (large gradients when far from targets). CE becomes effective late (at cell boundaries). Explicit CE weight annealing fights this natural process. Keep CE weight constant.
+</details>
 
 ## Dynamics Geometry Analysis (Pet Sim)
 
 To understand *how* the dynamics core transforms state, we ran geometry analysis on the pet sim checkpoint (28K params, mini profile, 98.9% exact match). Tools: `scripts/visualize_dynamics.py` and `src/twm/analysis.py`.
 
-### Latent Space Structure
+![Dynamics analysis](sprint4_figures/dynamics_analysis.png)
 
-![Latent space scatter](sprint4_figures/latent_space.png)
-
-3,780 states (5 pets × 756 attribute/action combos), PCA to 3D (68.4% variance explained). Each pet starts from a tight pre-dynamics cluster, then fans out into a larger downstream region after the dynamics step. The inputs are encoded compactly, while most of the variation appears in the transition map itself. The downstream clouds differ by pet, so the model is not ignoring identity, but the overall geometry shows dog-specific variation around a common transition mechanism.
-
-### Flow Field
-
-![Flow field](sprint4_figures/flow_field.png)
-
-PC1 vs PC2 with displacement arrows. Most transitions move in a broadly similar direction, with different magnitudes and branching angles. The learned dynamics have a dominant global transport component — a shared progression axis corresponding to "advance this state forward" — with smaller local deviations depending on which pet/state you started from.
-
-### Jacobian Eigenspectrum
-
-![Eigenspectrum](sprint4_figures/eigenspectrum.png)
-
-Jacobian of the dynamics map at a representative state (Daisy, hungry, tired, content, messy, feed). 768×768 Jacobian (24 positions × 32 d_model).
-
-- Eigenvalue magnitude range: [0.0006, 4.88]
-- Mean |λ|: 1.0
-- 304 expansive directions (|λ| > 1), 455 contractive (|λ| < 1)
-
-The local operators are not simple contractions or random noise — they show heterogeneous structure, including expansive directions and coupled modes. This supports the claim that the core learned real latent dynamics.
+3,780 states (5 pets × 756 attribute/action combos). **Left**: PCA to 3D (68.4% variance). Each pet starts from a tight pre-dynamics cluster, then fans out into a larger downstream region. The downstream clouds differ by pet — the model isn't ignoring identity — but the overall geometry shows variation around a common transition mechanism. **Center**: PC1 vs PC2 flow field. Most transitions share a dominant global transport direction ("advance this state forward") with pet/state-specific deviations. **Right**: Jacobian eigenspectrum at a representative state (Daisy, hungry, tired, content, messy, feed). 768×768 Jacobian with 305 expansive (|λ| > 1) and 451 contractive directions, mean |λ| = 1.0. Not simple contraction or noise — heterogeneous structure with coupled modes.
 
 ### Takeaway
 
-In the pet sim, the dynamics core learned one main next-state prediction function, with pet identity acting mostly as a conditioning signal that slightly changes the shape of the flow rather than selecting entirely different dynamics. This is consistent with the architecture's design: decomposed triples let the transformer share structure across entities, and the input residual means the dynamics only needs to learn the delta.
+The dynamics core learned one shared next-state function, with pet identity as a conditioning signal that adjusts the flow rather than selecting entirely different dynamics. Decomposed triples let the transformer share structure across entities, and the input residual means it only needs to learn the delta.
 
 ## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
 
@@ -285,7 +281,8 @@ Once the bottleneck has real dimensionality from the VAE prior, these two comple
 - **Partial freeze relaxation**: unfreeze last compressor layer during dynamics. Superseded by the VAE approach which fixes geometry at the source.
 - **Scale up warmup modes**: 4-6 modes instead of 2. Useful for mode-reading but secondary to the structural fix.
 
-## Current Config
+<details>
+<summary>Current Config</summary>
 
 ```json
 {
@@ -342,3 +339,4 @@ Once the bottleneck has real dimensionality from the VAE prior, these two comple
     ]
 }
 ```
+</details>
