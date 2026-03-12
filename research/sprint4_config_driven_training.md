@@ -118,7 +118,8 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 **File:** `scripts/prepare_webnlg_multimodal.py` — `train_bpe()`
 </details>
 
-## Architecture Notes
+<details>
+<summary>Architecture Notes</summary>
 
 ### Graduated t-Range Curriculum
 
@@ -144,6 +145,7 @@ During dynamics, the length head reads from the **post-dynamics** bottleneck, pr
 ### Natural MSE/CE Curriculum
 
 MSE dominates early (large gradients when far from targets). CE becomes effective late (at cell boundaries). Explicit CE weight annealing fights this natural process. Keep CE weight constant.
+</details>
 
 ## Dynamics Geometry Analysis (Pet Sim)
 
