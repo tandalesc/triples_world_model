@@ -67,9 +67,19 @@ From `mode_delta_stats.json` (delta vectors relative to identity):
 
 Mini’s operators are more coherent/consistent across sampled states.
 
-## Additional analysis notes
+## Exhaustive Lattice View (Mini)
 
-An exhaustive mini sweep was run separately for internal validation on CPU, but is intentionally not the centerpiece of this findings note. The core argument here is carried by the paired probe visuals above (pre-latent, post-by-mode, and mode-delta vectors) that directly test mode-operator structure in micro vs mini.
+To complement the paired probe visuals, I ran an exhaustive CPU sweep over the enumerated state lattice and projected latent spaces with PCA.
+
+| PRE latent (colored by task) | POST latent (colored by mode) |
+|:----------------------------:|:------------------------------:|
+| ![Exhaustive pre](cedric_mode_probe_v2_mini/analysis_exhaustive/pre_by_task.png) | ![Exhaustive post](cedric_mode_probe_v2_mini/analysis_exhaustive/post_by_mode.png) |
+
+Interpretation:
+- **PRE**: task semantics are already present as structured gradients before the dynamics step.
+- **POST**: dynamics + mode conditioning significantly reshapes the manifold; mode-specific transport becomes visible globally (not only in sampled probes).
+
+This supports the same conclusion as the probe plots: Mini is not just larger — it learns more organized mode-conditioned geometry.
 
 ## Practical Recommendation
 
