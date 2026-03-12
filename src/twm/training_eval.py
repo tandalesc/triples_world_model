@@ -26,14 +26,16 @@ def _generate(model, dataset, device, n, n_steps):
         output_ids = dataset._output_token_ids[:n].to(device)
         mode_ids = dataset._modes[:n].to(device)
 
-        bottleneck = model.compress(input_ids, input_pad)
+        compress_out = model.compress(input_ids, input_pad)
+        bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
         target_ids = output_ids
     else:
         input_ids = dataset._text_token_ids[:n].to(device)
         input_pad = dataset._text_pad_mask[:n].to(device)
 
-        bottleneck = model.compress(input_ids, input_pad)
+        compress_out = model.compress(input_ids, input_pad)
+        bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
         target_ids = input_ids
         mode_ids = None
 
@@ -201,7 +203,8 @@ def diagnose_mode_attention(model, dataset, device, n_examples=64):
     input_pad = dataset._input_pad_mask[:n].to(device)
     mode_ids = dataset._modes[:n].to(device)
 
-    bottleneck = model.compress(input_ids, input_pad)
+    compress_out = model.compress(input_ids, input_pad)
+    bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
 
     # Build dynamics input with mode triple (same as forward_dynamics)
     mode_triple = model._build_mode_triple(mode_ids)  # (B, 3, d)

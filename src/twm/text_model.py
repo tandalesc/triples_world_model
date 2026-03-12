@@ -30,6 +30,7 @@ class TextWorldModel(nn.Module):
         max_text_tokens: int = 64,
         dropout: float = 0.1,
         alpha_min: float = 0.01,
+        vae: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -37,6 +38,7 @@ class TextWorldModel(nn.Module):
         self.max_text_tokens = max_text_tokens
         self._text_compressor_layers = text_compressor_layers
         self._text_expander_layers = text_expander_layers
+        self._vae = vae
         d = config.d_model
 
         # Shared frozen embedding table
@@ -51,6 +53,7 @@ class TextWorldModel(nn.Module):
             max_triples=config.max_triples,
             max_text_tokens=max_text_tokens,
             dropout=dropout,
+            vae=vae,
         )
 
         # Role centroids for bottleneck structure prior.
@@ -81,6 +84,7 @@ class TextWorldModel(nn.Module):
                     self.shared_token_emb.weight.data[sid] = 0.0
 
     def compress(self, text_token_ids, text_pad_mask):
+        """Compress text to bottleneck. Returns (bottleneck, vae_info) if VAE, else bottleneck."""
         return self.text_compressor(text_token_ids, text_pad_mask, self.config.max_triples)
 
     def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None):

@@ -91,7 +91,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            output_len, device, timestep, mode_ids=None,
                            aux_ce_weight=0.1, length_weight=0.1,
                            bottleneck_weight=0.0, role_prior_weight=0.0,
-                           bn_role_weights=None, detach_dynamics_expander=False):
+                           bn_role_weights=None, detach_dynamics_expander=False,
+                           kl_weight=0.0):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
@@ -103,14 +104,22 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         detach_dynamics_expander: if True, detach bottleneck before expander
             during dynamics training. Core trains on bn loss only, no token
             gradients fighting its exploration of W-space.
+        kl_weight: VAE KL weight (β), already annealed by caller.
     """
     input_ids = input_ids.to(device)
     input_pad = input_pad.to(device)
     token_emb = model.shared_token_emb
 
-    bottleneck = model.compress(input_ids, input_pad)
+    compress_out = model.compress(input_ids, input_pad)
 
-    # Role-conditioned prior: pull each slot toward its role centroid.
+    # Handle VAE vs deterministic compressor
+    vae_info = {}
+    if isinstance(compress_out, tuple):
+        bottleneck, vae_info = compress_out
+    else:
+        bottleneck = compress_out
+
+    # Role-conditioned prior: pull each slot toward its role centroid (legacy).
     role_loss = torch.tensor(0.0, device=device)
     if role_prior_weight > 0 and hasattr(model, "role_centroids"):
         role_loss = _compute_role_prior_loss(bottleneck, model.role_centroids)
@@ -125,7 +134,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         # Compute target bottleneck for direct supervision (detached)
         if bottleneck_weight > 0 or bn_role_weights is not None:
             with torch.no_grad():
-                bottleneck_target = model.compress(output_ids, output_pad)
+                target_out = model.compress(output_ids, output_pad)
+                bottleneck_target = target_out[0] if isinstance(target_out, tuple) else target_out
 
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
         target_ids = output_ids
@@ -193,8 +203,15 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                 bn_loss = F.mse_loss(bottleneck[transform_mask], bottleneck_target[transform_mask])
 
     bn_w = bottleneck_weight if bn_role_weights is None else 1.0
+
+    # VAE KL loss
+    kl_loss = torch.tensor(0.0, device=device)
+    if kl_weight > 0 and "kl_loss" in vae_info:
+        kl_loss = vae_info["kl_loss"]
+
     total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
-             + bn_w * bn_loss + role_prior_weight * role_loss)
+             + bn_w * bn_loss + role_prior_weight * role_loss
+             + kl_weight * kl_loss)
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
@@ -203,4 +220,9 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         metrics["bn_loss"] = bn_loss.item()
     if role_prior_weight > 0:
         metrics["role_loss"] = role_loss.item()
+    if kl_weight > 0 and vae_info:
+        metrics["kl"] = kl_loss.item()
+        for k in ("kl_entity", "kl_attribute", "kl_value"):
+            if k in vae_info:
+                metrics[k] = vae_info[k]
     return total, metrics

@@ -60,6 +60,7 @@ class Trainer:
                 text_expander_layers=c.text_expander_layers,
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
+                vae=c.vae,
             )
         else:
             model = TextDynamicsModel(
@@ -69,6 +70,7 @@ class Trainer:
                 dynamics_layers=dyn_layers,
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
+                vae=c.vae,
             )
         model.init_embeddings()
         return model.to(self.device)
@@ -171,7 +173,14 @@ class Trainer:
             epoch_bn_a = 0.0
             epoch_bn_v = 0.0
             epoch_role = 0.0
+            epoch_kl = 0.0
             n_batches = 0
+
+            # β annealing: linear ramp from 0 to kl_weight over kl_anneal_epochs
+            if c.kl_weight > 0 and c.kl_anneal_epochs > 0:
+                eff_kl_weight = c.kl_weight * min(1.0, epoch / c.kl_anneal_epochs)
+            else:
+                eff_kl_weight = c.kl_weight
             perm = torch.randperm(n_train)
 
             for start in range(0, n_train - c.batch_size + 1, c.batch_size):
@@ -194,6 +203,7 @@ class Trainer:
                         role_prior_weight=c.role_prior_weight,
                         bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
                         detach_dynamics_expander=c.detach_dynamics_expander,
+                        kl_weight=eff_kl_weight,
                     )
                 else:
                     loss, batch_m = compute_diffusion_loss(
@@ -204,6 +214,7 @@ class Trainer:
                         mode_ids=None,
                         aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
                         role_prior_weight=c.role_prior_weight,
+                        kl_weight=eff_kl_weight,
                     )
 
                 optimizer.zero_grad()
@@ -219,6 +230,7 @@ class Trainer:
                 epoch_bn_a += batch_m.get("bn_a", 0.0)
                 epoch_bn_v += batch_m.get("bn_v", 0.0)
                 epoch_role += batch_m.get("role_loss", 0.0)
+                epoch_kl += batch_m.get("kl", 0.0)
                 n_batches += 1
 
             scheduler.step()
@@ -230,6 +242,7 @@ class Trainer:
             avg_bn_a = epoch_bn_a / max(n_batches, 1)
             avg_bn_v = epoch_bn_v / max(n_batches, 1)
             avg_role = epoch_role / max(n_batches, 1)
+            avg_kl = epoch_kl / max(n_batches, 1)
 
             if epoch % c.log_every == 0 or epoch == 1:
                 self.model.eval()
@@ -244,6 +257,8 @@ class Trainer:
                     log += f" (e={avg_bn_e:.4f} a={avg_bn_a:.4f} v={avg_bn_v:.4f})"
                 if c.role_prior_weight > 0:
                     log += f" role={avg_role:.4f}"
+                if c.kl_weight > 0:
+                    log += f" kl={avg_kl:.4f} (β={eff_kl_weight:.4f})"
                 log += f" | {format_metrics(gen_m)}"
 
                 cur_metric = gen_m[metric_key]
