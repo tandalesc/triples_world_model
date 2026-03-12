@@ -53,6 +53,9 @@ class TextWorldModel(nn.Module):
             dropout=dropout,
         )
 
+        # Role centroids for bottleneck structure prior.
+        self.role_centroids = nn.Embedding(3, d)
+
         self.text_expander = TextExpander(
             token_emb=self.shared_token_emb,
             d_model=d,

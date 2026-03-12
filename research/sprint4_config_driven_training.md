@@ -164,31 +164,36 @@ In the pet sim, the dynamics core learned one main next-state prediction functio
 
 ## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
 
-Cedric is an OpenClaw assistant running on a hardened local LXC. He performs a number of monitoring, alert, reminder, automation, and report generation tasks. To sanity-check whether Mini is merely a larger Micro or actually learns a different latent organization, I ran a focused mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) and compared both families with the same analysis tooling.
+Cedric (OpenClaw assistant on a hardened local LXC) ran a mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) with 4 modes (identity, query, solve, advance) to test whether Mini is qualitatively different from Micro in how it organizes mode-conditioned dynamics — or just a larger version of the same thing.
 
-### Snapshot results
+- **Micro**: comp/context F1 ~0.91, exact-match ~0.39-0.44 on hard splits
+- **Mini**: 1.00 F1 and exact-match across all v2 splits
 
-- Micro (`results/cedric_mode_probe_v2_micro`): comp/context F1 ~0.91 with notably lower exact-match on hard splits.
-- Mini (`results/cedric_mode_probe_v2_mini`): 1.00 across F1/exact on current v2 splits.
+Full findings: [`results/cedric_mode_probe_v2_findings.md`](../results/cedric_mode_probe_v2_findings.md)
 
-### Geometry interpretation
+### Mode Delta Vectors (vs identity)
 
-- Micro shows stronger mode overlap/entanglement in post-dynamics latent projections.
-- Mini shows clearer regime organization and cleaner mode-conditioned transport.
-- Mode delta vector analysis (`mode_delta_vectors.png` + `mode_delta_stats.json`) indicates Mini operators are more coherent across states.
+The clearest signal. Each point is a state's dynamics displacement relative to identity mode, colored by mode. Lines connect the same state across modes.
 
-### Probe focus
+| Micro | Mini |
+|:-----:|:----:|
+| ![Micro mode deltas](../results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_delta_vectors.png) | ![Mini mode deltas](../results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_delta_vectors.png) |
 
-For this sprint log, the key explanatory visuals are the paired micro-vs-mini probe plots:
-- pre-dynamics latent embeddings,
-- post-dynamics latent space by mode,
-- mode delta vectors (vs identity).
+Micro's mode clusters overlap and transport lines cross — the core is entangling modes, applying partially-shared operators that don't cleanly separate. Mini shows three distinct, coherent clusters with parallel transport. The mode operator is consistent across states: query always pushes in roughly the same direction, solve in another, advance in a third.
 
-These three views most directly answer the question we care about: whether Mini learns a cleaner mode-conditioned operator geometry than Micro.
+Quantitatively (cosine similarity between mode delta vectors): Mini's inter-mode coherence is 0.53-0.70 vs Micro's 0.16-0.57. Mini's operators are more self-consistent.
 
-### Recommendation
+### Post-Dynamics Latent Space by Mode
 
-Use Mini as the default policy-reasoning core for mode-conditioned assistant behavior; keep Micro as a footprint-first fallback.
+| Micro | Mini |
+|:-----:|:----:|
+| ![Micro post-dynamics](../results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_conditioned_post_latent.png) | ![Mini post-dynamics](../results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_conditioned_post_latent.png) |
+
+Micro's post-dynamics space is a mode-entangled soup — all four modes occupy the same region with heavy overlap. Mini shows clearer spatial separation, particularly for identity (blue) which maintains distinct positioning from the transformation modes.
+
+### Takeaway
+
+Mini doesn't just have more capacity — it learns a qualitatively different latent organization. The dynamics core develops clean, mode-conditioned transport operators rather than an entangled approximation. Recommendation: use Mini as the default for mode-conditioned reasoning; keep Micro as footprint-first fallback.
 
 ## Current Config
 

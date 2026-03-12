@@ -17,10 +17,12 @@ from .domain_bpe import DomainBPETokenizer
 
 MODE_IDENTITY = 0
 MODE_QA = 1
+MODE_REVERSE = 2
 
 MODE_MAP = {
     "identity": MODE_IDENTITY,
     "qa": MODE_QA,
+    "reverse": MODE_REVERSE,
 }
 
 

@@ -66,6 +66,9 @@ class TrainingConfig:
     aux_ce_weight: float = 0.1
     length_weight: float = 0.1
     bottleneck_weight: float = 0.0  # direct bottleneck MSE (dynamics only)
+    bn_role_weights: list[float] | None = None  # [entity_w, attr_w, value_w] for decomposed bn loss
+    detach_dynamics_expander: bool = False  # cut token gradients to dynamics core
+    role_prior_weight: float = 0.0  # role-conditioned centroid regularization
     log_every: int = 10
     diagnostic_every: int = 50
 
