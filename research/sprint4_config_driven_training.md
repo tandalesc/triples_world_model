@@ -4,7 +4,7 @@
 
 Refactor training from 600-line scripts into config-driven experiments, then train a dynamics core that transforms question bottlenecks into answer bottlenecks — the first real "world model" behavior over open-vocab text.
 
-## Key Results (In Progress)
+## Key Results
 
 | Experiment | IO Exact | QA tok_acc | Notes |
 |-----------|:--------:|:----------:|-------|
@@ -12,7 +12,8 @@ Refactor training from 600-line scripts into config-driven experiments, then tra
 | v19 fixed init | 93.9% @ ep200 | — | Warm-start conditioning proj + restore compressor LNs |
 | v19 graduated curriculum | **96.9%** | — | 3-phase t-range: [0.7,1]→[0.4,1]→[0.0,1] |
 | v19 dynamics (2L, frozen len) | 99.6% id | 12% qa | Dynamics core too small + length head frozen |
-| v19 dynamics (4L, unfrozen len) | — | TBD | Current run |
+| v20 mode warmup | 96.9% io | 5.5% rev tok | Mode-reading circuitry forms, but reverse doesn't converge |
+| v20 dynamics | — | ~12% qa | QA mode-collapses in bottleneck space |
 
 ## Infrastructure: Config-Driven Training
 
@@ -209,6 +210,80 @@ This corroborates the micro-vs-mini probe: Mini's organization is a real geometr
 
 Mini doesn't just have more capacity — it learns a qualitatively different latent organization. The dynamics core develops clean, mode-conditioned transport operators rather than an entangled approximation. Recommendation: use Mini as the default for mode-conditioned reasoning; keep Micro as footprint-first fallback.
 
+## Open-Vocab Bottleneck Geometry (v20)
+
+To understand why dynamics training isn't converging on QA, we visualized the bottleneck geometry at each stage of the v20 pipeline. Tool: `scripts/visualize_bottleneck.py`.
+
+### Plot 1: Compressor Output (IO Checkpoint)
+
+![Compressor bottleneck geometry](../results/v20_bottleneck_geometry/compressor_bottleneck_geometry.png)
+
+PCA of mean-pooled compressor bottleneck vectors (86% variance in 2 components). Left: colored by mode. Right: colored by relation type.
+
+**Finding: The compressor maps all inputs onto a single curved 1D manifold.** Identity and QA examples are completely interleaved — the compressor is mode-agnostic (expected, since it never sees mode). Relation types cluster: location queries group at one end, affiliation at the other. The bottleneck has meaningful semantic structure, but it's low-dimensional — most variation is captured by a single curve.
+
+### Plot 2: Post-Dynamics — IO vs Mode Warmup
+
+![IO vs mode warmup post-dynamics](../results/v20_bottleneck_geometry/post_dynamics_io_vs_warmup.png)
+
+Same inputs run through dynamics with identity (blue) and QA (orange) mode conditioning. Left: IO checkpoint. Right: mode warmup checkpoint (also shows reverse in green).
+
+**Finding: IO checkpoint is mode-blind; warmup learns to read mode.** The IO checkpoint produces complete identity/QA overlap — the dynamics core passes everything through unchanged regardless of mode. This confirms the diagnosis: the core never learned mode-reading circuitry during IO training because it was frozen.
+
+After mode warmup, the three modes separate along PC2. Identity (blue) pulls away from QA/reverse. The core learned to condition on mode. But QA and reverse still overlap heavily — the warmup task (sentence reversal) was too simple to force deep mode separation.
+
+### Plot 3: Post-Dynamics — Warmup vs Dynamics
+
+![Warmup vs dynamics post-dynamics](../results/v20_bottleneck_geometry/post_dynamics_warmup_vs_dynamics.png)
+
+Left: mode warmup checkpoint. Right: dynamics checkpoint (after QA training).
+
+**Finding: Dynamics training causes QA mode collapse.** The warmup checkpoint shows identity and QA interleaved along the manifold with partial separation. After dynamics training, QA collapses to a tight cluster near the origin while identity points scatter with outliers. The dynamics core learned to do *something* mode-conditional — it pushes all QA inputs to roughly the same bottleneck regardless of content. This is mode collapse: the core found a shortcut (constant QA output) rather than learning content-dependent question→answer transformations.
+
+### Diagnosis
+
+The bottleneck geometry tells a clear story:
+
+1. **Compressor works.** Semantic structure is present — relation types cluster, 86% variance in 2 PCA components. The IO pipeline is solid.
+2. **Mode warmup works partially.** The core learns to read mode and separate identity from transformations. But reverse is too simple a task to build deep mode-conditional circuitry.
+3. **Dynamics training collapses.** Instead of learning diverse QA transformations, the core maps all QA inputs to a single point. The QA task is too hard to learn from scratch with only mode-reading from warmup — the core takes the path of least resistance.
+
+The fundamental gap: there's no curriculum bridge between "read mode" (warmup) and "transform question→answer" (dynamics). The jump is too large.
+
+## What to Try Next
+
+### 1. Stronger warmup tasks (graduated difficulty)
+
+The reverse task is essentially a permutation — it doesn't require understanding content. We need warmup tasks that force the core to learn *content-dependent* mode-conditional transformations:
+
+- **Entity extraction**: given a sentence, output just the entity name (shorter output, content-dependent)
+- **Attribute extraction**: output just the relation/attribute mentioned
+- **Paraphrase**: semantically equivalent but syntactically different output (forces learning that different bottleneck positions can encode the same meaning)
+- Graduate: reverse → extraction → paraphrase → QA
+
+### 2. Bottleneck supervision curriculum
+
+Currently bn_loss fires with a single weight for all non-identity modes. Instead:
+
+- **Phase 1**: High bn_weight, low denoise weight — force the core to match target bottleneck geometry directly
+- **Phase 2**: Anneal bn_weight down, let denoise loss take over — transition from "match the answer bottleneck" to "generate the answer tokens"
+- This gives the core a direct optimization target (MSE to answer bottleneck) before asking it to produce tokens
+
+### 3. Partial freeze relaxation
+
+Currently compressor/expander are fully frozen during dynamics. The compressor bottleneck geometry is fixed, and the dynamics core must work within it. But the 1D manifold structure may not have enough room for QA transformations:
+
+- **Unfreeze last compressor layer** during dynamics — let the bottleneck geometry adapt to what dynamics needs
+- Or add a **learnable bottleneck adapter** (1-layer MLP) between compressor and dynamics that can reshape the manifold
+
+### 4. Contrastive mode loss
+
+Add an explicit contrastive term that pushes same-mode pairs together and different-mode pairs apart in post-dynamics bottleneck space. This directly penalizes mode collapse.
+
+### 5. Scale up warmup modes
+
+Instead of just 2 modes (identity + reverse), add 4-6 warmup modes of increasing difficulty. Cedric's probe showed Mini can handle 4 clean modes. More modes = more mode-reading pressure = richer initial dynamics circuitry.
+
 ## Current Config
 
 ```json
@@ -225,7 +300,7 @@ Mini doesn't just have more capacity — it learns a qualitatively different lat
     "alpha_min": 0.01,
     "data_dir": "data/webnlg_multi",
     "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
-    "out_dir": "results/v19_mini64",
+    "out_dir": "results/v20_mini64",
     "batch_size": 64,
     "denoise_steps": 10,
     "aux_ce_weight": 0.1,
@@ -242,6 +317,15 @@ Mini doesn't just have more capacity — it learns a qualitatively different lat
                 {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 100},
                 {"t_min": 0.4, "t_max": 1.0, "epochs": 400, "patience": 100, "metric": "exact"},
                 {"t_min": 0.0, "t_max": 1.0, "epochs": 800, "patience": 150, "metric": "exact"}
+            ]
+        },
+        {
+            "name": "mode_warmup",
+            "dataset": "mode_warmup",
+            "freeze": ["compressor", "expander"],
+            "max_examples": 15000,
+            "phases": [
+                {"t_min": 0.0, "t_max": 1.0, "lr": 1e-3, "epochs": 200, "patience": 50}
             ]
         },
         {
