@@ -16,6 +16,7 @@
     "denoise_steps": 10,
     "aux_ce_weight": 0.1,
     "length_weight": 0.1,
+    "bottleneck_weight": 1.0,
     "log_every": 10,
     "diagnostic_every": 50,
     "stages": [

@@ -28,7 +28,8 @@ def _clean(s: str) -> str:
 
 def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            output_len, device, timestep, mode_ids=None,
-                           aux_ce_weight=0.1, length_weight=0.1):
+                           aux_ce_weight=0.1, length_weight=0.1,
+                           bottleneck_weight=0.0):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
@@ -40,11 +41,18 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
 
     bottleneck = model.compress(input_ids, input_pad)
 
+    bottleneck_target = None
     if mode_ids is not None:
         # Dynamics mode: transform through dynamics core
         mode_ids = mode_ids.to(device)
         output_ids = output_ids.to(device)
         output_pad = output_pad.to(device)
+
+        # Compute target bottleneck for direct supervision (detached)
+        if bottleneck_weight > 0:
+            with torch.no_grad():
+                bottleneck_target = model.compress(output_ids, output_pad)
+
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
         target_ids = output_ids
         target_pad = output_pad
@@ -93,9 +101,20 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
     len_pred = model.forward_length(bottleneck)
     len_loss = F.mse_loss(len_pred, output_len.float().to(device))
 
-    total = mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
+    bn_loss = torch.tensor(0.0, device=device)
+    if bottleneck_target is not None and bottleneck_weight > 0:
+        # Direct bottleneck supervision: dynamics output should match
+        # what the compressor would produce from the answer text.
+        # Only apply to QA examples (mode=1), not identity (mode=0).
+        qa_mask = mode_ids == 1
+        if qa_mask.any():
+            bn_loss = F.mse_loss(bottleneck[qa_mask], bottleneck_target[qa_mask])
+
+    total = mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss + bottleneck_weight * bn_loss
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
     metrics["len_loss"] = len_loss.item()
+    if bottleneck_weight > 0:
+        metrics["bn_loss"] = bn_loss.item()
     return total, metrics

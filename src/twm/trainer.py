@@ -166,6 +166,7 @@ class Trainer:
             epoch_loss = 0.0
             epoch_mse = 0.0
             epoch_ce = 0.0
+            epoch_bn = 0.0
             n_batches = 0
             perm = torch.randperm(n_train)
 
@@ -182,6 +183,7 @@ class Trainer:
                         train_ds._output_lengths[idx], self.device, timestep,
                         mode_ids=train_ds._modes[idx],
                         aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
+                        bottleneck_weight=c.bottleneck_weight,
                     )
                 else:
                     loss, batch_m = compute_diffusion_loss(
@@ -201,12 +203,14 @@ class Trainer:
                 epoch_loss += loss.item()
                 epoch_mse += batch_m.get("mse", 0.0)
                 epoch_ce += batch_m.get("ce", 0.0)
+                epoch_bn += batch_m.get("bn_loss", 0.0)
                 n_batches += 1
 
             scheduler.step()
             avg_loss = epoch_loss / max(n_batches, 1)
             avg_mse = epoch_mse / max(n_batches, 1)
             avg_ce = epoch_ce / max(n_batches, 1)
+            avg_bn = epoch_bn / max(n_batches, 1)
 
             if epoch % c.log_every == 0 or epoch == 1:
                 self.model.eval()
@@ -214,7 +218,10 @@ class Trainer:
                                n_examples=64, n_steps=c.denoise_steps)
                 gen_cache = gen_m.pop("_gen", None)
 
-                log = f"Epoch {epoch:4d} | loss {avg_loss:.4f} mse={avg_mse:.4f} ce={avg_ce:.4f} | {format_metrics(gen_m)}"
+                log = f"Epoch {epoch:4d} | loss {avg_loss:.4f} mse={avg_mse:.4f} ce={avg_ce:.4f}"
+                if c.bottleneck_weight > 0:
+                    log += f" bn={avg_bn:.4f}"
+                log += f" | {format_metrics(gen_m)}"
 
                 cur_metric = gen_m[metric_key]
                 if cur_metric > best_metric:
