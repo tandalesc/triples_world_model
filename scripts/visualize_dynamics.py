@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import itertools
+import json
 from pathlib import Path
 
 import numpy as np
@@ -57,6 +58,56 @@ def enumerate_pet_states():
     return states, labels
 
 
+def _is_triple_list(x):
+    return isinstance(x, list) and all(isinstance(t, list) and len(t) == 3 for t in x)
+
+
+def load_states_file(path: Path):
+    """Load custom states from JSON/JSONL.
+
+    Accepted line/object formats:
+      - [[e,a,v], ...]
+      - {"state_t": [[e,a,v], ...]}
+    """
+    states = []
+    labels = []
+
+    if path.suffix.lower() == ".jsonl":
+        lines = [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        objs = [json.loads(ln) for ln in lines]
+    else:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+        objs = obj if isinstance(obj, list) else [obj]
+
+    for i, obj in enumerate(objs):
+        if _is_triple_list(obj):
+            st = obj
+        elif isinstance(obj, dict) and _is_triple_list(obj.get("state_t")):
+            st = obj["state_t"]
+        else:
+            continue
+
+        st = _sort_triples(st)
+        states.append(st)
+
+        d = {(e, a): v for e, a, v in st}
+        label = {
+            "index": str(i),
+            "mode": d.get(("#mode", "state"), d.get(("#mode", "type"), "unknown")),
+            "user": d.get(("user", "state"), "n/a"),
+            "task": d.get(("task", "state"), "n/a"),
+            "energy": d.get(("energy", "state"), "n/a"),
+            "focus": d.get(("focus", "state"), "n/a"),
+            "calendar": d.get(("calendar", "state"), "n/a"),
+            "urgency": d.get(("urgency", "state"), "n/a"),
+        }
+        labels.append(label)
+
+    if not states:
+        raise ValueError(f"No valid states found in {path}")
+    return states, labels
+
+
 def encode_states(wm, states):
     """Encode all states to input_ids tensor."""
     all_ids = []
@@ -100,7 +151,7 @@ def build_scatter_plot(pre_3d, post_3d, labels, color_by="pet"):
     import plotly.graph_objects as go
     import plotly.colors as pc
 
-    color_key = color_by
+    color_key = color_by if color_by in labels[0] else "index"
     unique_vals = sorted(set(l[color_key] for l in labels))
     palette = pc.qualitative.Set1[:len(unique_vals)]
     color_map = {v: palette[i % len(palette)] for i, v in enumerate(unique_vals)}
@@ -163,10 +214,13 @@ def build_scatter_plot(pre_3d, post_3d, labels, color_by="pet"):
     return fig
 
 
-def run_scatter(wm, output_path, color_by="pet"):
+def run_scatter(wm, output_path, color_by="pet", states=None, labels=None):
     """Main scatter plot pipeline."""
-    print("Enumerating pet states...")
-    states, labels = enumerate_pet_states()
+    if states is None or labels is None:
+        print("Enumerating pet states...")
+        states, labels = enumerate_pet_states()
+    else:
+        print("Using custom states...")
     print(f"  {len(states)} states")
 
     print("Encoding states...")
@@ -191,19 +245,31 @@ def run_scatter(wm, output_path, color_by="pet"):
     return pca  # for reuse in flow field
 
 
-def run_eigenspectrum(wm, output_path):
+def _auto_sample_state_from_vocab(wm):
+    toks = [t for t in wm.vocab.token2id.keys() if t != "<pad>"]
+    rel_pref = ["state", "type", "relation", "attr", "action"]
+    rel = next((r for r in rel_pref if r in wm.vocab.token2id), toks[0])
+
+    mode_vals = [m for m in ["advance", "identity", "query", "solve"] if m in wm.vocab.token2id]
+    mode_v = mode_vals[0] if mode_vals else toks[min(1, len(toks)-1)]
+
+    entities = [t for t in toks if t not in {"#mode", rel, mode_v}][: max(2, wm.config.max_triples - 1)]
+    values = [t for t in toks if t not in {"#mode", rel, *entities}]
+    if not values:
+        values = entities
+
+    sample = [["#mode", rel, mode_v]]
+    for i, e in enumerate(entities[: wm.config.max_triples - 1]):
+        sample.append([e, rel, values[i % len(values)]])
+    return sample
+
+
+def run_eigenspectrum(wm, output_path, sample_state=None):
     """Compute and plot Jacobian eigenspectrum for a sample state."""
     from twm.analysis import dynamics_jacobian, eigenspectrum_plot
 
-    # Use a representative state
-    sample_state = [
-        ["#mode", "type", "advance"],
-        ["Daisy", "hunger", "hungry"],
-        ["Daisy", "energy", "tired"],
-        ["Daisy", "mood", "content"],
-        ["Daisy", "cleanliness", "messy"],
-        ["Daisy", "action", "feed"],
-    ]
+    if sample_state is None:
+        sample_state = _auto_sample_state_from_vocab(wm)
     sorted_state = _sort_triples(sample_state)
     padded = _pad_triples(sorted_state, wm.config.max_triples)
     ids = _flatten_triples(padded, wm.vocab)
@@ -219,17 +285,29 @@ def run_eigenspectrum(wm, output_path):
     print(f"  # with |lambda| < 1 (contractive): {(mags < 1).sum()}")
 
     eigen_path = output_path.parent / "eigenspectrum.html"
-    eigenspectrum_plot(eigenvalues, output_path=eigen_path)
-    print(f"  Saved to {eigen_path}")
+    try:
+        eigenspectrum_plot(eigenvalues, output_path=eigen_path)
+        print(f"  Saved to {eigen_path}")
+    except ModuleNotFoundError:
+        fallback = output_path.parent / "eigenspectrum_values.json"
+        with fallback.open("w", encoding="utf-8") as f:
+            json.dump({
+                "real": [float(x.real) for x in eigenvalues],
+                "imag": [float(x.imag) for x in eigenvalues],
+            }, f)
+        print(f"  plotly not installed; wrote eigenvalues to {fallback}")
 
 
-def run_flow_field(wm, output_path):
+def run_flow_field(wm, output_path, states=None, labels=None):
     """Visualize flow field in PCA space."""
     from twm.analysis import flow_field
     import plotly.graph_objects as go
 
-    print("Enumerating states for flow field...")
-    states, labels = enumerate_pet_states()
+    if states is None or labels is None:
+        print("Enumerating states for flow field...")
+        states, labels = enumerate_pet_states()
+    else:
+        print("Using custom states for flow field...")
     input_ids = encode_states(wm, states)
 
     # Fit PCA on pre-dynamics latents
@@ -250,20 +328,22 @@ def run_flow_field(wm, output_path):
     idx = list(range(0, n, step))
 
     import plotly.colors as pc
-    palette = pc.qualitative.Set1[:len(PETS)]
-    pet_colors = {p: palette[i] for i, p in enumerate(PETS)}
+    group_key = "pet" if "pet" in labels[0] else ("mode" if "mode" in labels[0] else "index")
+    groups = sorted(set(l.get(group_key, "unknown") for l in labels))
+    palette = pc.qualitative.Set1
+    group_colors = {g: palette[i % len(palette)] for i, g in enumerate(groups)}
 
-    for pet in PETS:
-        pet_idx = [j for j in idx if labels[j]["pet"] == pet]
-        if not pet_idx:
+    for g in groups:
+        g_idx = [j for j in idx if labels[j].get(group_key, "unknown") == g]
+        if not g_idx:
             continue
         fig.add_trace(go.Scatter(
-            x=origins[pet_idx, 0], y=origins[pet_idx, 1],
+            x=origins[g_idx, 0], y=origins[g_idx, 1],
             mode="markers",
-            marker=dict(size=4, color=pet_colors[pet]),
-            text=[f"{labels[i]['pet']} {labels[i]['action']}" for i in pet_idx],
+            marker=dict(size=4, color=group_colors[g]),
+            text=[" | ".join(f"{k}:{v}" for k, v in labels[i].items()) for i in g_idx],
             hovertemplate="%{text}<extra></extra>",
-            name=pet,
+            name=str(g),
         ))
 
     # Arrows as annotations
@@ -295,8 +375,13 @@ def main():
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to run directory")
     parser.add_argument("--output", type=str, default=None, help="Output HTML path")
     parser.add_argument("--color-by", type=str, default="pet",
-                        choices=["pet", "action", "hunger", "energy", "mood", "cleanliness"],
-                        help="Color scatter points by this attribute")
+                        help="Color scatter points by this attribute (default: pet)")
+    parser.add_argument("--states-file", type=str, default=None,
+                        help="Optional JSON/JSONL file with custom states for scatter/flow")
+    parser.add_argument("--sample-state-json", type=str, default=None,
+                        help="Optional JSON triple-list for eigenspectrum sample state")
+    parser.add_argument("--sample-state-file", type=str, default=None,
+                        help="Optional file containing sample state JSON triple-list")
     parser.add_argument("--eigenspectrum", action="store_true", help="Compute Jacobian eigenspectrum")
     parser.add_argument("--flow-field", action="store_true", help="Visualize dynamics flow field")
     parser.add_argument("--device", type=str, default=None)
@@ -310,12 +395,24 @@ def main():
     wm = WorldModel(ckpt_dir, device=args.device)
     print(f"  {wm.model.param_count():,} params on {wm.device}")
 
+    states = labels = None
+    if args.states_file:
+        states, labels = load_states_file(Path(args.states_file))
+
+    sample_state = None
+    if args.sample_state_json:
+        sample_state = json.loads(args.sample_state_json)
+    elif args.sample_state_file:
+        sample_state = json.loads(Path(args.sample_state_file).read_text(encoding="utf-8"))
+
     if args.eigenspectrum:
-        run_eigenspectrum(wm, output_path)
+        if sample_state is None and states:
+            sample_state = states[0]
+        run_eigenspectrum(wm, output_path, sample_state=sample_state)
     elif args.flow_field:
-        run_flow_field(wm, output_path)
+        run_flow_field(wm, output_path, states=states, labels=labels)
     else:
-        run_scatter(wm, output_path, color_by=args.color_by)
+        run_scatter(wm, output_path, color_by=args.color_by, states=states, labels=labels)
 
 
 if __name__ == "__main__":
