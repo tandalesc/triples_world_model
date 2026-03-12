@@ -164,7 +164,7 @@ In the pet sim, the dynamics core learned one main next-state prediction functio
 
 ## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
 
-To sanity-check whether Mini is merely a larger Micro or actually learns a different latent organization, I ran a focused mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) and compared both families with the same analysis tooling.
+Cedric is an OpenClaw assistant running on a hardened local LXC. He performs a number of monitoring, alert, reminder, automation, and report generation tasks. To sanity-check whether Mini is merely a larger Micro or actually learns a different latent organization, I ran a focused mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) and compared both families with the same analysis tooling.
 
 ### Snapshot results
 
