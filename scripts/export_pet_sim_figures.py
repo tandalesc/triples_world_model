@@ -31,7 +31,7 @@ from twm.analysis import dynamics_jacobian
 
 def plot_latent_space_3d(pre_3d, post_3d, labels, var_ratio, output_path):
     """3D scatter of pre/post dynamics, colored by pet."""
-    fig = plt.figure(figsize=(14, 10))
+    fig = plt.figure(figsize=(10, 7))
     ax = fig.add_subplot(111, projection="3d")
 
     pets = sorted(set(l["pet"] for l in labels))
@@ -42,12 +42,12 @@ def plot_latent_space_3d(pre_3d, post_3d, labels, var_ratio, output_path):
         idx = [i for i, l in enumerate(labels) if l["pet"] == pet]
         c = pet_color[pet]
         ax.scatter(pre_3d[idx, 0], pre_3d[idx, 1], pre_3d[idx, 2],
-                   c=[c], s=8, alpha=0.4, label=f"{pet} (pre)")
+                   c=[c], s=4, alpha=0.3, label=f"{pet} (pre)", rasterized=True)
         ax.scatter(post_3d[idx, 0], post_3d[idx, 1], post_3d[idx, 2],
-                   c=[c], s=8, alpha=0.4, marker="^")
+                   c=[c], s=4, alpha=0.3, marker="^", rasterized=True)
 
     # Flow lines (subsample)
-    step = max(1, len(pre_3d) // 300)
+    step = max(1, len(pre_3d) // 200)
     for i in range(0, len(pre_3d), step):
         ax.plot([pre_3d[i, 0], post_3d[i, 0]],
                 [pre_3d[i, 1], post_3d[i, 1]],
@@ -62,14 +62,14 @@ def plot_latent_space_3d(pre_3d, post_3d, labels, var_ratio, output_path):
     ax.legend(fontsize=8, loc="upper left", markerscale=2)
     ax.view_init(elev=25, azim=135)
 
-    fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"  Saved: {output_path}")
 
 
 def plot_flow_field_2d(pre_3d, post_3d, labels, var_ratio, output_path):
     """2D flow field with displacement arrows, colored by pet."""
-    fig, ax = plt.subplots(figsize=(12, 9))
+    fig, ax = plt.subplots(figsize=(9, 7))
 
     pets = sorted(set(l["pet"] for l in labels))
     colors = plt.cm.Set1(np.linspace(0, 0.8, len(pets)))
@@ -80,10 +80,10 @@ def plot_flow_field_2d(pre_3d, post_3d, labels, var_ratio, output_path):
         idx = [i for i, l in enumerate(labels) if l["pet"] == pet]
         c = pet_color[pet]
         ax.scatter(pre_3d[idx, 0], pre_3d[idx, 1],
-                   c=[c], s=10, alpha=0.5, label=pet, zorder=2)
+                   c=[c], s=6, alpha=0.4, label=pet, zorder=2, rasterized=True)
 
     # Displacement arrows (subsample)
-    step = max(1, len(pre_3d) // 400)
+    step = max(1, len(pre_3d) // 250)
     disp = post_3d - pre_3d
     for i in range(0, len(pre_3d), step):
         ax.annotate("", xy=(pre_3d[i, 0] + disp[i, 0], pre_3d[i, 1] + disp[i, 1]),
@@ -96,7 +96,7 @@ def plot_flow_field_2d(pre_3d, post_3d, labels, var_ratio, output_path):
     ax.legend(fontsize=9, markerscale=2)
     ax.grid(True, alpha=0.2)
 
-    fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"  Saved: {output_path}")
 
@@ -107,7 +107,7 @@ def plot_eigenspectrum(eigenvalues, output_path):
     reals = eigenvalues.real
     imags = eigenvalues.imag
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Magnitude histogram
     ax = axes[0]
@@ -140,7 +140,7 @@ def plot_eigenspectrum(eigenvalues, output_path):
     fig.suptitle(f"Jacobian Eigenspectrum ({len(eigenvalues)}×{len(eigenvalues)} dynamics map)",
                  fontsize=13, y=1.02)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight", facecolor="white")
+    fig.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"  Saved: {output_path}")
 
