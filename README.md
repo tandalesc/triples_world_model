@@ -2,9 +2,9 @@
 
 - A state machine that discovers its own states from your data.
 - A minimal world model that learns state dynamics over structured
-(entity, attribute, value) triples using a vanilla transformer encoder.
+(entity, attribute, value) triples.
 - Scales down to as few as 4K parameters (Micro variant) and runs client-side in 303 KB of JavaScript.
-- Modular world dynamics with pluggable natural-language I/O (Mini variant and above).
+- Modular world dynamics with pluggable natural-language I/O (Mini variant and above) (*Experimental!*).
 
 **The core claim**: a small transformer over decomposed triple tokens can learn
 compositional state transformations that generalize to novel entity-state
@@ -35,7 +35,7 @@ latent tensors. The I/O layers are interchangeable.
 - **Set-to-set prediction** (not autoregressive) — triples have no natural order
 - **Input residual**: most of the state persists, model only learns the delta
 - **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
-- *Experimental!* **Modular interfaces** for extending applicability into other domains. Currently working on diffusion-based token-level output: [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
+- **Modular interfaces** (*Experimental!*) for extending applicability into other domains. Currently working on diffusion-based token-level output: [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
 
 ## Quick Start
 
