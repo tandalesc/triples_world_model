@@ -78,8 +78,7 @@ class Trainer:
         print(f"=== Config-driven Training ===")
         print(f"Device: {self.device}")
         print(f"Model: {self.config.model_type} ({self.config.profile})")
-        print(f"Total: {self.model.param_count():,} params "
-              f"({self.model.trainable_param_count():,} trainable)")
+        print(f"Total: {self.model.param_count():,} params")
 
         for stage in self.config.stages:
             self._run_stage(stage)
@@ -101,7 +100,15 @@ class Trainer:
         if stage.dataset == "identity" and hasattr(self.model, "dynamics"):
             if "dynamics" not in freeze:
                 freeze.append("dynamics")
-        self._apply_freeze(freeze)
+
+        # Default unfreeze: length_head when expander is frozen (it must adapt
+        # to transformed bottlenecks from dynamics). Override with explicit
+        # unfreeze=[] to keep it frozen (e.g. uniform-length data).
+        unfreeze = stage.unfreeze
+        if unfreeze is None:
+            unfreeze = ["length_head"] if "expander" in freeze else []
+
+        self._apply_freeze(freeze, unfreeze)
 
         # Load dataset
         train_ds, ds_for_assessment = self._load_datasets(stage, data_dir)
@@ -109,7 +116,10 @@ class Trainer:
         # Print stage info
         trainable_count = self.model.trainable_param_count()
         frozen_parts = freeze if freeze else ["none"]
+        unfrozen_parts = unfreeze if unfreeze else []
         print(f"  Frozen: {', '.join(frozen_parts)}")
+        if unfrozen_parts:
+            print(f"  Unfrozen overrides: {', '.join(unfrozen_parts)}")
         print(f"  Trainable: {trainable_count:,} params")
         print(f"  Train: {len(train_ds)} examples")
         print(f"  Assessment: {len(ds_for_assessment)} examples")
@@ -130,8 +140,10 @@ class Trainer:
         c = self.config
         is_dynamics = stage.dataset == "qa"
 
+        metric_key = phase.metric  # "tok_acc" or "exact"
+
         print(f"\n{'='*60}")
-        print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}")
+        print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
         print(f"{'='*60}")
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -200,11 +212,13 @@ class Trainer:
                 self.model.eval()
                 gen_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
                                n_examples=64, n_steps=c.denoise_steps)
+                gen_cache = gen_m.pop("_gen", None)
 
                 log = f"Epoch {epoch:4d} | loss {avg_loss:.4f} mse={avg_mse:.4f} ce={avg_ce:.4f} | {format_metrics(gen_m)}"
 
-                if gen_m["tok_acc"] > best_metric:
-                    best_metric = gen_m["tok_acc"]
+                cur_metric = gen_m[metric_key]
+                if cur_metric > best_metric:
+                    best_metric = cur_metric
                     best_epoch = epoch
                     no_improve = 0
                     torch.save(self.model.state_dict(), phase_dir / "model_best.pt")
@@ -217,18 +231,18 @@ class Trainer:
 
                 if epoch == 1 or epoch % c.diagnostic_every == 0:
                     print_samples(self.model, ds_for_assessment, self.device, self.tokenizer,
-                                  n=5, n_steps=c.denoise_steps)
+                                  n=5, n_steps=c.denoise_steps, gen_cache=gen_cache)
 
                 if phase.patience > 0 and no_improve >= phase.patience:
                     print(f"\nEarly stopping at epoch {epoch} "
-                          f"(best tok={best_metric:.4f} at epoch {best_epoch})")
+                          f"(best {metric_key}={best_metric:.4f} at epoch {best_epoch})")
                     break
 
         torch.save(self.model.state_dict(), phase_dir / "model_final.pt")
         with open(phase_dir / "history.json", "w") as f:
             json.dump(history, f, indent=2)
 
-        print(f"\n{name} done. Best tok: {best_metric:.4f} at epoch {best_epoch}")
+        print(f"\n{name} done. Best {metric_key}: {best_metric:.4f} at epoch {best_epoch}")
 
     def _load_datasets(self, stage: StageConfig, data_dir: Path):
         c = self.config
@@ -260,8 +274,15 @@ class Trainer:
                 )
         return train_ds, ds_for_assessment
 
-    def _apply_freeze(self, components: list[str]):
-        """Freeze named model components. Unfreezes everything first."""
+    def _apply_freeze(self, components: list[str], unfreeze: list[str] | None = None):
+        """Freeze named model components, then selectively unfreeze overrides.
+
+        Args:
+            components: top-level modules to freeze ("compressor", "expander", "dynamics")
+            unfreeze: sub-components to unfreeze after freezing ("length_head").
+                      Useful when freezing "expander" but the length head must
+                      adapt to transformed bottlenecks from dynamics.
+        """
         # Unfreeze all (except shared_token_emb which is always frozen)
         for name, p in self.model.named_parameters():
             if "shared_token_emb" not in name:
@@ -292,6 +313,21 @@ class Trainer:
                     elif isinstance(obj, nn.Module):
                         for p in obj.parameters():
                             p.requires_grad = False
+
+        # Selectively unfreeze sub-components
+        unfreeze_map = {
+            "length_head": None,
+        }
+        # Resolve length_head location
+        expander = getattr(self.model, "text_expander", None)
+        if expander is not None:
+            unfreeze_map["length_head"] = getattr(expander, "length_head", None)
+
+        for name in (unfreeze or []):
+            module = unfreeze_map.get(name)
+            if module is not None:
+                for p in module.parameters():
+                    p.requires_grad = True
 
     def _resolve_pretrained(self, stage: StageConfig) -> str | None:
         """Resolve pretrained checkpoint path."""

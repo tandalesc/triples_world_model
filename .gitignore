@@ -5,15 +5,42 @@ __pycache__/
 dist/
 build/
 
-# Model checkpoints are large — keep in results/ but don't track .pt files
+# Model checkpoints and experiment artifacts
 results/**/*.pt
+results/**/*.json
+
+# Results directories (experiment outputs, logs, history)
+results/atomic_*/
+results/pet_sim/
+results/seq2seq_*/
+results/t5_*/
+results/t5v2_*/
+results/v16_*/
+results/v17_*/
+results/v18_*/
+results/v19_*/
 
 # Pretrained embeddings
 data/combined/pretrained_embeds.pt
 
 # Raw downloaded datasets (large)
 data/openpi_raw/
+data/atomic_raw/
 data/propara_raw/
+
+# Processed data directories (regenerable from scripts)
+data/atomic/
+data/atomic_10000/
+data/atomic_2k/
+data/atomic_small/
+data/webnlg_multi/.cache/
+data/webnlg_multi_5k/
+
+# Tarballs
+*.tar.gz
 
 # OS
 .DS_Store
+
+# Demo resources (generated assets)
+demo/pet_simulation/resources/
