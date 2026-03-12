@@ -23,25 +23,34 @@ I ran a focused geometry + behavior comparison on a synthetic-but-structured ass
 - **Micro**: comp/context F1 ~0.91, much lower exact-match on harder splits (comp ~0.44, context ~0.39)
 - **Mini**: 1.00 F1 and exact-match on current v2 splits
 
-## Key Probe Visuals (what this section is testing)
+## Mode Delta Vectors (vs identity)
 
-These are the primary plots used to explain the micro-vs-mini geometry difference for mode conditioning:
+| Micro | Mini |
+|:-----:|:----:|
+| ![Micro](cedric_mode_probe_v2_micro/analysis_snapshots/mode_delta_vectors.png) | ![Mini](cedric_mode_probe_v2_mini/analysis_snapshots/mode_delta_vectors.png) |
 
-- **Pre-dynamics latent embeddings**
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/pre_latent_embeddings.png`
-  - `results/cedric_mode_probe_v2_mini/analysis_snapshots/pre_latent_embeddings.png`
-- **Post-dynamics latent space by mode**
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_conditioned_post_latent.png`
-  - `results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_conditioned_post_latent.png`
-- **Mode delta vectors (relative to identity)**
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_delta_vectors.png`
-  - `results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_delta_vectors.png`
+Micro's mode clusters overlap with crossing transport lines — the core entangles modes. Mini separates into three coherent clusters with parallel transport per mode.
+
+## Post-Dynamics Latent Space by Mode
+
+| Micro | Mini |
+|:-----:|:----:|
+| ![Micro](cedric_mode_probe_v2_micro/analysis_snapshots/mode_conditioned_post_latent.png) | ![Mini](cedric_mode_probe_v2_mini/analysis_snapshots/mode_conditioned_post_latent.png) |
+
+Micro is a mode-entangled soup. Mini shows clearer spatial separation, especially identity (blue) maintaining distinct positioning.
+
+## Pre-Dynamics Latent Embeddings
+
+| Micro | Mini |
+|:-----:|:----:|
+| ![Micro](cedric_mode_probe_v2_micro/analysis_snapshots/pre_latent_embeddings.png) | ![Mini](cedric_mode_probe_v2_mini/analysis_snapshots/pre_latent_embeddings.png) |
+
+Pre-dynamics embeddings before mode conditioning. Both show similar spread — the differentiation happens in the dynamics core, not the encoder.
 
 ## Interpretation
 
 - Micro behaves like a compressed approximation with stronger mode entanglement.
-- Mini exhibits clearer regime structure and more coherent mode-conditioned transport.
-- In practice, Mini appears to learn a shared manifold with stronger local operators for mode transitions.
+- Mini learns a qualitatively different latent organization: clean mode-conditioned transport operators on a shared manifold.
 
 ## Quantitative Mode-Delta Signal
 
