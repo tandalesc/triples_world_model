@@ -23,19 +23,18 @@ I ran a focused geometry + behavior comparison on a synthetic-but-structured ass
 - **Micro**: comp/context F1 ~0.91, much lower exact-match on harder splits (comp ~0.44, context ~0.39)
 - **Mini**: 1.00 F1 and exact-match on current v2 splits
 
-## Latent Geometry Assets
+## Key Probe Visuals (what this section is testing)
 
-- Micro:
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/latent_flow.png`
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/eigenspectrum.png`
+These are the primary plots used to explain the micro-vs-mini geometry difference for mode conditioning:
+
+- **Pre-dynamics latent embeddings**
   - `results/cedric_mode_probe_v2_micro/analysis_snapshots/pre_latent_embeddings.png`
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_conditioned_post_latent.png`
-  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_delta_vectors.png`
-- Mini:
-  - `results/cedric_mode_probe_v2_mini/analysis_snapshots/latent_flow.png`
-  - `results/cedric_mode_probe_v2_mini/analysis_snapshots/eigenspectrum.png`
   - `results/cedric_mode_probe_v2_mini/analysis_snapshots/pre_latent_embeddings.png`
+- **Post-dynamics latent space by mode**
+  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_conditioned_post_latent.png`
   - `results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_conditioned_post_latent.png`
+- **Mode delta vectors (relative to identity)**
+  - `results/cedric_mode_probe_v2_micro/analysis_snapshots/mode_delta_vectors.png`
   - `results/cedric_mode_probe_v2_mini/analysis_snapshots/mode_delta_vectors.png`
 
 ## Interpretation
@@ -59,29 +58,9 @@ From `mode_delta_stats.json` (delta vectors relative to identity):
 
 Mini’s operators are more coherent/consistent across sampled states.
 
-## Exhaustive Mini Sweep (CPU)
+## Additional analysis notes
 
-Using enumerated state combinations and PCA projections:
-
-- `results/cedric_mode_probe_v2_mini/analysis_exhaustive/pre_by_task.png`
-- `results/cedric_mode_probe_v2_mini/analysis_exhaustive/post_by_mode.png`
-
-Observed:
-- PRE space shows structured gradients by task.
-- POST space shows substantial mode-dependent reshaping.
-
-### Note on transition graph mapping
-
-A full 8100-state graph over `(user, task, energy, focus, calendar, urgency, mode)` did not close directly because model outputs omit `user` in predicted next-state triples.
-
-Reduced-state mapping over `(task, energy, focus, calendar, urgency, mode)` yields:
-- states: 1620
-- mapped edges: 980
-- self loops: 908
-- components: 1548
-- largest component: 4
-
-This suggests many locally stable regions with sparse cross-region transitions under current learned policy.
+An exhaustive mini sweep was run separately for internal validation on CPU, but is intentionally not the centerpiece of this findings note. The core argument here is carried by the paired probe visuals above (pre-latent, post-by-mode, and mode-delta vectors) that directly test mode-operator structure in micro vs mini.
 
 ## Practical Recommendation
 
