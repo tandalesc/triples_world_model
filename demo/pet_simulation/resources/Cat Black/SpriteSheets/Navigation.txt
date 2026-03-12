@@ -1,0 +1,31 @@
+IDLE: Cat swaying their tail. Recommend to use slower frame rate (see example).
+
+CAT EATING
+Row 1 - Row 4: Front, Left, Back, Right
+
+CAT LAYING
+Row 1, 3, 5, 7: TRANSITION from standing to laying animation (vice versa).
+Between those are normal IDLE animation while laying down.
+
+CAT LICKING
+Row 1 - Row 4: Front, Left, Back, Right
+
+CAT OBSERVING
+Row 1 - Row 4: Front, Left, Back, Right
+
+CAT RUNNING
+Row 1 - Row 4: Front, Left, Back, Right
+
+CAT SITTING
+Row 1, 3, 5, 7: TRANSITION from standing to sitting animation (vice versa).
+Between those are normal IDLE animation while sitting down.
+
+CAT SLEEPING
+Row 1 & 2: Left, Right - Curling Pose
+Row 3    : Left, Right - Laying Pose
+
+CAT STANDING
+Row 1 - Row 4: Front, Left, Back, Right
+
+CAT WALKING
+Row 1 - Row 4: Front, Left, Back, Right
