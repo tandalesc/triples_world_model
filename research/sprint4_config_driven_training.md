@@ -118,10 +118,10 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 **File:** `scripts/prepare_webnlg_multimodal.py` — `train_bpe()`
 </details>
 
-<details>
-<summary>Architecture Notes</summary>
+## Architecture Notes
 
-### Graduated t-Range Curriculum
+<details>
+<summary>Graduated t-Range Curriculum</summary>
 
 Instead of training on full noise range [0,1] from the start, use graduated phases:
 1. **Phase 1** [0.7, 1.0] — high noise only, learn coarse structure. Gate on `tok_acc`.
@@ -129,20 +129,26 @@ Instead of training on full noise range [0,1] from the start, use graduated phas
 3. **Phase 3** [0.0, 1.0] — full range, fine-tune boundaries. Gate on `exact`.
 
 Each phase extends competence incrementally rather than shocking the model with low-noise gradients that destroy high-noise knowledge.
+</details>
 
-### Attention Pool vs Mean Pool
+<details>
+<summary>Attention Pool vs Mean Pool</summary>
 
 Mean pool (`bottleneck.mean(dim=1)`) divides gradients by N×3 (=36). Attention pool (learned query cross-attending to bottleneck) preserves per-position gradient flow. Both the conditioning vector and length head read from the same attention-pooled vector.
+</details>
 
-### Length Prediction Architecture
+<details>
+<summary>Length Prediction Architecture</summary>
 
 Length lives in the expander, not the compressor:
 ```
 bottleneck → cond_attn pool → cond_proj → length_head (2-layer MLP) → scalar
 ```
 During dynamics, the length head reads from the **post-dynamics** bottleneck, predicting the **output** length. The dynamics core must reshape the bottleneck geometry so the length head reads the correct output length.
+</details>
 
-### Natural MSE/CE Curriculum
+<details>
+<summary>Natural MSE/CE Curriculum</summary>
 
 MSE dominates early (large gradients when far from targets). CE becomes effective late (at cell boundaries). Explicit CE weight annealing fights this natural process. Keep CE weight constant.
 </details>
