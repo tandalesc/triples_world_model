@@ -250,39 +250,40 @@ The bottleneck geometry tells a clear story:
 
 The fundamental gap: there's no curriculum bridge between "read mode" (warmup) and "transform question→answer" (dynamics). The jump is too large.
 
-## What to Try Next
+## What to Try Next (Sprint 5)
 
-### 1. Stronger warmup tasks (graduated difficulty)
+### Primary: Role-Conditioned VAE Prior
 
-The reverse task is essentially a permutation — it doesn't require understanding content. We need warmup tasks that force the core to learn *content-dependent* mode-conditional transformations:
+The compressor collapses to 1D because the reconstruction loss doesn't constrain internal geometry — any encoding that decodes correctly is equally good. The role centroid regularizer we added is too weak: the centroids are learned and can themselves collapse onto the same curve if that minimizes the combined loss.
 
-- **Entity extraction**: given a sentence, output just the entity name (shorter output, content-dependent)
-- **Attribute extraction**: output just the relation/attribute mentioned
-- **Paraphrase**: semantically equivalent but syntactically different output (forces learning that different bottleneck positions can encode the same meaning)
-- Graduate: reverse → extraction → paraphrase → QA
+A VAE with role-conditioned priors solves this structurally. Instead of "entity slots should be near an entity centroid," it enforces "entity slots must be distributed according to N(μ_E, σ_E), attribute slots according to N(μ_A, σ_A), value slots according to N(μ_V, σ_V), and these three distributions must be distinct." The KL term makes this a hard geometric constraint, not a soft regularizer.
 
-### 2. Bottleneck supervision curriculum
+**Why this is the right fix:**
+- Directly breaks the 1D manifold. If E/A/V slots are forced into three distinct distributions, the bottleneck is *at minimum* 3-dimensional in role structure, with content variation adding further dimensions within each role.
+- The compressor can't collapse everything onto one curve because the KL term penalizes any encoding where entity and value distributions overlap.
+- Composes with everything else. Once the bottleneck has genuine role-structured dimensionality, the dynamics core has geometric room to learn "keep entity slots, transform value slots." Contrastive mode loss prevents collapse. Bn_loss gives direct supervision. But none of those matter if the underlying space is 1D.
 
-Currently bn_loss fires with a single weight for all non-identity modes. Instead:
+**Implementation path:**
+1. Add μ and log_σ projection heads after the compressor's extraction stage
+2. Reparameterize: z = μ + σ · ε
+3. KL divergence against three learned role-conditioned priors (one per role)
+4. Anneal β from 0 upward during IO training — reconstruction converges first, then the prior gradually imposes structure
+5. Monitor KL per role — if one role's KL drops to zero, that role has posterior-collapsed and needs higher β or a more informative prior
 
-- **Phase 1**: High bn_weight, low denoise weight — force the core to match target bottleneck geometry directly
-- **Phase 2**: Anneal bn_weight down, let denoise loss take over — transition from "match the answer bottleneck" to "generate the answer tokens"
-- This gives the core a direct optimization target (MSE to answer bottleneck) before asking it to produce tokens
+**The deeper lesson from comparing Cedric's probe to the WebNLG results:** the closed-vocab dynamics core works beautifully because it operates on real triples with genuinely high-dimensional structure. The open-vocab pipeline collapses that structure into a 1D manifold during compression, then asks the core to do the same job with fundamentally less geometric information. The fix has to restore dimensionality to the bottleneck, not just improve the training curriculum around a 1D space.
 
-### 3. Partial freeze relaxation
+### Supporting: Contrastive Mode Loss + Bn Supervision Curriculum
 
-Currently compressor/expander are fully frozen during dynamics. The compressor bottleneck geometry is fixed, and the dynamics core must work within it. But the 1D manifold structure may not have enough room for QA transformations:
+Once the bottleneck has real dimensionality from the VAE prior, these two complement it:
 
-- **Unfreeze last compressor layer** during dynamics — let the bottleneck geometry adapt to what dynamics needs
-- Or add a **learnable bottleneck adapter** (1-layer MLP) between compressor and dynamics that can reshape the manifold
+- **Contrastive mode loss**: push same-mode post-dynamics pairs together, different-mode pairs apart. Directly prevents the QA mode collapse from Plot 3.
+- **Bn supervision curriculum**: high bn_weight early in dynamics (direct MSE to answer bottleneck), anneal down to let denoise loss take over. Gives the core a geometric target before asking it to generate tokens.
 
-### 4. Contrastive mode loss
+### Extra ideas (lower priority)
 
-Add an explicit contrastive term that pushes same-mode pairs together and different-mode pairs apart in post-dynamics bottleneck space. This directly penalizes mode collapse.
-
-### 5. Scale up warmup modes
-
-Instead of just 2 modes (identity + reverse), add 4-6 warmup modes of increasing difficulty. Cedric's probe showed Mini can handle 4 clean modes. More modes = more mode-reading pressure = richer initial dynamics circuitry.
+- **Stronger warmup tasks**: graduated difficulty (reverse → entity extraction → paraphrase → QA). Good curriculum but doesn't fix the dimensionality problem.
+- **Partial freeze relaxation**: unfreeze last compressor layer during dynamics. Superseded by the VAE approach which fixes geometry at the source.
+- **Scale up warmup modes**: 4-6 modes instead of 2. Useful for mode-reading but secondary to the structural fix.
 
 ## Current Config
 
