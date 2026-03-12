@@ -81,9 +81,9 @@ Try it: `cd demo/pet_simulation && python -m http.server 8080`
 
 ![Dynamics latent space](research/sprint4_figures/latent_space.png)
 
-Geometry analysis of the pet sim latent space (3,780 states, PCA to 3D) reveals the dynamics core learned a single shared next-state function — pet identity acts as a conditioning signal that adjusts the flow, not a selector for entirely different dynamics. The Jacobian eigenspectrum confirms nontrivial structure: a mix of expansive and contractive directions (mean |λ| ≈ 1.0), not simple contraction or noise. See [analysis tools](#dynamics-analysis) below.
+Geometry analysis of the pet sim latent space (3,780 states, PCA to 3D) reveals the dynamics core learned a single shared next-state function — pet identity acts as a conditioning signal that adjusts the flow, not a selector for entirely different dynamics. The Jacobian eigenspectrum confirms nontrivial structure: a mix of expansive and contractive directions (mean |λ| ≈ 1.0), not simple contraction or noise. More graphs are included in sprint logs [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
 
-See sprint logs [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md) to keep up with current progress.
+See [analysis tools](#dynamics-analysis) below for notes on creating your own graphs from your TWMs.
 
 ### Compositional Generalization Benchmark (1.4K examples)
 
