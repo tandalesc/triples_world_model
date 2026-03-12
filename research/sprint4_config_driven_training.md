@@ -162,6 +162,34 @@ The local operators are not simple contractions or random noise — they show he
 
 In the pet sim, the dynamics core learned one main next-state prediction function, with pet identity acting mostly as a conditioning signal that slightly changes the shape of the flow rather than selecting entirely different dynamics. This is consistent with the architecture's design: decomposed triples let the transformer share structure across entities, and the input residual means the dynamics only needs to learn the delta.
 
+## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
+
+Cedric is an OpenClaw assistant running on a hardened local LXC. He performs a number of monitoring, alert, reminder, automation, and report generation tasks. To sanity-check whether Mini is merely a larger Micro or actually learns a different latent organization, I ran a focused mode-conditioned geometry probe on a structured assistant dataset (`data/cedric_mode_probe_v2`) and compared both families with the same analysis tooling.
+
+### Snapshot results
+
+- Micro (`results/cedric_mode_probe_v2_micro`): comp/context F1 ~0.91 with notably lower exact-match on hard splits.
+- Mini (`results/cedric_mode_probe_v2_mini`): 1.00 across F1/exact on current v2 splits.
+
+### Geometry interpretation
+
+- Micro shows stronger mode overlap/entanglement in post-dynamics latent projections.
+- Mini shows clearer regime organization and cleaner mode-conditioned transport.
+- Mode delta vector analysis (`mode_delta_vectors.png` + `mode_delta_stats.json`) indicates Mini operators are more coherent across states.
+
+### Probe focus
+
+For this sprint log, the key explanatory visuals are the paired micro-vs-mini probe plots:
+- pre-dynamics latent embeddings,
+- post-dynamics latent space by mode,
+- mode delta vectors (vs identity).
+
+These three views most directly answer the question we care about: whether Mini learns a cleaner mode-conditioned operator geometry than Micro.
+
+### Recommendation
+
+Use Mini as the default policy-reasoning core for mode-conditioned assistant behavior; keep Micro as a footprint-first fallback.
+
 ## Current Config
 
 ```json
