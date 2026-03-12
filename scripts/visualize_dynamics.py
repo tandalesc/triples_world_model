@@ -62,12 +62,34 @@ def _is_triple_list(x):
     return isinstance(x, list) and all(isinstance(t, list) and len(t) == 3 for t in x)
 
 
-def load_states_file(path: Path):
+def _state_attr_map(state):
+    out = {}
+    for e, a, v in state:
+        out[(e, a)] = v
+    return out
+
+
+def _extract_label(d, key: str):
+    # key format: entity:attr (e.g., user:state, #mode:type)
+    if ":" in key:
+        ent, attr = key.split(":", 1)
+        return d.get((ent, attr), "n/a")
+    # fallback: try common attrs for entity key
+    for attr in ("state", "type", "attr", "relation"):
+        v = d.get((key, attr))
+        if v is not None:
+            return v
+    return "n/a"
+
+
+def load_states_file(path: Path, label_keys: list[str] | None = None):
     """Load custom states from JSON/JSONL.
 
     Accepted line/object formats:
       - [[e,a,v], ...]
       - {"state_t": [[e,a,v], ...]}
+
+    label_keys: optional list of keys to include in labels (entity or entity:attr).
     """
     states = []
     labels = []
@@ -90,17 +112,13 @@ def load_states_file(path: Path):
         st = _sort_triples(st)
         states.append(st)
 
-        d = {(e, a): v for e, a, v in st}
-        label = {
-            "index": str(i),
-            "mode": d.get(("#mode", "state"), d.get(("#mode", "type"), "unknown")),
-            "user": d.get(("user", "state"), "n/a"),
-            "task": d.get(("task", "state"), "n/a"),
-            "energy": d.get(("energy", "state"), "n/a"),
-            "focus": d.get(("focus", "state"), "n/a"),
-            "calendar": d.get(("calendar", "state"), "n/a"),
-            "urgency": d.get(("urgency", "state"), "n/a"),
-        }
+        d = _state_attr_map(st)
+        label = {"index": str(i)}
+
+        keys = label_keys or ["#mode", "user", "task", "energy", "focus"]
+        for k in keys:
+            label[k] = _extract_label(d, k)
+
         labels.append(label)
 
     if not states:
@@ -378,6 +396,8 @@ def main():
                         help="Color scatter points by this attribute (default: pet)")
     parser.add_argument("--states-file", type=str, default=None,
                         help="Optional JSON/JSONL file with custom states for scatter/flow")
+    parser.add_argument("--label-keys", type=str, default=None,
+                        help="Comma-separated label keys for custom states (e.g. '#mode,user,task,energy' or 'user:state,#mode:type')")
     parser.add_argument("--sample-state-json", type=str, default=None,
                         help="Optional JSON triple-list for eigenspectrum sample state")
     parser.add_argument("--sample-state-file", type=str, default=None,
@@ -397,7 +417,8 @@ def main():
 
     states = labels = None
     if args.states_file:
-        states, labels = load_states_file(Path(args.states_file))
+        label_keys = [x.strip() for x in args.label_keys.split(",")] if args.label_keys else None
+        states, labels = load_states_file(Path(args.states_file), label_keys=label_keys)
 
     sample_state = None
     if args.sample_state_json:
