@@ -37,6 +37,7 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 
 <details>
 <summary>1. adaLN Initialization Symmetry Breaking</summary>
+
 **Problem:** v19's factored adaLN has 3 projections (conditioning, timestep, position). All three were zero-initialized, creating a symmetry-breaking problem — the denoiser started with zero modulation from all sources, couldn't distinguish conditioning signal from noise.
 
 **Fix:** Warm-start the conditioning projection (index 0) with default Kaiming init. Timestep and position projections stay zero-init. The model starts in v18's single-projection optimization landscape and grows into v19's factored design.
@@ -46,6 +47,7 @@ Replaced per-experiment scripts with a JSON config + `Trainer` class.
 
 <details>
 <summary>2. Compressor LayerNorms</summary>
+
 **Problem:** Internal LayerNorms (`cross_ln`, `query_self_ln`, `query_ffn_ln`) were removed in v19 refactor. Without them, bottleneck vectors had inconsistent magnitudes, and the expander couldn't learn a stable mapping.
 
 **Fix:** Restored all three LayerNorms in the extraction pipeline.
@@ -147,33 +149,13 @@ MSE dominates early (large gradients when far from targets). CE becomes effectiv
 
 To understand *how* the dynamics core transforms state, we ran geometry analysis on the pet sim checkpoint (28K params, mini profile, 98.9% exact match). Tools: `scripts/visualize_dynamics.py` and `src/twm/analysis.py`.
 
-### Latent Space Structure
+![Dynamics analysis](sprint4_figures/dynamics_analysis.png)
 
-![Latent space scatter](sprint4_figures/latent_space.png)
-
-3,780 states (5 pets × 756 attribute/action combos), PCA to 3D (68.4% variance explained). Each pet starts from a tight pre-dynamics cluster, then fans out into a larger downstream region after the dynamics step. The inputs are encoded compactly, while most of the variation appears in the transition map itself. The downstream clouds differ by pet, so the model is not ignoring identity, but the overall geometry shows dog-specific variation around a common transition mechanism.
-
-### Flow Field
-
-![Flow field](sprint4_figures/flow_field.png)
-
-PC1 vs PC2 with displacement arrows. Most transitions move in a broadly similar direction, with different magnitudes and branching angles. The learned dynamics have a dominant global transport component — a shared progression axis corresponding to "advance this state forward" — with smaller local deviations depending on which pet/state you started from.
-
-### Jacobian Eigenspectrum
-
-![Eigenspectrum](sprint4_figures/eigenspectrum.png)
-
-Jacobian of the dynamics map at a representative state (Daisy, hungry, tired, content, messy, feed). 768×768 Jacobian (24 positions × 32 d_model).
-
-- Eigenvalue magnitude range: [0.0006, 4.88]
-- Mean |λ|: 1.0
-- 304 expansive directions (|λ| > 1), 455 contractive (|λ| < 1)
-
-The local operators are not simple contractions or random noise — they show heterogeneous structure, including expansive directions and coupled modes. This supports the claim that the core learned real latent dynamics.
+3,780 states (5 pets × 756 attribute/action combos). **Left**: PCA to 3D (68.4% variance). Each pet starts from a tight pre-dynamics cluster, then fans out into a larger downstream region. The downstream clouds differ by pet — the model isn't ignoring identity — but the overall geometry shows variation around a common transition mechanism. **Center**: PC1 vs PC2 flow field. Most transitions share a dominant global transport direction ("advance this state forward") with pet/state-specific deviations. **Right**: Jacobian eigenspectrum at a representative state (Daisy, hungry, tired, content, messy, feed). 768×768 Jacobian with 305 expansive (|λ| > 1) and 451 contractive directions, mean |λ| = 1.0. Not simple contraction or noise — heterogeneous structure with coupled modes.
 
 ### Takeaway
 
-In the pet sim, the dynamics core learned one main next-state prediction function, with pet identity acting mostly as a conditioning signal that slightly changes the shape of the flow rather than selecting entirely different dynamics. This is consistent with the architecture's design: decomposed triples let the transformer share structure across entities, and the input residual means the dynamics only needs to learn the delta.
+The dynamics core learned one shared next-state function, with pet identity as a conditioning signal that adjusts the flow rather than selecting entirely different dynamics. Decomposed triples let the transformer share structure across entities, and the input residual means it only needs to learn the delta.
 
 ## Cedric Mode Geometry Probe (Micro vs Mini, closed-vocab)
 
