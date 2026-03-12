@@ -77,6 +77,7 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 │   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
 │   ├── train.py             # Training loop
 │   ├── eval.py              # Evaluation + attention visualization
+│   ├── analysis.py          # Dynamics geometry tools (Jacobian, flow field)
 │   ├── serve.py             # Inference server
 │   └── vocab.py             # Vocabulary builder
 ├── scripts/                 # Training and plotting scripts
