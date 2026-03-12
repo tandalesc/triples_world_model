@@ -57,9 +57,21 @@ See [`configs/README.md`](configs/README.md) for full recipes (edge deployment, 
 
 ### Open-Vocab: WebNLG (210K+ training pairs)
 
-Current focus. 35K WebNLG knowledge graph entries with natural language, expanded to 210K+ QA pairs. The compressor/expander learns to encode/decode free text through a bottleneck (96.9% exact match on identity reconstruction), then the dynamics core learns question→answer transformations with the IO pipeline frozen.
+35K WebNLG knowledge graph entries with natural language, expanded to 210K+ QA pairs. The compressor/expander learns to encode/decode free text through a bottleneck, then the dynamics core learns question→answer transformations with the IO pipeline frozen.
 
-See sprint logs [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md) to keep up with current progress.
+**Sprint 4 results:**
+- **IO pipeline**: 96.9% exact match on identity reconstruction via graduated t-range curriculum
+- **Mode warmup**: dynamics core learns to read mode conditioning (identity vs reverse), confirmed via attention diagnostics
+- **Dynamics**: QA mode collapses — the core maps all QA inputs to a single bottleneck point rather than learning diverse transformations
+- **Root cause identified**: PCA of compressor bottleneck reveals a 1D manifold (86% variance in PC1). The compressor finds *an* encoding that decodes correctly, but with no geometric constraint it collapses role structure. The dynamics core has no room to work in a 1D space.
+
+| Stage | Metric | Result |
+|-------|--------|--------|
+| IO (identity reconstruction) | Exact match | 96.9% |
+| Mode warmup (identity + reverse) | Mode attention differential | Forming across all layers |
+| Dynamics (question → answer) | QA token accuracy | ~12% (mode collapse) |
+
+**Sprint 5 direction: Role-conditioned VAE prior.** Replace the soft role centroid regularizer with a proper VAE — μ/log_σ projection heads after the compressor, KL divergence against learned per-role priors (entity, attribute, value). This forces the bottleneck into at minimum 3D role-structured geometry, giving the dynamics core room to learn content-dependent transformations. See [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md) for full diagnosis and plan.
 
 Training is config-driven with staged curriculum — see [Quick Start](#quick-start) and [`configs/README.md`](configs/README.md).
 
@@ -134,7 +146,7 @@ uv run python scripts/generate_qa_dataset.py \
 
 # 3. Train (IO stage learns encode/decode, dynamics stage learns transformations)
 # Points to latest experiment at time of writing, you can use your own recipe here.
-uv run python scripts/train.py configs/v19_mini64.json
+uv run python scripts/train.py configs/v20_mini64.json
 ```
 
 ### Closed-vocab training (fixed token set)
