@@ -65,6 +65,7 @@ class TrainingConfig:
     denoise_steps: int = 10
     aux_ce_weight: float = 0.1
     length_weight: float = 0.1
+    bottleneck_weight: float = 0.0  # direct bottleneck MSE (dynamics only)
     log_every: int = 10
     diagnostic_every: int = 50
 

@@ -19,8 +19,6 @@ For now, thanks for checking this out!
 
 ## How It Works
 
-Full architecture details and file map: [`research/architecture.md`](research/architecture.md)
-
 At the center is the **dynamics core** — a transformer that processes triples
 in latent space. You can use it directly with a fixed token set (simulations, domain-specific rules, process automation, benchmarks), or wrap it with a **compressor/expander** for open-vocabulary, natural language and other use cases.
 
@@ -36,6 +34,8 @@ latent tensors. The I/O layers are interchangeable.
 - **Input residual**: most of the state persists, model only learns the delta
 - **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
 - **Modular interfaces** (*Experimental!*) for extending applicability into other domains. Currently working on diffusion-based token-level output: [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
+
+Full architecture details and file map: [`research/architecture.md`](research/architecture.md)
 
 ## Quick Start
 
@@ -76,6 +76,14 @@ from 11K generated training examples by a 29K parameter model at 98.9%
 compositional generalization exact match.
 
 Try it: `cd demo/pet_simulation && python -m http.server 8080`
+
+#### What the dynamics core actually learns
+
+![Dynamics latent space](research/sprint4_figures/latent_space.png)
+
+Geometry analysis of the pet sim latent space (3,780 states, PCA to 3D) reveals the dynamics core learned a single shared next-state function — pet identity acts as a conditioning signal that adjusts the flow, not a selector for entirely different dynamics. The Jacobian eigenspectrum confirms nontrivial structure: a mix of expansive and contractive directions (mean |λ| ≈ 1.0), not simple contraction or noise. More graphs are included in sprint logs [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
+
+See [analysis tools](#dynamics-analysis) below for notes on creating your own graphs from your TWMs.
 
 ### Compositional Generalization Benchmark (1.4K examples)
 
@@ -158,6 +166,33 @@ model = TextDynamicsModel.load("results/my_run/")
 # Interactive REPL (closed-vocab)
 uv run python -m twm.serve \
   --checkpoint results/my_run --interactive
+```
+
+## Dynamics Analysis
+
+Tools for understanding how the dynamics core transforms state. Requires viz extras: `uv sync --extra viz`.
+
+```bash
+# 3D latent space scatter (pre/post dynamics, colored by pet/action/attribute)
+uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim
+
+# Jacobian eigenspectrum at a representative state
+uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --eigenspectrum
+
+# Flow field (displacement arrows in PCA space)
+uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --flow-field
+```
+
+Outputs interactive HTML to the checkpoint directory. The reusable analysis functions live in `src/twm/analysis.py`:
+
+```python
+from twm.analysis import dynamics_jacobian, flow_field, eigenspectrum_plot
+
+# Jacobian eigendecomposition at a given state
+eigenvalues, J = dynamics_jacobian(model, input_ids)
+
+# Flow field: pre→post displacement in PCA space
+origins, displacements = flow_field(model, input_ids_batch, pca)
 ```
 
 ## Project Structure and Architecture

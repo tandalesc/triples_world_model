@@ -231,6 +231,7 @@ src/twm/
   train.py             Training loop with eval, QAT support
   metrics.py           Set-based F1, exact match, delta metrics
   serve.py             Inference wrapper (WorldModel)
+  analysis.py          Dynamics geometry tools (Jacobian, flow field)
   losses.py            Loss functions (CE, diffusion)
   mlp_baseline.py      MLP baseline (no cross-position attention)
   llm_bridge.py        LLM<->TWM bridge for structured reasoning
@@ -247,6 +248,7 @@ scripts/
   build_pretrained_embeds.py  GloVe embedding initialization
   run_mlp_baseline.py         Train + compare MLP vs transformer
   inference_tool.py           Train-if-missing + inference CLI
+  visualize_dynamics.py       Latent space scatter, eigenspectrum, flow field
 
 demo/
   pet_simulation/             Browser-based pet simulator
