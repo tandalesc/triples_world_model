@@ -26,20 +26,94 @@ def _clean(s: str) -> str:
     return s.replace("\u0120", " ").replace("\u010a", "\n").replace("\u00e2\u0122\u0135", "-").strip()
 
 
+def _compute_role_prior_loss(bottleneck, role_centroids):
+    """Pull each slot toward its role-conditioned centroid.
+
+    Slots repeat in E, A, V pattern: positions 0,3,6,... are entity,
+    1,4,7,... are attribute, 2,5,8,... are value.
+
+    Args:
+        bottleneck: (B, N*3, d_model)
+        role_centroids: nn.Embedding(3, d_model) — learned centroids
+
+    Returns:
+        scalar MSE loss
+    """
+    B, T, d = bottleneck.shape
+    device = bottleneck.device
+
+    # Build role index for each slot: [0,1,2, 0,1,2, ...]
+    role_idx = torch.arange(3, device=device).repeat(T // 3)  # (T,)
+    centroids = role_centroids(role_idx)  # (T, d)
+
+    # MSE between each slot and its role centroid
+    return F.mse_loss(bottleneck, centroids.unsqueeze(0).expand_as(bottleneck))
+
+
+def _compute_role_decomposed_bn_loss(bottleneck, target, bn_role_weights):
+    """Role-decomposed bottleneck MSE: separate loss for E, A, V slots.
+
+    Entity and attribute slots should be preserved (Q and A share them).
+    Value slots should transform (that's where new information lives).
+
+    Args:
+        bottleneck: (B, N*3, d) dynamics output
+        target: (B, N*3, d) compressor output for the answer
+        bn_role_weights: (entity_w, attr_w, value_w) loss weights
+
+    Returns:
+        weighted scalar loss, per-role metrics dict
+    """
+    B, T, d = bottleneck.shape
+    device = bottleneck.device
+    w_e, w_a, w_v = bn_role_weights
+
+    # Role masks: E=0,3,6,...  A=1,4,7,...  V=2,5,8,...
+    role_idx = torch.arange(T, device=device) % 3
+    e_mask = role_idx == 0
+    a_mask = role_idx == 1
+    v_mask = role_idx == 2
+
+    e_loss = F.mse_loss(bottleneck[:, e_mask], target[:, e_mask])
+    a_loss = F.mse_loss(bottleneck[:, a_mask], target[:, a_mask])
+    v_loss = F.mse_loss(bottleneck[:, v_mask], target[:, v_mask])
+
+    total = w_e * e_loss + w_a * a_loss + w_v * v_loss
+    role_metrics = {
+        "bn_e": e_loss.item(),
+        "bn_a": a_loss.item(),
+        "bn_v": v_loss.item(),
+    }
+    return total, role_metrics
+
+
 def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            output_len, device, timestep, mode_ids=None,
                            aux_ce_weight=0.1, length_weight=0.1,
-                           bottleneck_weight=0.0):
+                           bottleneck_weight=0.0, role_prior_weight=0.0,
+                           bn_role_weights=None, detach_dynamics_expander=False):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
     When mode_ids is provided: dynamics mode (run dynamics core, output is target).
+
+    Args:
+        bn_role_weights: (entity_w, attr_w, value_w) for role-decomposed bn loss.
+            If None, uses uniform bottleneck_weight on all slots.
+        detach_dynamics_expander: if True, detach bottleneck before expander
+            during dynamics training. Core trains on bn loss only, no token
+            gradients fighting its exploration of W-space.
     """
     input_ids = input_ids.to(device)
     input_pad = input_pad.to(device)
     token_emb = model.shared_token_emb
 
     bottleneck = model.compress(input_ids, input_pad)
+
+    # Role-conditioned prior: pull each slot toward its role centroid.
+    role_loss = torch.tensor(0.0, device=device)
+    if role_prior_weight > 0 and hasattr(model, "role_centroids"):
+        role_loss = _compute_role_prior_loss(bottleneck, model.role_centroids)
 
     bottleneck_target = None
     if mode_ids is not None:
@@ -49,7 +123,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         output_pad = output_pad.to(device)
 
         # Compute target bottleneck for direct supervision (detached)
-        if bottleneck_weight > 0:
+        if bottleneck_weight > 0 or bn_role_weights is not None:
             with torch.no_grad():
                 bottleneck_target = model.compress(output_ids, output_pad)
 
@@ -61,7 +135,10 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         target_ids = input_ids
         target_pad = input_pad
 
-    pred_emb, _ = model.forward_expander(bottleneck, target_ids, target_pad, timestep=timestep)
+    # Detach bottleneck before expander during dynamics: core trains on
+    # bn loss only, token-level gradients don't fight W-space exploration.
+    expander_input = bottleneck.detach() if (detach_dynamics_expander and mode_ids is not None) else bottleneck
+    pred_emb, _ = model.forward_expander(expander_input, target_ids, target_pad, timestep=timestep)
 
     non_pad = ~target_pad
     metrics = {}
@@ -82,7 +159,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
 
         # Per-mode token accuracy (dynamics only)
         if mode_ids is not None:
-            for mode_val, mode_name in [(0, "id"), (1, "qa")]:
+            for mode_val, mode_name in [(0, "id"), (1, "qa"), (2, "rev")]:
                 mask = mode_ids == mode_val
                 if mask.any():
                     mode_non_pad = ~target_pad[mask]
@@ -98,23 +175,32 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         logits = model.text_expander.decode_proj_logits(pred_emb)
         aux_loss = F.cross_entropy(logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0)
 
-    len_pred = model.forward_length(bottleneck)
+    len_pred = model.forward_length(expander_input)
     len_loss = F.mse_loss(len_pred, output_len.float().to(device))
 
+    # Bottleneck loss: role-decomposed or uniform
+    # Apply to all non-identity modes (qa=1, reverse=2, etc.)
     bn_loss = torch.tensor(0.0, device=device)
-    if bottleneck_target is not None and bottleneck_weight > 0:
-        # Direct bottleneck supervision: dynamics output should match
-        # what the compressor would produce from the answer text.
-        # Only apply to QA examples (mode=1), not identity (mode=0).
-        qa_mask = mode_ids == 1
-        if qa_mask.any():
-            bn_loss = F.mse_loss(bottleneck[qa_mask], bottleneck_target[qa_mask])
+    if bottleneck_target is not None:
+        transform_mask = mode_ids != 0
+        if transform_mask.any():
+            if bn_role_weights is not None:
+                bn_loss, bn_metrics = _compute_role_decomposed_bn_loss(
+                    bottleneck[transform_mask], bottleneck_target[transform_mask], bn_role_weights
+                )
+                metrics.update(bn_metrics)
+            elif bottleneck_weight > 0:
+                bn_loss = F.mse_loss(bottleneck[transform_mask], bottleneck_target[transform_mask])
 
-    total = mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss + bottleneck_weight * bn_loss
+    bn_w = bottleneck_weight if bn_role_weights is None else 1.0
+    total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
+             + bn_w * bn_loss + role_prior_weight * role_loss)
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
     metrics["len_loss"] = len_loss.item()
-    if bottleneck_weight > 0:
+    if bottleneck_weight > 0 or bn_role_weights is not None:
         metrics["bn_loss"] = bn_loss.item()
+    if role_prior_weight > 0:
+        metrics["role_loss"] = role_loss.item()
     return total, metrics

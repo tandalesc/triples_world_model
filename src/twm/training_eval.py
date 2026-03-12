@@ -61,7 +61,7 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
     )
 
     tok_match = total_tok = exact_count = len_match = 0
-    id_tok = id_total = qa_tok = qa_total = 0
+    id_tok = id_total = qa_tok = qa_total = rev_tok = rev_total = 0
 
     for i in range(n):
         tgt = [x for x in target_ids[i].tolist() if x != pad_id]
@@ -86,9 +86,12 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
             if mode == 0:
                 id_tok += matches
                 id_total += tgt_len
-            else:
+            elif mode == 1:
                 qa_tok += matches
                 qa_total += tgt_len
+            elif mode == 2:
+                rev_tok += matches
+                rev_total += tgt_len
 
         # Exact match requires correct length AND all tokens match
         if pl == tgt_len and pred == tgt:
@@ -103,6 +106,8 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
         result["tok_id"] = id_tok / id_total
     if qa_total > 0:
         result["tok_qa"] = qa_tok / qa_total
+    if rev_total > 0:
+        result["tok_rev"] = rev_tok / rev_total
 
     # Stash generation results for print_samples to reuse
     result["_gen"] = (target_ids, gen_ids, pred_lens, mode_ids, input_ids)
@@ -136,7 +141,7 @@ def print_samples(model, dataset, device, tokenizer, n=5, n_steps=10,
             model, dataset, device, n, n_steps
         )
 
-    mode_names = {0: "ID", 1: "QA"}
+    mode_names = {0: "ID", 1: "QA", 2: "REV"}
     print(f"\n{'='*70}")
     for i in range(n):
         tgt_ids_list = [x for x in target_ids[i].tolist() if x != pad_id]
@@ -178,6 +183,67 @@ def print_samples(model, dataset, device, tokenizer, n=5, n_steps=10,
     print(f"{'='*70}", flush=True)
 
 
+@torch.no_grad()
+def diagnose_mode_attention(model, dataset, device, n_examples=64):
+    """Analyze dynamics core attention to mode triple, split by mode.
+
+    Reports per-layer, per-head mean attention from data positions to mode
+    positions, separately for each mode. Mode-reading circuitry shows as
+    mode-dependent attention patterns across heads.
+
+    The mode triple occupies positions 0-2 in the dynamics input.
+    Data triples start at position 3.
+    """
+    model.eval()
+    n = min(n_examples, len(dataset))
+
+    input_ids = dataset._input_token_ids[:n].to(device)
+    input_pad = dataset._input_pad_mask[:n].to(device)
+    mode_ids = dataset._modes[:n].to(device)
+
+    bottleneck = model.compress(input_ids, input_pad)
+
+    # Build dynamics input with mode triple (same as forward_dynamics)
+    mode_triple = model._build_mode_triple(mode_ids)  # (B, 3, d)
+    x = torch.cat([mode_triple, bottleneck], dim=1)  # (B, 3+N*3, d)
+
+    # Extract per-layer attention weights
+    attn_weights = model.dynamics.extract_attention_weights(x)
+    # Each: (B, n_heads, T, T) — already on CPU
+
+    unique_modes = mode_ids.unique().cpu()
+    mode_labels = {0: "identity", 1: "qa", 2: "reverse"}
+
+    print(f"\n{'='*60}")
+    print("Mode-Attention Diagnostic (data→mode attention)")
+    print(f"{'='*60}")
+
+    for li, layer_attn in enumerate(attn_weights):
+        # layer_attn: (B, n_heads, T, T)
+        # Attention from data positions (rows 3+) to mode positions (cols 0:3)
+        data_to_mode = layer_attn[:, :, 3:, :3].mean(dim=(2, 3))  # (B, n_heads)
+
+        print(f"\nLayer {li}:")
+        mode_means = {}
+        for mode_val in unique_modes:
+            mask = (mode_ids.cpu() == mode_val)
+            mode_name = mode_labels.get(mode_val.item(), f"mode_{mode_val}")
+            mode_attn = data_to_mode[mask].mean(dim=0)  # (n_heads,)
+            mode_means[mode_val.item()] = mode_attn
+            head_strs = " ".join(f"h{h}={v:.4f}" for h, v in enumerate(mode_attn))
+            print(f"  {mode_name:>10}: {head_strs}")
+
+        # Differential between modes (if exactly 2 modes)
+        if len(unique_modes) == 2:
+            m0, m1 = unique_modes.tolist()
+            diff = mode_means[m1] - mode_means[m0]
+            diff_str = " ".join(f"h{h}={v:+.4f}" for h, v in enumerate(diff))
+            max_diff = diff.abs().max().item()
+            print(f"  {'diff':>10}: {diff_str}  (max |diff|={max_diff:.4f})")
+
+    print(f"{'='*60}\n", flush=True)
+
+
 def format_metrics(metrics: dict) -> str:
     """Format metrics dict into a log string."""
     parts = [f"tok={metrics['tok_acc']:.3f}", f"exact={metrics['exact']:.3f}",
@@ -186,4 +252,6 @@ def format_metrics(metrics: dict) -> str:
         parts.append(f"id={metrics['tok_id']:.3f}")
     if "tok_qa" in metrics:
         parts.append(f"qa={metrics['tok_qa']:.3f}")
+    if "tok_rev" in metrics:
+        parts.append(f"rev={metrics['tok_rev']:.3f}")
     return " ".join(parts)

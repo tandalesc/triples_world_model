@@ -8,6 +8,7 @@ there is nothing architecturally special about a mode triple.
 Modes:
   - identity (0): passthrough — reconstruct input
   - qa (1): transform — question → answer
+  - reverse (2): reverse triple order — forces mode-reading circuitry
 
 Pipeline:
     input text → Compressor → [mode_triple | bottleneck] → Dynamics
@@ -27,7 +28,7 @@ from .modules import TransformerDynamics
 from .text_compressor import TextCompressor
 from .text_expander import TextExpander
 
-NUM_MODES = 2  # identity=0, qa=1
+NUM_MODES = 3  # identity=0, qa=1, reverse=2
 
 
 class TextDynamicsModel(nn.Module):
@@ -91,6 +92,11 @@ class TextDynamicsModel(nn.Module):
 
         # Role encoding for mode triples — same E/A/V structure as data
         self.mode_role_emb = nn.Embedding(3, d)
+
+        # Role centroids for bottleneck structure prior.
+        # Entity/attribute/value slots are pulled toward learned centroids,
+        # imposing role-conditioned geometry on the bottleneck space.
+        self.role_centroids = nn.Embedding(3, d)
 
         self.text_expander = TextExpander(
             token_emb=self.shared_token_emb,
