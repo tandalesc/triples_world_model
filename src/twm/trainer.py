@@ -20,7 +20,7 @@ from .text_dataset import TextDataset
 from .text_pair_dataset import TextPairDataset
 from .training_config import TrainingConfig, StageConfig, PhaseConfig
 from .training_losses import sample_timestep, compute_diffusion_loss
-from .training_eval import assess, print_samples, format_metrics, diagnose_mode_attention
+from .training_eval import assess, print_samples, format_metrics, diagnose_mode_attention, save_latent_snapshot
 
 
 def _resolve_device(device_str: str | None) -> torch.device:
@@ -157,6 +157,7 @@ class Trainer:
         best_epoch = 0
         no_improve = 0
         history = []
+        pca_basis = None
 
         # Initial assessment
         init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
@@ -285,6 +286,12 @@ class Trainer:
                     print(f"\nEarly stopping at epoch {epoch} "
                           f"(best {metric_key}={best_metric:.4f} at epoch {best_epoch})")
                     break
+
+            if c.snapshot_every > 0 and (epoch == 1 or epoch % c.snapshot_every == 0):
+                pca_basis = save_latent_snapshot(
+                    self.model, ds_for_assessment, self.device,
+                    epoch, name, phase_dir, pca_basis=pca_basis
+                )
 
         torch.save(self.model.state_dict(), phase_dir / "model_final.pt")
         with open(phase_dir / "history.json", "w") as f:

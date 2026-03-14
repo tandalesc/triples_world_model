@@ -74,6 +74,7 @@ class TrainingConfig:
     kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.
     log_every: int = 10
     diagnostic_every: int = 50
+    snapshot_every: int = 0  # 0 = disabled; >0 = save latent PCA frame every N epochs
 
     # Stages
     stages: list[StageConfig] = field(default_factory=list)

@@ -23,6 +23,7 @@
     "detach_dynamics_expander": true,
     "log_every": 10,
     "diagnostic_every": 50,
+    "snapshot_every": 10,
     "stages": [
         {
             "name": "io",
