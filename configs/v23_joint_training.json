@@ -1,0 +1,61 @@
+{
+    "model_type": "dynamics",
+    "profile": "mini",
+    "d_model": 64,
+    "max_triples": 12,
+    "text_compressor_layers": 3,
+    "text_expander_layers": 3,
+    "dynamics_layers": 4,
+    "max_text_tokens": 64,
+    "dropout": 0.1,
+    "alpha_min": 0.01,
+    "vae": true,
+    "data_dir": "data/webnlg_multi",
+    "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
+    "out_dir": "results/v23_joint_training",
+    "batch_size": 128,
+    "denoise_steps": 10,
+    "aux_ce_weight": 0.1,
+    "length_weight": 0.1,
+    "kl_weight": 0.001,
+    "kl_anneal_epochs": 100,
+    "spectral_weight": 0.1,
+    "bn_role_weights": [1.0, 1.0, 2.0],
+    "detach_dynamics_expander": false,
+    "log_every": 10,
+    "diagnostic_every": 50,
+    "snapshot_every": 10,
+    "stages": [
+        {
+            "name": "io_warmup",
+            "dataset": "identity",
+            "lr": 3e-4,
+            "max_examples": 30000,
+            "phases": [
+                {"t_min": 0.7, "t_max": 1.0, "epochs": 30, "patience": 0}
+            ]
+        },
+        {
+            "name": "joint_io",
+            "dataset": "identity",
+            "joint": true,
+            "lr": 3e-4,
+            "max_examples": 30000,
+            "phases": [
+                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 100},
+                {"t_min": 0.4, "t_max": 1.0, "epochs": 400, "patience": 100, "metric": "exact"},
+                {"t_min": 0.0, "t_max": 1.0, "epochs": 800, "patience": 150, "metric": "exact"}
+            ]
+        },
+        {
+            "name": "dynamics",
+            "dataset": "qa",
+            "freeze": ["compressor", "expander"],
+            "max_examples": 15000,
+            "phases": [
+                {"t_min": 0.0, "t_max": 1.0, "lr": 1e-3, "epochs": 800, "patience": 150}
+            ]
+        }
+    ],
+    "device": "cuda"
+}

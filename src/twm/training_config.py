@@ -35,6 +35,7 @@ class StageConfig:
     weight_decay: float = 0.01
     freeze: list[str] = field(default_factory=list)  # ["compressor", "expander"]
     unfreeze: list[str] | None = None  # None = auto (unfreeze length_head when expander frozen); [] = no overrides
+    joint: bool = False  # Route identity data through dynamics (mode=identity) for joint training
     pretrained: str | None = None  # checkpoint path, None = auto-detect
     max_examples: int | None = None  # None = inherit from top-level
 

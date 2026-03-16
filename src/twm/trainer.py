@@ -97,10 +97,10 @@ class Trainer:
         if pretrained:
             self._load_pretrained(pretrained)
 
-        # Apply freezes — auto-freeze dynamics during IO stages
+        # Apply freezes — auto-freeze dynamics during IO stages (unless joint training)
         freeze = list(stage.freeze)
         if stage.dataset == "identity" and hasattr(self.model, "dynamics"):
-            if "dynamics" not in freeze:
+            if "dynamics" not in freeze and not stage.joint:
                 freeze.append("dynamics")
 
         # Default unfreeze: length_head when expander is frozen (it must adapt
@@ -140,7 +140,7 @@ class Trainer:
         phase_dir = self.out_dir / name
         phase_dir.mkdir(parents=True, exist_ok=True)
         c = self.config
-        is_dynamics = stage.dataset in ("qa", "mode_warmup")
+        is_dynamics = stage.dataset in ("qa", "mode_warmup") or stage.joint
 
         metric_key = phase.metric  # "tok_acc" or "exact"
 
@@ -191,15 +191,28 @@ class Trainer:
                 timestep = sample_timestep(B, self.device, phase.t_min, phase.t_max, phase.bias_power)
 
                 if is_dynamics:
-                    # Mode warmup: use bn loss for direct bottleneck supervision
-                    # + detach expander so core trains on bn signal, not indirect
-                    # token gradients through frozen expander
+                    # Dynamics path: route through dynamics core with mode conditioning.
+                    # For joint training on identity data, use same text as input/output
+                    # with mode=0 (identity) so dynamics gradients flow back to compressor.
+                    if stage.joint and stage.dataset == "identity":
+                        in_ids = train_ds._text_token_ids[idx]
+                        in_pad = train_ds._text_pad_mask[idx]
+                        out_ids = in_ids
+                        out_pad = in_pad
+                        out_len = train_ds._text_lengths[idx]
+                        batch_modes = torch.zeros(B, dtype=torch.long)
+                    else:
+                        in_ids = train_ds._input_token_ids[idx]
+                        in_pad = train_ds._input_pad_mask[idx]
+                        out_ids = train_ds._output_token_ids[idx]
+                        out_pad = train_ds._output_pad_mask[idx]
+                        out_len = train_ds._output_lengths[idx]
+                        batch_modes = train_ds._modes[idx]
                     loss, batch_m = compute_diffusion_loss(
                         self.model,
-                        train_ds._input_token_ids[idx], train_ds._input_pad_mask[idx],
-                        train_ds._output_token_ids[idx], train_ds._output_pad_mask[idx],
-                        train_ds._output_lengths[idx], self.device, timestep,
-                        mode_ids=train_ds._modes[idx],
+                        in_ids, in_pad, out_ids, out_pad,
+                        out_len, self.device, timestep,
+                        mode_ids=batch_modes,
                         aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
                         bottleneck_weight=c.bottleneck_weight,
                         role_prior_weight=c.role_prior_weight,
