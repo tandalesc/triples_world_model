@@ -99,7 +99,8 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Micro is viable**: 80K params (57x smaller), 0.91 context-dep F1
 - **Pet sim demo**: 29K params, 98.9% exact match, runs client-side in 303 KB JS
 - **Open-vocab (staged)**: 81.1% exact match on ATOMIC 10K with compressor/expander (identity mode)
-- **Open-vocab (joint+dynamics)**: 19% exact / 73% tok_acc on WebNLG with VAE bottleneck, joint training, and dynamics core online (v25, sprint 5)
+- **Open-vocab (joint+dynamics, VAE)**: 19% exact / 73% tok_acc on WebNLG IO with VAE bottleneck (v25); 26% QA tok_acc with dynamics (v27)
+- **Open-vocab (no VAE)**: 61% exact / 95% tok_acc on WebNLG IO in 150 epochs (v30, sprint 5). Best architecture: no VAE, joint training, spectral penalty on deterministic bottleneck.
 - **Beats frontier LLMs**: 100% attr accuracy vs 4-8/8 for Claude/Gemini/GPT on ATOMIC
 
 ## VAE + Diffusion Gotchas
@@ -109,12 +110,13 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Length head reads pre-dynamics mu.** Length is a property of the input, not the transformation. Reading post-dynamics bottleneck makes the length head chase a moving target.
 - **Joint training prevents bottleneck collapse.** Staged IO→dynamics fails because the compressor collapses to 1D before dynamics arrives. Joint training (dynamics from epoch 1 with zero-init gate) keeps spectral loss at 0.04 vs 1.0 for staged. Use `StageConfig.joint=true`.
 - **Warmup is counterproductive.** Pre-trained IO geometry gets destroyed when random dynamics comes online. Co-evolution from scratch works better.
+- **Drop the VAE.** With joint training + spectral penalty, VAE is pure overhead. No-VAE (v30) trains 5-10x faster and reaches 95% tok_acc / 61% exact in IO phase 1. The VAE introduced 3 bugs (spectral on noise, double-noise mismatch, z/mu divergence) that took hours to fix. Without VAE, the bottleneck is deterministic — no train/eval mismatch, no noise masking collapse.
 
 ## Training
 
 Config-driven via JSON: `uv run python scripts/train.py configs/<name>.json`
 Training configs define stages (io, joint_io, dynamics) with phases (graduated noise curriculum).
-Key configs: `v25_clean_conditioning.json` (current best joint training setup).
+Key configs: `v30_no_vae.json` (best architecture — no VAE, joint training), `v28_d128.json` (scale-up test).
 Submit to GPU server via wartable MCP: `mcp__wartable__submit_job`.
 
 ## Data Format
