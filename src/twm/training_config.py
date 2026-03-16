@@ -72,6 +72,7 @@ class TrainingConfig:
     role_prior_weight: float = 0.0  # role-conditioned centroid regularization (legacy, use vae instead)
     kl_weight: float = 0.0  # VAE KL weight (β). 0 = no KL. Annealed from 0 to this value.
     kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.
+    spectral_weight: float = 0.0  # spectral penalty weight. Penalizes bottleneck collapse to 1D manifold.
     log_every: int = 10
     diagnostic_every: int = 50
     snapshot_every: int = 0  # 0 = disabled; >0 = save latent PCA frame every N epochs

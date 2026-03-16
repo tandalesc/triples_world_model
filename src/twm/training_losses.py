@@ -26,6 +26,53 @@ def _clean(s: str) -> str:
     return s.replace("\u0120", " ").replace("\u010a", "\n").replace("\u00e2\u0122\u0135", "-").strip()
 
 
+def _compute_spectral_loss(bottleneck, n_roles=3):
+    """Penalize bottleneck covariance collapse per role.
+
+    For each role (E, A, V), computes the covariance of bottleneck vectors
+    across the batch, then penalizes when the top eigenvalue dominates
+    (PC1 explained variance ratio → 1.0 means 1D collapse).
+
+    Loss = mean over roles of (λ_max / Σλ), which is 1/d when perfectly
+    spread and approaches 1.0 when collapsed to 1D.
+
+    Args:
+        bottleneck: (B, N*3, d_model)
+
+    Returns:
+        scalar loss, metrics dict with per-role PC1 ratios
+    """
+    B, T, d = bottleneck.shape
+    device = bottleneck.device
+
+    role_idx = torch.arange(T, device=device) % n_roles
+    role_names = ["entity", "attribute", "value"]
+    total = torch.tensor(0.0, device=device)
+    metrics = {}
+
+    for r in range(n_roles):
+        mask = role_idx == r
+        # (B, n_slots_per_role, d) → (B * n_slots_per_role, d)
+        vecs = bottleneck[:, mask].reshape(-1, d)
+        if vecs.shape[0] < 2:
+            continue
+        # Center
+        vecs = vecs - vecs.mean(dim=0, keepdim=True)
+        # Covariance: (d, d)
+        cov = (vecs.T @ vecs) / (vecs.shape[0] - 1)
+        # Eigenvalues (symmetric → real)
+        eigvals = torch.linalg.eigvalsh(cov)  # ascending order
+        eigvals = eigvals.clamp(min=1e-8)
+        # PC1 ratio = max eigenvalue / sum
+        pc1_ratio = eigvals[-1] / eigvals.sum()
+        total = total + pc1_ratio
+        metrics[f"spec_{role_names[r]}"] = pc1_ratio.item()
+
+    total = total / n_roles
+    metrics["spec_loss"] = total.item()
+    return total, metrics
+
+
 def _compute_role_prior_loss(bottleneck, role_centroids):
     """Pull each slot toward its role-conditioned centroid.
 
@@ -92,7 +139,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            aux_ce_weight=0.1, length_weight=0.1,
                            bottleneck_weight=0.0, role_prior_weight=0.0,
                            bn_role_weights=None, detach_dynamics_expander=False,
-                           kl_weight=0.0):
+                           kl_weight=0.0, spectral_weight=0.0):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
@@ -105,6 +152,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
             during dynamics training. Core trains on bn loss only, no token
             gradients fighting its exploration of W-space.
         kl_weight: VAE KL weight (β), already annealed by caller.
+        spectral_weight: weight for spectral penalty (prevents bottleneck
+            collapse to 1D manifold by penalizing dominant eigenvalues).
     """
     input_ids = input_ids.to(device)
     input_pad = input_pad.to(device)
@@ -209,9 +258,15 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
     if kl_weight > 0 and "kl_loss" in vae_info:
         kl_loss = vae_info["kl_loss"]
 
+    # Spectral penalty: prevent bottleneck collapse to 1D
+    spec_loss = torch.tensor(0.0, device=device)
+    if spectral_weight > 0:
+        spec_loss, spec_metrics = _compute_spectral_loss(bottleneck)
+        metrics.update(spec_metrics)
+
     total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
              + bn_w * bn_loss + role_prior_weight * role_loss
-             + kl_weight * kl_loss)
+             + kl_weight * kl_loss + spectral_weight * spec_loss)
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
@@ -225,4 +280,6 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         for k in ("kl_entity", "kl_attribute", "kl_value"):
             if k in vae_info:
                 metrics[k] = vae_info[k]
+    if spectral_weight > 0:
+        metrics["spec"] = spec_loss.item()
     return total, metrics
