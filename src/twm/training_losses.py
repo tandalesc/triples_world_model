@@ -174,8 +174,9 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         bottleneck = compress_out
         expander_bn = bottleneck
 
-    # Save pre-dynamics bottleneck for length prediction — length is a
-    # property of the input, not the dynamics transformation.
+    # Length bottleneck: pre-dynamics for IO (length = input property),
+    # post-dynamics for QA (length = output property, only known after transform).
+    # Set pre-dynamics default here; overridden after dynamics in QA branch.
     length_bn = expander_bn
 
     # Role-conditioned prior: pull each slot toward its role centroid (legacy).
@@ -206,6 +207,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         # z, not from the dynamics path.
         bottleneck = model.forward_dynamics(expander_bn, mode_ids)
         expander_bn = bottleneck
+        # QA length comes from post-dynamics bottleneck (answer length)
+        length_bn = expander_bn
         target_ids = output_ids
         target_pad = output_pad
     else:
