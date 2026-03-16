@@ -89,7 +89,8 @@ class TransformerDynamics(nn.Module):
     (B, T, d_model) vectors can feed into this.
     """
 
-    def __init__(self, d_model: int, n_heads: int, n_layers: int, d_ff: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, n_heads: int, n_layers: int, d_ff: int,
+                 dropout: float = 0.1, zero_init: bool = False):
         super().__init__()
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -103,9 +104,16 @@ class TransformerDynamics(nn.Module):
             encoder_layer,
             num_layers=n_layers,
         )
+        # Output gate: zero-init so dynamics starts as identity (delta=0)
+        # when used with input residual. Learns to open as training progresses.
+        self.out_gate = nn.Linear(d_model, d_model, bias=False)
+        if zero_init:
+            nn.init.zeros_(self.out_gate.weight)
+        else:
+            nn.init.eye_(self.out_gate.weight)
 
     def forward(self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
-        return self.encoder(x, src_key_padding_mask=src_key_padding_mask)
+        return self.out_gate(self.encoder(x, src_key_padding_mask=src_key_padding_mask))
 
     def extract_attention_weights(self, x: torch.Tensor, pad_mask: torch.Tensor | None = None) -> list[torch.Tensor]:
         """Extract per-layer attention weights for visualization.

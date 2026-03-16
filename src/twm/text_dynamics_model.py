@@ -78,13 +78,14 @@ class TextDynamicsModel(nn.Module):
             vae=vae,
         )
 
-        # Dynamics core
+        # Dynamics core — zero_init so delta starts at 0 with input residual
         self.dynamics = TransformerDynamics(
             d_model=d,
             n_heads=config.n_heads,
             n_layers=dyn_layers,
             d_ff=config.d_ff,
             dropout=dropout,
+            zero_init=True,
         )
 
         # Mode triples: learned vectors in W-space, one triple per mode.
