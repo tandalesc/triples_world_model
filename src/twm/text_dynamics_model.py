@@ -155,12 +155,16 @@ class TextDynamicsModel(nn.Module):
     def forward_dynamics(self, bottleneck, mode_ids):
         """Run dynamics core with mode triple conditioning and input residual.
 
+        The input residual means the core learns a delta, not the full output.
+        For identity mode, the optimal delta is zero — making identity the
+        default behavior from initialization.
+
         Args:
             bottleneck: (B, N*3, d) from compressor
             mode_ids: (B,) integer mode IDs
 
         Returns:
-            (B, N*3, d) transformed bottleneck
+            (B, N*3, d) transformed bottleneck (input + delta)
         """
         B = bottleneck.shape[0]
 
@@ -173,8 +177,11 @@ class TextDynamicsModel(nn.Module):
         # Run dynamics transformer
         x = self.dynamics(x)
 
-        # Strip mode triple, return data positions
-        return x[:, 3:]  # (B, N*3, d)
+        # Strip mode triple, keep data positions
+        delta = x[:, 3:]  # (B, N*3, d)
+
+        # Input residual: core learns the delta, not the full output
+        return bottleneck + delta
 
     def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None):
         return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep)
