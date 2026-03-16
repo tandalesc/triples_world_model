@@ -50,7 +50,7 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Decomposed triples, not sentence embeddings.** Each entity/attribute/value is its own token. Compositionality comes from structure, not embedding space.
 - **Set-to-set, not autoregressive.** Parallel prediction of all output positions. Closer to BERT than GPT.
 - **Embedding-agnostic.** The dynamics core doesn't prescribe an embedding space. Closed-vocab uses learned embeddings; open-vocab uses BPE compressor/expander.
-- **Input residual.** Most state persists across transformations. The model learns the delta.
+- **Input residual.** Most state persists across transformations. The model learns the delta. In the open-vocab path, `forward_dynamics` returns `bottleneck + out_gate(transformer(x))` where the gate is zero-initialized for identity at init.
 
 ## Config Profiles
 
@@ -98,8 +98,24 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Mini matches Base**: 178K params (25x smaller) gets identical context-dep F1
 - **Micro is viable**: 80K params (57x smaller), 0.91 context-dep F1
 - **Pet sim demo**: 29K params, 98.9% exact match, runs client-side in 303 KB JS
-- **Open-vocab**: 81.1% exact match on ATOMIC 10K with compressor/expander (identity mode)
+- **Open-vocab (staged)**: 81.1% exact match on ATOMIC 10K with compressor/expander (identity mode)
+- **Open-vocab (joint+dynamics)**: 19% exact / 73% tok_acc on WebNLG with VAE bottleneck, joint training, and dynamics core online (v25, sprint 5)
 - **Beats frontier LLMs**: 100% attr accuracy vs 4-8/8 for Claude/Gemini/GPT on ATOMIC
+
+## VAE + Diffusion Gotchas
+
+- **Spectral loss must measure mu, not z.** VAE sampling noise masks bottleneck collapse. Always compute geometry metrics on the deterministic mu.
+- **Condition diffusion expander on mu, not z.** Double-noise (VAE + diffusion) causes train/eval mismatch — the expander learns to denoise against noisy conditioning but sees clean mu at eval, converging to a single attractor.
+- **Length head reads pre-dynamics mu.** Length is a property of the input, not the transformation. Reading post-dynamics bottleneck makes the length head chase a moving target.
+- **Joint training prevents bottleneck collapse.** Staged IO→dynamics fails because the compressor collapses to 1D before dynamics arrives. Joint training (dynamics from epoch 1 with zero-init gate) keeps spectral loss at 0.04 vs 1.0 for staged. Use `StageConfig.joint=true`.
+- **Warmup is counterproductive.** Pre-trained IO geometry gets destroyed when random dynamics comes online. Co-evolution from scratch works better.
+
+## Training
+
+Config-driven via JSON: `uv run python scripts/train.py configs/<name>.json`
+Training configs define stages (io, joint_io, dynamics) with phases (graduated noise curriculum).
+Key configs: `v25_clean_conditioning.json` (current best joint training setup).
+Submit to GPU server via wartable MCP: `mcp__wartable__submit_job`.
 
 ## Data Format
 
