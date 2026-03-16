@@ -78,6 +78,12 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
 
     tok_match = total_tok = exact_count = len_match = 0
     id_tok = id_total = qa_tok = qa_total = rev_tok = rev_total = 0
+    cos_sim_sum = cos_sim_count = 0
+
+    # Frozen BPE embeddings for position-locked cosine distance
+    import torch.nn.functional as F
+    emb_weight = model.shared_token_emb.weight.detach()  # (vocab, d_model)
+    emb_normed = F.normalize(emb_weight, dim=-1)
 
     for i in range(n):
         tgt = [x for x in target_ids[i].tolist() if x != pad_id]
@@ -96,6 +102,14 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
         matches = sum(1 for a, b in zip(pred, tgt[:cmp_len]) if a == b)
         tok_match += matches
         total_tok += tgt_len
+
+        # Position-locked cosine similarity in frozen BPE embedding space
+        if cmp_len > 0:
+            pred_emb = emb_normed[pred]        # (cmp_len, d_model)
+            tgt_emb = emb_normed[tgt[:cmp_len]]  # (cmp_len, d_model)
+            cos_sim = (pred_emb * tgt_emb).sum(dim=-1)  # (cmp_len,)
+            cos_sim_sum += cos_sim.sum().item()
+            cos_sim_count += cmp_len
 
         if mode_ids is not None:
             mode = mode_ids[i].item()
@@ -117,6 +131,7 @@ def assess(model, dataset, device, tokenizer, n_examples=64, n_steps=10) -> dict
         "tok_acc": tok_match / max(total_tok, 1),
         "exact": exact_count / n,
         "len_acc": len_match / n,
+        "emd": cos_sim_sum / max(cos_sim_count, 1),
     }
     if id_total > 0:
         result["tok_id"] = id_tok / id_total
@@ -371,7 +386,7 @@ def save_latent_snapshot(model, dataset, device, epoch, stage_name, out_dir,
 def format_metrics(metrics: dict) -> str:
     """Format metrics dict into a log string."""
     parts = [f"tok={metrics['tok_acc']:.3f}", f"exact={metrics['exact']:.3f}",
-             f"len={metrics.get('len_acc', 0):.3f}"]
+             f"len={metrics.get('len_acc', 0):.3f}", f"emd={metrics.get('emd', 0):.3f}"]
     if "tok_id" in metrics:
         parts.append(f"id={metrics['tok_id']:.3f}")
     if "tok_qa" in metrics:
