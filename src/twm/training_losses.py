@@ -161,12 +161,22 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
 
     compress_out = model.compress(input_ids, input_pad)
 
-    # Handle VAE vs deterministic compressor
+    # Handle VAE vs deterministic compressor.
+    # For VAE: condition expander on mu (clean), not z (noisy). The KL loss
+    # still regularizes via z, but the expander sees the same clean signal
+    # in training and eval — no double-noise problem.
     vae_info = {}
     if isinstance(compress_out, tuple):
         bottleneck, vae_info = compress_out
+        # Expander/length head see mu; dynamics/KL see z (bottleneck)
+        expander_bn = vae_info.get("mu", bottleneck)
     else:
         bottleneck = compress_out
+        expander_bn = bottleneck
+
+    # Save pre-dynamics bottleneck for length prediction — length is a
+    # property of the input, not the dynamics transformation.
+    length_bn = expander_bn
 
     # Role-conditioned prior: pull each slot toward its role centroid (legacy).
     role_loss = torch.tensor(0.0, device=device)
@@ -180,13 +190,22 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         output_ids = output_ids.to(device)
         output_pad = output_pad.to(device)
 
-        # Compute target bottleneck for direct supervision (detached)
+        # Compute target bottleneck for direct supervision (detached).
+        # Use mu (clean) for consistency with dynamics input.
         if bottleneck_weight > 0 or bn_role_weights is not None:
             with torch.no_grad():
                 target_out = model.compress(output_ids, output_pad)
-                bottleneck_target = target_out[0] if isinstance(target_out, tuple) else target_out
+                if isinstance(target_out, tuple):
+                    _, target_info = target_out
+                    bottleneck_target = target_info.get("mu", target_out[0])
+                else:
+                    bottleneck_target = target_out
 
-        bottleneck = model.forward_dynamics(bottleneck, mode_ids)
+        # Run dynamics on mu (clean) — the expander and bn_loss both see
+        # clean conditioning. KL regularization comes from the compressor's
+        # z, not from the dynamics path.
+        bottleneck = model.forward_dynamics(expander_bn, mode_ids)
+        expander_bn = bottleneck
         target_ids = output_ids
         target_pad = output_pad
     else:
@@ -196,7 +215,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
 
     # Detach bottleneck before expander during dynamics: core trains on
     # bn loss only, token-level gradients don't fight W-space exploration.
-    expander_input = bottleneck.detach() if (detach_dynamics_expander and mode_ids is not None) else bottleneck
+    expander_input = expander_bn.detach() if (detach_dynamics_expander and mode_ids is not None) else expander_bn
     pred_emb, _ = model.forward_expander(expander_input, target_ids, target_pad, timestep=timestep)
 
     non_pad = ~target_pad
@@ -234,7 +253,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         logits = model.text_expander.decode_proj_logits(pred_emb)
         aux_loss = F.cross_entropy(logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0)
 
-    len_pred = model.forward_length(expander_input)
+    len_pred = model.forward_length(length_bn)
     len_loss = F.mse_loss(len_pred, output_len.float().to(device))
 
     # Bottleneck loss: role-decomposed or uniform
