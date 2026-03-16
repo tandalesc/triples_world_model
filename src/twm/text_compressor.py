@@ -233,6 +233,7 @@ class TextCompressor(nn.Module):
         # Total KL: mean over batch, sum over all active slots and dimensions
         kl_total = kl_per_dim.sum(dim=(1, 2)).mean()
         kl_info["kl_loss"] = kl_total
+        kl_info["mu"] = mu  # expose for spectral loss (must measure structure, not noise)
 
         return z, kl_info
 

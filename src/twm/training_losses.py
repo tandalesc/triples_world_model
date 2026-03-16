@@ -258,10 +258,12 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
     if kl_weight > 0 and "kl_loss" in vae_info:
         kl_loss = vae_info["kl_loss"]
 
-    # Spectral penalty: prevent bottleneck collapse to 1D
+    # Spectral penalty: prevent bottleneck collapse to 1D.
+    # Use mu (not sampled z) for VAE models — sampling noise masks collapse.
     spec_loss = torch.tensor(0.0, device=device)
     if spectral_weight > 0:
-        spec_loss, spec_metrics = _compute_spectral_loss(bottleneck)
+        spec_input = vae_info.get("mu", bottleneck)
+        spec_loss, spec_metrics = _compute_spectral_loss(spec_input)
         metrics.update(spec_metrics)
 
     total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
