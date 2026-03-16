@@ -43,8 +43,15 @@ def _generate(model, dataset, device, n, n_steps):
 
         compress_out = model.compress(input_ids, input_pad)
         bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
+        # Joint IO training routes identity data through dynamics with mode=0.
+        # Eval must match: if the model has dynamics, run it so the length head
+        # and expander see the same post-dynamics bottleneck they trained on.
+        if hasattr(model, "forward_dynamics"):
+            mode_ids = torch.zeros(n, dtype=torch.long, device=device)
+            bottleneck = model.forward_dynamics(bottleneck, mode_ids)
+        else:
+            mode_ids = None
         target_ids = input_ids
-        mode_ids = None
 
     gen_ids = model.generate(bottleneck, n_steps=n_steps)
     pred_lens = model.forward_length(bottleneck)
