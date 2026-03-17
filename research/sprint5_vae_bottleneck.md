@@ -1,80 +1,92 @@
-# Sprint 5: VAE Bottleneck & Latent Collapse
+# Sprint 5: VAE Bottleneck, Latent Collapse & Open-Vocab Dynamics
 
 ## Goal
 
-Add a VAE bottleneck with role-conditioned priors to the compressor, then investigate and fix latent space collapse during staged training.
+Add a VAE bottleneck with role-conditioned priors to the compressor, then investigate and fix latent space collapse during staged training. Evolved into: drop the VAE entirely, solve collapse with joint training + spectral penalty, push open-vocab QA as far as possible.
 
 ## Key Results
 
-| Experiment | Architecture | Collapse? | Per-role PC1 var | Notes |
-|-----------|:------------|:---------:|:----------------:|-------|
-| v21 micro (d=16, 1L) | VAE + IO only | Yes | E=1.0 A=1.0 V=1.0 | Collapses by epoch ~30 |
-| v21 full (d=64, 3L) | VAE + IO only | **Yes** | E=0.99 A=0.99 V=1.0 | Collapses by epoch ~50 |
+| Experiment | Architecture | IO tok_acc | IO exact | QA tok_acc | Notes |
+|-----------|-------------|-----------|----------|-----------|-------|
+| v21 (VAE) | d64, staged | — | — | — | Collapses to 1D by ep50 |
+| v25 (VAE, clean mu) | d64, joint | 73% | 19% | 26% (v27) | First working joint training |
+| v30 (no VAE) | d64, joint, t12 | 95% | 61% | — | VAE is overhead |
+| v31 (+ tokfix) | d64, joint, t12 | 90%* | 83%* | 26% | *eval bug masked true perf |
+| v33b (micro) | d32, joint, t12 | 83% | 34% | 8% | 312K params viable |
+| v34 sweep (t16) | d32, joint, t16 | 85% | 36% | 5% | More triples = higher IO ceiling |
+| **v35 (best IO)** | **d64, joint, t16** | **99.3%** | **96.9%** | **36.8%** | **Best model. QA geometry collapses** |
+| v36 (frozen IO) | d64, frozen, t16 | 98.6% | 96.9% | ~8% | Preserves geometry, QA can't learn |
+| v37 (joint all) | d64, joint, t16 | — | — | — | **PENDING: server died** |
 
-## VAE Bottleneck (v21)
+## Architecture Evolution
 
-Added `vae=True` mode to compressor: reparameterized bottleneck with role-conditioned priors (separate learned mean/logvar per entity/attribute/value position). KL divergence annealed from 0 to `kl_weight` over `kl_anneal_epochs`.
+### Phase 1: VAE + Collapse Discovery (v21-v24)
 
-**Files:** `src/twm/text_compressor.py`, `src/twm/training_config.py`
+Added VAE bottleneck with role-conditioned priors. PCA visualization confirmed collapse to 1D manifold during IO training. Root cause: expander only needs 1D for identity reconstruction, KL flattens everything else.
 
-## In-Training Latent Visualization
+### Phase 2: Joint Training + Spectral Fix (v24-v27)
 
-Built a PCA scatter-plot snapshot system to watch bottleneck geometry evolve during training. Produces numbered frames that assemble into video via ffmpeg.
+Joint training (dynamics from epoch 1 with zero-init gate) provides back-pressure against collapse. Spectral penalty penalizes PC1 variance ratio. Together they maintain 8+ effective dimensions (spectral 0.04 vs 1.0 for staged).
 
-**Features:**
-- Consistent PCA basis: fit on epoch 1, reused for all subsequent frames
-- Dual subplot: left colored by mode (identity/qa/reverse), right colored by role (E/A/V)
-- Per-role PC1 explained variance annotated on each frame (collapse signal)
-- Independent of `log_every` / `diagnostic_every` — controlled by `snapshot_every`
-- ~50KB per frame at 100 DPI
+**Critical bug found:** Spectral loss was measuring z (noisy VAE sample) instead of mu (structure). Noise masked collapse — reported 0.026 when real value was 1.00.
 
-**Files:** `src/twm/training_eval.py` (`save_latent_snapshot`), `src/twm/trainer.py`, `src/twm/training_config.py` (`snapshot_every`)
+### Phase 3: Drop the VAE (v30-v31)
 
-**Usage:**
-```bash
-# Training with snapshots
-uv run python scripts/train.py configs/v21_vae_mini64.json  # snapshot_every: 10
+VAE was pure overhead. Without it: no spectral noise masking, no double-noise train/eval mismatch, no z/mu divergence. v30 hit 95% tok_acc in 150 epochs (5-10x faster than VAE).
 
-# Assemble video
-ffmpeg -framerate 8 -pattern_type glob \
-  -i 'results/.../frames/*.png' \
-  -c:v libx264 -pix_fmt yuv420p latent_evolution.mp4
-```
+**Eval dynamics routing bug (v31):** Joint training routes IO through dynamics with mode=0, but eval skipped dynamics for TextDataset. Length head saw different bottleneck at eval vs train → systematic N-1 length on questions. Fix: route eval through dynamics when model has `forward_dynamics`.
 
-## Critical Finding: Bottleneck Collapses to 1D
+**Training schedule discovery (v33b):** t_min=0.5/0.3 with patience 200 (vs 0.7/0.4 with 100) dramatically accelerates learning. Smaller models need lower noise to resolve tokens. v35 hit 92% exact at ep180 where v31 needed 400+ epochs for 83%.
 
-PCA visualization confirmed that the VAE bottleneck collapses to a **1D manifold** during IO-only training — at full scale (d_model=64, 3L compressor/expander), not just micro.
+### Phase 4: Triples Sweep (v34)
 
-**Timeline (v21 full, d=64):**
-- Epoch 1: 2D spread, per-role PC1 var ~0.55 (uniform across E/A/V)
-- Epoch 20-50: KL annealing drives collapse
-- Epoch 100+: PC1 explains 99-100% of variance for all roles — 1D arc
+Tested max_triples 4/8/12/16 at d_model=32. IO phase 2 results:
 
-**Root cause:** The expander only needs to invert the compressor for identity-mode reconstruction. A 1D manifold is sufficient. KL pressure flattens everything the dynamics core would need.
+| Triples | Bottleneck dims | IO tok | IO exact | QA tok | Params |
+|---------|----------------|--------|----------|--------|--------|
+| 4       | 384d           | 57%    | 3%       | 8%     | ~220K  |
+| 8       | 768d           | 74%    | 9%       | 7%     | ~260K  |
+| 12      | 1152d          | 83%    | 34%      | 8%     | ~312K  |
+| 16      | 1536d          | 85%    | 36%      | 5%     | ~360K  |
 
-**Implication:** Staged training (IO → dynamics) may be fundamentally flawed. The dynamics core needs latent dimensionality to navigate the space, but by the time it arrives the geometry is already collapsed.
+More triples = higher IO ceiling. Big jump at 8→12. QA at d32 is capacity-limited regardless of triples — needs d64+ with 4+ dynamics layers.
 
-### Example frames
+### Phase 5: v35 (Best IO) and QA Geometry Collapse
 
-Epoch 1 (2D structure intact):
-![Epoch 1](../results/test_snapshot/io_phase1/frames/io_phase1_0001.png)
+v35 combined all improvements: d64, 16 triples, v33b schedule. **99.3% tok_acc, 96.9% exact** in IO — near-perfect reconstruction through a 64d bottleneck with dynamics online.
 
-Epoch 100 (collapsed to 1D arc):
-![Epoch 100](../results/test_snapshot/io_phase1/frames/io_phase1_0100.png)
+**QA failure mode:** When dynamics training starts with all params unfrozen, compressor geometry collapses. PCA shows PC1 variance jumping 0.28→0.57 in 190 epochs. Dynamics finds cheap shortcut (mode separation via geometric collapse) instead of learning transforms within the rich space. Identity drops 98%→70%. QA plateaus at 36.8% tok with 0% exact.
 
-Epoch 200 (locked in):
-![Epoch 200](../results/test_snapshot/io_phase1/frames/io_phase1_0200.png)
+### Phase 6: Addressing Geometry Collapse (v36-v37)
 
-Full video: `results/test_snapshot/latent_evolution.mp4`
+**v36 (frozen compressor/expander):** Preserves geometry (spectral 0.04→0.10, identity ~90%) but QA only reaches ~8%. The rigid frozen space can't support the transforms dynamics needs to learn.
 
-## Candidate Fixes
+**v37 (joint identity+QA from epoch 1):** The core insight: IO-first training builds a 1D+noise manifold optimized for "store and retrieve." The only cheap modification to this space that separates modes is geometric collapse. If QA is present from epoch 1, the compressor must build a space supporting both reconstruction AND transformation from the start — a fundamentally different optimization target.
 
-1. **Joint training:** Train dynamics alongside IO from the start. Its need for dimensionality creates back-pressure against collapse. Breaks staged assumption but addresses root cause.
-2. **Spectral penalty:** Penalize when bottleneck covariance eigenvalue ratio exceeds a threshold during IO. A "structure tax" that holds the space open.
-3. **Soft staging:** Short IO warmup (non-garbage expander), then bring dynamics online early with low LR before collapse completes.
+Config: single stage using QA dataset (has both identity+QA mixed), joint=true, patience 300. **NOT YET RUN — server hardware failure before execution.**
 
-## Next Steps
+## Files Changed
 
-- [ ] Implement and test spectral penalty or joint training
-- [ ] Re-run with fix, verify latent space maintains dimensionality via snapshot video
-- [ ] If latent structure holds, evaluate dynamics core on QA task
+- `src/twm/training_eval.py` — Eval dynamics routing fix, latent snapshot system
+- `src/twm/training_losses.py` — Spectral loss on mu not z, expander conditions on mu
+- `src/twm/text_dynamics_model.py` — Input residual (bottleneck + delta), zero-init gate
+- `src/twm/text_compressor.py` — Expose mu in vae_info
+- `src/twm/domain_bpe.py` — Tokenizer fix (collapse spaces before punctuation)
+- `src/twm/modules.py` — Zero-init output gate on TransformerDynamics
+- `src/twm/trainer.py` — Joint training, freeze/unfreeze support
+- `src/twm/training_config.py` — StageConfig.joint, freeze, unfreeze fields
+- Configs: v22-v37 in `configs/`
+
+## PCA Videos
+
+Local copies in `results/spectral_comparison/`:
+- `v28_pca_evolution.mp4` — d128 VAE (beautiful geometry, broken length)
+- `v30_pca_evolution.mp4` — first no-VAE run
+- `v31_pca_evolution.mp4` — tokfix run through QA
+- `v35_pca_evolution.mp4` — best IO, shows QA geometry collapse
+
+## What's Next
+
+1. **Run v37** (`configs/v37_joint_all.json`) — joint identity+QA from epoch 1. Key hypothesis test.
+2. If v37 works, scale to d_model=128 for capacity test.
+3. If v37 fails, the bottleneck representation fundamentally can't support QA transforms at d64 — need architectural changes (more capacity, different bottleneck structure, or auxiliary QA signal).
