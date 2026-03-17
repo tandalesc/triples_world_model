@@ -100,7 +100,8 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Pet sim demo**: 29K params, 98.9% exact match, runs client-side in 303 KB JS
 - **Open-vocab (staged)**: 81.1% exact match on ATOMIC 10K with compressor/expander (identity mode)
 - **Open-vocab (joint+dynamics, VAE)**: 19% exact / 73% tok_acc on WebNLG IO with VAE bottleneck (v25); 26% QA tok_acc with dynamics (v27)
-- **Open-vocab (no VAE)**: 61% exact / 95% tok_acc on WebNLG IO in 150 epochs (v30, sprint 5). Best architecture: no VAE, joint training, spectral penalty on deterministic bottleneck.
+- **Open-vocab (no VAE)**: 96.9% exact / 99.3% tok_acc on WebNLG IO (v35, d64, 16 triples). 36.8% QA tok_acc. Best architecture: no VAE, joint training, spectral penalty, 16 triples, t_min=0.5/0.3 schedule.
+- **Triples sweep (d32)**: 4→57%, 8→74%, 12→83%, 16→85% IO tok_acc. Big jump at 8→12 triples. QA needs d64+ (d32 caps at ~8% regardless of triples).
 - **Beats frontier LLMs**: 100% attr accuracy vs 4-8/8 for Claude/Gemini/GPT on ATOMIC
 
 ## VAE + Diffusion Gotchas
@@ -111,12 +112,15 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Joint training prevents bottleneck collapse.** Staged IO→dynamics fails because the compressor collapses to 1D before dynamics arrives. Joint training (dynamics from epoch 1 with zero-init gate) keeps spectral loss at 0.04 vs 1.0 for staged. Use `StageConfig.joint=true`.
 - **Warmup is counterproductive.** Pre-trained IO geometry gets destroyed when random dynamics comes online. Co-evolution from scratch works better.
 - **Drop the VAE.** With joint training + spectral penalty, VAE is pure overhead. No-VAE (v30) trains 5-10x faster and reaches 95% tok_acc / 61% exact in IO phase 1. The VAE introduced 3 bugs (spectral on noise, double-noise mismatch, z/mu divergence) that took hours to fix. Without VAE, the bottleneck is deterministic — no train/eval mismatch, no noise masking collapse.
+- **Eval must route through dynamics for joint IO.** In joint training, identity data routes through dynamics with mode=0. If eval skips dynamics for TextDataset, the length head and expander see a different bottleneck than training — causes systematic N-1 length on questions. Fixed in `training_eval.py`.
+- **Use t_min=0.5/0.3, patience 200.** The old schedule (t_min=0.7/0.4, patience 100) early-stops before geometry is built. Lower noise from the start lets tokens resolve in phase 1. v35 hit 92% exact at ep180 where v31 needed 400+ epochs for 83%.
+- **Staged IO→QA causes geometry collapse.** IO-first builds a 1D+noise manifold. When QA arrives, dynamics collapses the geometry for cheap mode separation instead of learning transforms (PC1 0.28→0.57). Freezing compressor preserves geometry but limits QA to ~8%. Next approach: joint identity+QA from epoch 1 (v37, untested).
 
 ## Training
 
 Config-driven via JSON: `uv run python scripts/train.py configs/<name>.json`
 Training configs define stages (io, joint_io, dynamics) with phases (graduated noise curriculum).
-Key configs: `v30_no_vae.json` (best architecture — no VAE, joint training), `v28_d128.json` (scale-up test).
+Key configs: `v35_d64_t16.json` (best IO model — 99.3% tok, 36.8% QA tok), `v37_joint_all.json` (next experiment — joint identity+QA from epoch 1).
 Submit to GPU server via wartable MCP: `mcp__wartable__submit_job`.
 
 ## Data Format
