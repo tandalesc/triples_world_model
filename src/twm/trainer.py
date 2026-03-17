@@ -20,7 +20,7 @@ from .text_dataset import TextDataset
 from .text_pair_dataset import TextPairDataset
 from .training_config import TrainingConfig, StageConfig, PhaseConfig
 from .training_losses import sample_timestep, compute_diffusion_loss
-from .training_eval import assess, print_samples, format_metrics, diagnose_mode_attention
+from .training_eval import assess, print_samples, format_metrics, diagnose_mode_attention, save_latent_snapshot
 
 
 def _resolve_device(device_str: str | None) -> torch.device:
@@ -60,6 +60,7 @@ class Trainer:
                 text_expander_layers=c.text_expander_layers,
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
+                vae=c.vae,
             )
         else:
             model = TextDynamicsModel(
@@ -69,6 +70,7 @@ class Trainer:
                 dynamics_layers=dyn_layers,
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
+                vae=c.vae,
             )
         model.init_embeddings()
         return model.to(self.device)
@@ -95,10 +97,10 @@ class Trainer:
         if pretrained:
             self._load_pretrained(pretrained)
 
-        # Apply freezes — auto-freeze dynamics during IO stages
+        # Apply freezes — auto-freeze dynamics during IO stages (unless joint training)
         freeze = list(stage.freeze)
         if stage.dataset == "identity" and hasattr(self.model, "dynamics"):
-            if "dynamics" not in freeze:
+            if "dynamics" not in freeze and not stage.joint:
                 freeze.append("dynamics")
 
         # Default unfreeze: length_head when expander is frozen (it must adapt
@@ -138,7 +140,7 @@ class Trainer:
         phase_dir = self.out_dir / name
         phase_dir.mkdir(parents=True, exist_ok=True)
         c = self.config
-        is_dynamics = stage.dataset in ("qa", "mode_warmup")
+        is_dynamics = stage.dataset in ("qa", "mode_warmup") or stage.joint
 
         metric_key = phase.metric  # "tok_acc" or "exact"
 
@@ -155,6 +157,7 @@ class Trainer:
         best_epoch = 0
         no_improve = 0
         history = []
+        pca_basis = None
 
         # Initial assessment
         init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
@@ -171,7 +174,15 @@ class Trainer:
             epoch_bn_a = 0.0
             epoch_bn_v = 0.0
             epoch_role = 0.0
+            epoch_kl = 0.0
+            epoch_spec = 0.0
             n_batches = 0
+
+            # β annealing: linear ramp from 0 to kl_weight over kl_anneal_epochs
+            if c.kl_weight > 0 and c.kl_anneal_epochs > 0:
+                eff_kl_weight = c.kl_weight * min(1.0, epoch / c.kl_anneal_epochs)
+            else:
+                eff_kl_weight = c.kl_weight
             perm = torch.randperm(n_train)
 
             for start in range(0, n_train - c.batch_size + 1, c.batch_size):
@@ -180,20 +191,35 @@ class Trainer:
                 timestep = sample_timestep(B, self.device, phase.t_min, phase.t_max, phase.bias_power)
 
                 if is_dynamics:
-                    # Mode warmup: use bn loss for direct bottleneck supervision
-                    # + detach expander so core trains on bn signal, not indirect
-                    # token gradients through frozen expander
+                    # Dynamics path: route through dynamics core with mode conditioning.
+                    # For joint training on identity data, use same text as input/output
+                    # with mode=0 (identity) so dynamics gradients flow back to compressor.
+                    if stage.joint and stage.dataset == "identity":
+                        in_ids = train_ds._text_token_ids[idx]
+                        in_pad = train_ds._text_pad_mask[idx]
+                        out_ids = in_ids
+                        out_pad = in_pad
+                        out_len = train_ds._text_lengths[idx]
+                        batch_modes = torch.zeros(B, dtype=torch.long)
+                    else:
+                        in_ids = train_ds._input_token_ids[idx]
+                        in_pad = train_ds._input_pad_mask[idx]
+                        out_ids = train_ds._output_token_ids[idx]
+                        out_pad = train_ds._output_pad_mask[idx]
+                        out_len = train_ds._output_lengths[idx]
+                        batch_modes = train_ds._modes[idx]
                     loss, batch_m = compute_diffusion_loss(
                         self.model,
-                        train_ds._input_token_ids[idx], train_ds._input_pad_mask[idx],
-                        train_ds._output_token_ids[idx], train_ds._output_pad_mask[idx],
-                        train_ds._output_lengths[idx], self.device, timestep,
-                        mode_ids=train_ds._modes[idx],
+                        in_ids, in_pad, out_ids, out_pad,
+                        out_len, self.device, timestep,
+                        mode_ids=batch_modes,
                         aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
                         bottleneck_weight=c.bottleneck_weight,
                         role_prior_weight=c.role_prior_weight,
                         bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
                         detach_dynamics_expander=c.detach_dynamics_expander,
+                        kl_weight=eff_kl_weight,
+                        spectral_weight=c.spectral_weight,
                     )
                 else:
                     loss, batch_m = compute_diffusion_loss(
@@ -204,6 +230,8 @@ class Trainer:
                         mode_ids=None,
                         aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
                         role_prior_weight=c.role_prior_weight,
+                        kl_weight=eff_kl_weight,
+                        spectral_weight=c.spectral_weight,
                     )
 
                 optimizer.zero_grad()
@@ -219,6 +247,8 @@ class Trainer:
                 epoch_bn_a += batch_m.get("bn_a", 0.0)
                 epoch_bn_v += batch_m.get("bn_v", 0.0)
                 epoch_role += batch_m.get("role_loss", 0.0)
+                epoch_kl += batch_m.get("kl", 0.0)
+                epoch_spec += batch_m.get("spec", 0.0)
                 n_batches += 1
 
             scheduler.step()
@@ -230,6 +260,8 @@ class Trainer:
             avg_bn_a = epoch_bn_a / max(n_batches, 1)
             avg_bn_v = epoch_bn_v / max(n_batches, 1)
             avg_role = epoch_role / max(n_batches, 1)
+            avg_kl = epoch_kl / max(n_batches, 1)
+            avg_spec = epoch_spec / max(n_batches, 1)
 
             if epoch % c.log_every == 0 or epoch == 1:
                 self.model.eval()
@@ -244,6 +276,10 @@ class Trainer:
                     log += f" (e={avg_bn_e:.4f} a={avg_bn_a:.4f} v={avg_bn_v:.4f})"
                 if c.role_prior_weight > 0:
                     log += f" role={avg_role:.4f}"
+                if c.kl_weight > 0:
+                    log += f" kl={avg_kl:.4f} (β={eff_kl_weight:.4f})"
+                if c.spectral_weight > 0:
+                    log += f" spec={avg_spec:.4f}"
                 log += f" | {format_metrics(gen_m)}"
 
                 cur_metric = gen_m[metric_key]
@@ -270,6 +306,12 @@ class Trainer:
                     print(f"\nEarly stopping at epoch {epoch} "
                           f"(best {metric_key}={best_metric:.4f} at epoch {best_epoch})")
                     break
+
+            if c.snapshot_every > 0 and (epoch == 1 or epoch % c.snapshot_every == 0):
+                pca_basis = save_latent_snapshot(
+                    self.model, ds_for_assessment, self.device,
+                    epoch, name, phase_dir, pca_basis=pca_basis
+                )
 
         torch.save(self.model.state_dict(), phase_dir / "model_final.pt")
         with open(phase_dir / "history.json", "w") as f:

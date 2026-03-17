@@ -33,8 +33,12 @@ class DomainBPETokenizer:
 
     def encode(self, text: str, max_length: int | None = None) -> list[int]:
         """Encode text to token IDs, padded/truncated to max_length."""
+        import re
         ml = max_length or self.max_length
         normalized = text.replace("_", " ").lower().strip()
+        # Collapse spaces before punctuation so BPE doesn't create phantom
+        # space tokens (e.g., "airport ?" → "airport?" = 2 tokens not 3)
+        normalized = re.sub(r'\s+([?.!,;:])', r'\1', normalized)
         enc = self._tok.encode(normalized)
         ids = enc.ids[:ml]
         ids += [self.pad_token_id] * (ml - len(ids))

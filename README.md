@@ -33,7 +33,7 @@ latent tensors. The I/O layers are interchangeable.
 - **Set-to-set prediction** (not autoregressive) — triples have no natural order
 - **Input residual**: most of the state persists, model only learns the delta
 - **Padding mask** for variable-length triple sets (8-16 triples depending on profile)
-- **Modular interfaces** (*Experimental!*) for extending applicability into other domains. Currently working on diffusion-based token-level output: [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md).
+- **Modular interfaces** (*Experimental!*) for extending applicability into other domains. Diffusion-based open-vocab I/O with joint dynamics training: [research/sprint5_vae_bottleneck.md](research/sprint5_vae_bottleneck.md).
 
 Full architecture details and file map: [`research/architecture.md`](research/architecture.md)
 
@@ -59,19 +59,19 @@ See [`configs/README.md`](configs/README.md) for full recipes (edge deployment, 
 
 35K WebNLG knowledge graph entries with natural language, expanded to 210K+ QA pairs. The compressor/expander learns to encode/decode free text through a bottleneck, then the dynamics core learns question→answer transformations with the IO pipeline frozen.
 
-**Sprint 4 results:**
-- **IO pipeline**: 96.9% exact match on identity reconstruction via graduated t-range curriculum
-- **Mode warmup**: dynamics core learns to read mode conditioning (identity vs reverse), confirmed via attention diagnostics
-- **Dynamics**: QA mode collapses — the core maps all QA inputs to a single bottleneck point rather than learning diverse transformations
-- **Root cause identified**: PCA of compressor bottleneck reveals a 1D manifold (86% variance in PC1). The compressor finds *an* encoding that decodes correctly, but with no geometric constraint it collapses role structure. The dynamics core has no room to work in a 1D space.
+**Sprint 5 results (latest):**
+- **IO pipeline**: 99.3% tok_acc / 96.9% exact match on identity reconstruction (v35, d64, 16 triples)
+- **QA dynamics**: 36.8% tok_acc — model learns structural templates ("X was born in Y") and entity preservation through the dynamics transformation
+- **Triples sweep**: bottleneck bandwidth scales IO performance (4→57%, 8→74%, 12→83%, 16→85% at d32). QA requires d64+ with 4+ dynamics layers.
+- **Key findings**: VAE is unnecessary (spectral penalty + joint training suffices), lower noise schedule (t_min=0.5/0.3) dramatically accelerates learning, staged IO→QA causes geometry collapse
 
 | Stage | Metric | Result |
 |-------|--------|--------|
 | IO (identity reconstruction) | Exact match | 96.9% |
-| Mode warmup (identity + reverse) | Mode attention differential | Forming across all layers |
-| Dynamics (question → answer) | QA token accuracy | ~12% (mode collapse) |
+| IO (identity reconstruction) | Token accuracy | 99.3% |
+| Dynamics (question → answer) | QA token accuracy | 36.8% |
 
-**Sprint 5 direction: Role-conditioned VAE prior.** Replace the soft role centroid regularizer with a proper VAE — μ/log_σ projection heads after the compressor, KL divergence against learned per-role priors (entity, attribute, value). This forces the bottleneck into at minimum 3D role-structured geometry, giving the dynamics core room to learn content-dependent transformations. See [research/sprint4_config_driven_training.md](research/sprint4_config_driven_training.md) for full diagnosis and plan.
+**Current direction: joint identity+QA training from epoch 1.** Staged IO→QA builds a 1D+noise manifold that collapses when dynamics arrives. Training on mixed identity+QA from the start forces the compressor to build a space supporting both reconstruction and transformation. See [research/sprint5_vae_bottleneck.md](research/sprint5_vae_bottleneck.md) for full experiment log.
 
 Training is config-driven with staged curriculum — see [Quick Start](#quick-start) and [`configs/README.md`](configs/README.md).
 
@@ -146,7 +146,7 @@ uv run python scripts/generate_qa_dataset.py \
 
 # 3. Train (IO stage learns encode/decode, dynamics stage learns transformations)
 # Points to latest experiment at time of writing, you can use your own recipe here.
-uv run python scripts/train.py configs/v20_mini64.json
+uv run python scripts/train.py configs/v35_d64_t16.json
 ```
 
 ### Closed-vocab training (fixed token set)
@@ -159,9 +159,9 @@ uv run python -m twm.train \
   --epochs 500
 ```
 
-**Staged training**: IO stage trains compressor/expander with identity reconstruction. Dynamics stage freezes IO and trains the dynamics core to transform questions into answers. Checkpoints chain automatically between stages.
+**Joint training**: Compressor, expander, and dynamics core train together from epoch 1 with a zero-init output gate on dynamics (starts as identity pass-through). Spectral penalty prevents bottleneck collapse. Checkpoints chain automatically between phases.
 
-**Graduated curriculum**: The diffusion noise range narrows across phases — `[0.7,1.0]` → `[0.4,1.0]` → `[0.0,1.0]` — so the model learns coarse structure first, then refines.
+**Graduated curriculum**: The diffusion noise range narrows across phases — `[0.5,1.0]` → `[0.3,1.0]` — so the model learns coarse structure first, then refines. Lower t_min from the start helps tokens resolve earlier.
 
 ### Inference
 

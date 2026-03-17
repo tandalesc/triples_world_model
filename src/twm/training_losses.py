@@ -26,6 +26,53 @@ def _clean(s: str) -> str:
     return s.replace("\u0120", " ").replace("\u010a", "\n").replace("\u00e2\u0122\u0135", "-").strip()
 
 
+def _compute_spectral_loss(bottleneck, n_roles=3):
+    """Penalize bottleneck covariance collapse per role.
+
+    For each role (E, A, V), computes the covariance of bottleneck vectors
+    across the batch, then penalizes when the top eigenvalue dominates
+    (PC1 explained variance ratio → 1.0 means 1D collapse).
+
+    Loss = mean over roles of (λ_max / Σλ), which is 1/d when perfectly
+    spread and approaches 1.0 when collapsed to 1D.
+
+    Args:
+        bottleneck: (B, N*3, d_model)
+
+    Returns:
+        scalar loss, metrics dict with per-role PC1 ratios
+    """
+    B, T, d = bottleneck.shape
+    device = bottleneck.device
+
+    role_idx = torch.arange(T, device=device) % n_roles
+    role_names = ["entity", "attribute", "value"]
+    total = torch.tensor(0.0, device=device)
+    metrics = {}
+
+    for r in range(n_roles):
+        mask = role_idx == r
+        # (B, n_slots_per_role, d) → (B * n_slots_per_role, d)
+        vecs = bottleneck[:, mask].reshape(-1, d)
+        if vecs.shape[0] < 2:
+            continue
+        # Center
+        vecs = vecs - vecs.mean(dim=0, keepdim=True)
+        # Covariance: (d, d)
+        cov = (vecs.T @ vecs) / (vecs.shape[0] - 1)
+        # Eigenvalues (symmetric → real)
+        eigvals = torch.linalg.eigvalsh(cov)  # ascending order
+        eigvals = eigvals.clamp(min=1e-8)
+        # PC1 ratio = max eigenvalue / sum
+        pc1_ratio = eigvals[-1] / eigvals.sum()
+        total = total + pc1_ratio
+        metrics[f"spec_{role_names[r]}"] = pc1_ratio.item()
+
+    total = total / n_roles
+    metrics["spec_loss"] = total.item()
+    return total, metrics
+
+
 def _compute_role_prior_loss(bottleneck, role_centroids):
     """Pull each slot toward its role-conditioned centroid.
 
@@ -91,7 +138,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            output_len, device, timestep, mode_ids=None,
                            aux_ce_weight=0.1, length_weight=0.1,
                            bottleneck_weight=0.0, role_prior_weight=0.0,
-                           bn_role_weights=None, detach_dynamics_expander=False):
+                           bn_role_weights=None, detach_dynamics_expander=False,
+                           kl_weight=0.0, spectral_weight=0.0):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
@@ -103,14 +151,35 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         detach_dynamics_expander: if True, detach bottleneck before expander
             during dynamics training. Core trains on bn loss only, no token
             gradients fighting its exploration of W-space.
+        kl_weight: VAE KL weight (β), already annealed by caller.
+        spectral_weight: weight for spectral penalty (prevents bottleneck
+            collapse to 1D manifold by penalizing dominant eigenvalues).
     """
     input_ids = input_ids.to(device)
     input_pad = input_pad.to(device)
     token_emb = model.shared_token_emb
 
-    bottleneck = model.compress(input_ids, input_pad)
+    compress_out = model.compress(input_ids, input_pad)
 
-    # Role-conditioned prior: pull each slot toward its role centroid.
+    # Handle VAE vs deterministic compressor.
+    # For VAE: condition expander on mu (clean), not z (noisy). The KL loss
+    # still regularizes via z, but the expander sees the same clean signal
+    # in training and eval — no double-noise problem.
+    vae_info = {}
+    if isinstance(compress_out, tuple):
+        bottleneck, vae_info = compress_out
+        # Expander/length head see mu; dynamics/KL see z (bottleneck)
+        expander_bn = vae_info.get("mu", bottleneck)
+    else:
+        bottleneck = compress_out
+        expander_bn = bottleneck
+
+    # Length bottleneck: pre-dynamics for IO (length = input property),
+    # post-dynamics for QA (length = output property, only known after transform).
+    # Set pre-dynamics default here; overridden after dynamics in QA branch.
+    length_bn = expander_bn
+
+    # Role-conditioned prior: pull each slot toward its role centroid (legacy).
     role_loss = torch.tensor(0.0, device=device)
     if role_prior_weight > 0 and hasattr(model, "role_centroids"):
         role_loss = _compute_role_prior_loss(bottleneck, model.role_centroids)
@@ -122,12 +191,24 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         output_ids = output_ids.to(device)
         output_pad = output_pad.to(device)
 
-        # Compute target bottleneck for direct supervision (detached)
+        # Compute target bottleneck for direct supervision (detached).
+        # Use mu (clean) for consistency with dynamics input.
         if bottleneck_weight > 0 or bn_role_weights is not None:
             with torch.no_grad():
-                bottleneck_target = model.compress(output_ids, output_pad)
+                target_out = model.compress(output_ids, output_pad)
+                if isinstance(target_out, tuple):
+                    _, target_info = target_out
+                    bottleneck_target = target_info.get("mu", target_out[0])
+                else:
+                    bottleneck_target = target_out
 
-        bottleneck = model.forward_dynamics(bottleneck, mode_ids)
+        # Run dynamics on mu (clean) — the expander and bn_loss both see
+        # clean conditioning. KL regularization comes from the compressor's
+        # z, not from the dynamics path.
+        bottleneck = model.forward_dynamics(expander_bn, mode_ids)
+        expander_bn = bottleneck
+        # QA length comes from post-dynamics bottleneck (answer length)
+        length_bn = expander_bn
         target_ids = output_ids
         target_pad = output_pad
     else:
@@ -137,7 +218,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
 
     # Detach bottleneck before expander during dynamics: core trains on
     # bn loss only, token-level gradients don't fight W-space exploration.
-    expander_input = bottleneck.detach() if (detach_dynamics_expander and mode_ids is not None) else bottleneck
+    expander_input = expander_bn.detach() if (detach_dynamics_expander and mode_ids is not None) else expander_bn
     pred_emb, _ = model.forward_expander(expander_input, target_ids, target_pad, timestep=timestep)
 
     non_pad = ~target_pad
@@ -175,7 +256,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         logits = model.text_expander.decode_proj_logits(pred_emb)
         aux_loss = F.cross_entropy(logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0)
 
-    len_pred = model.forward_length(expander_input)
+    len_pred = model.forward_length(length_bn)
     len_loss = F.mse_loss(len_pred, output_len.float().to(device))
 
     # Bottleneck loss: role-decomposed or uniform
@@ -193,8 +274,23 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                 bn_loss = F.mse_loss(bottleneck[transform_mask], bottleneck_target[transform_mask])
 
     bn_w = bottleneck_weight if bn_role_weights is None else 1.0
+
+    # VAE KL loss
+    kl_loss = torch.tensor(0.0, device=device)
+    if kl_weight > 0 and "kl_loss" in vae_info:
+        kl_loss = vae_info["kl_loss"]
+
+    # Spectral penalty: prevent bottleneck collapse to 1D.
+    # Use mu (not sampled z) for VAE models — sampling noise masks collapse.
+    spec_loss = torch.tensor(0.0, device=device)
+    if spectral_weight > 0:
+        spec_input = vae_info.get("mu", bottleneck)
+        spec_loss, spec_metrics = _compute_spectral_loss(spec_input)
+        metrics.update(spec_metrics)
+
     total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
-             + bn_w * bn_loss + role_prior_weight * role_loss)
+             + bn_w * bn_loss + role_prior_weight * role_loss
+             + kl_weight * kl_loss + spectral_weight * spec_loss)
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
@@ -203,4 +299,11 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         metrics["bn_loss"] = bn_loss.item()
     if role_prior_weight > 0:
         metrics["role_loss"] = role_loss.item()
+    if kl_weight > 0 and vae_info:
+        metrics["kl"] = kl_loss.item()
+        for k in ("kl_entity", "kl_attribute", "kl_value"):
+            if k in vae_info:
+                metrics[k] = vae_info[k]
+    if spectral_weight > 0:
+        metrics["spec"] = spec_loss.item()
     return total, metrics

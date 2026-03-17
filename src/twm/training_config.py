@@ -35,6 +35,7 @@ class StageConfig:
     weight_decay: float = 0.01
     freeze: list[str] = field(default_factory=list)  # ["compressor", "expander"]
     unfreeze: list[str] | None = None  # None = auto (unfreeze length_head when expander frozen); [] = no overrides
+    joint: bool = False  # Route identity data through dynamics (mode=identity) for joint training
     pretrained: str | None = None  # checkpoint path, None = auto-detect
     max_examples: int | None = None  # None = inherit from top-level
 
@@ -54,6 +55,7 @@ class TrainingConfig:
     max_text_tokens: int = 64
     dropout: float = 0.1
     alpha_min: float = 0.01
+    vae: bool = False  # enable VAE bottleneck with role-conditioned priors
 
     # Data
     data_dir: str = ""
@@ -68,9 +70,13 @@ class TrainingConfig:
     bottleneck_weight: float = 0.0  # direct bottleneck MSE (dynamics only)
     bn_role_weights: list[float] | None = None  # [entity_w, attr_w, value_w] for decomposed bn loss
     detach_dynamics_expander: bool = False  # cut token gradients to dynamics core
-    role_prior_weight: float = 0.0  # role-conditioned centroid regularization
+    role_prior_weight: float = 0.0  # role-conditioned centroid regularization (legacy, use vae instead)
+    kl_weight: float = 0.0  # VAE KL weight (β). 0 = no KL. Annealed from 0 to this value.
+    kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.
+    spectral_weight: float = 0.0  # spectral penalty weight. Penalizes bottleneck collapse to 1D manifold.
     log_every: int = 10
     diagnostic_every: int = 50
+    snapshot_every: int = 0  # 0 = disabled; >0 = save latent PCA frame every N epochs
 
     # Stages
     stages: list[StageConfig] = field(default_factory=list)

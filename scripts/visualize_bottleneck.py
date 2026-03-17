@@ -75,7 +75,8 @@ def get_bottlenecks(model, dataset, device, n=500):
     input_pad = dataset._input_pad_mask[:n].to(device)
     modes = dataset._modes[:n].numpy()
 
-    bottleneck = model.compress(input_ids, input_pad)
+    compress_out = model.compress(input_ids, input_pad)
+    bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
     pooled = bottleneck.mean(dim=1).cpu().numpy()
 
     texts = [dataset.examples[i]["input_text"] for i in range(n)]
@@ -91,7 +92,8 @@ def get_post_dynamics(model, dataset, device, mode_id, n=500):
     input_ids = dataset._input_token_ids[:n].to(device)
     input_pad = dataset._input_pad_mask[:n].to(device)
 
-    bottleneck = model.compress(input_ids, input_pad)
+    compress_out = model.compress(input_ids, input_pad)
+    bottleneck = compress_out[0] if isinstance(compress_out, tuple) else compress_out
     modes = torch.full((n,), mode_id, dtype=torch.long, device=device)
     post = model.forward_dynamics(bottleneck, modes)
 

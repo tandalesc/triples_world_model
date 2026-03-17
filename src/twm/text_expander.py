@@ -96,9 +96,11 @@ class TextExpander(nn.Module):
 
         self.ln_f = nn.LayerNorm(d_model)
 
-        # Length head: predict text token count from pooled conditioning
+        # Length head: predict text token count from pooled conditioning + bottleneck norm hint.
+        # The norm hint gives the MLP a proxy for content density / slot occupancy
+        # so it can distinguish "12 tokens" from "10 tokens" of similar content.
         self.length_head = nn.Sequential(
-            nn.Linear(d_model, d_model),
+            nn.Linear(d_model + 1, d_model),
             nn.GELU(),
             nn.Linear(d_model, 1),
         )
@@ -224,6 +226,18 @@ class TextExpander(nn.Module):
 
         return decoded, all_mask
 
+    def _length_input(self, bottleneck: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """Build length head input: pooled conditioning + bottleneck norm hint.
+
+        The norm hint is the mean L2 norm of bottleneck slots, normalized by
+        max_text_tokens. This gives the length head a scale-invariant signal
+        for how "full" the bottleneck is, helping it distinguish similar
+        content at different lengths.
+        """
+        norm_hint = bottleneck.norm(dim=-1).mean(dim=-1, keepdim=True)  # (B, 1)
+        norm_hint = norm_hint / self.max_text_tokens  # normalize to ~[0, 1]
+        return torch.cat([cond, norm_hint], dim=-1)  # (B, d_model + 1)
+
     def forward_length(
         self,
         bottleneck: torch.Tensor,
@@ -235,7 +249,7 @@ class TextExpander(nn.Module):
             (B,) predicted text token counts (raw regression)
         """
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)
-        return self.length_head(cond).squeeze(-1)
+        return self.length_head(self._length_input(bottleneck, cond)).squeeze(-1)
 
     @torch.no_grad()
     def generate(
@@ -263,7 +277,8 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)
 
         if max_tokens is None:
-            T = self.length_head(cond).squeeze(-1).round().long().clamp(1, self.max_text_tokens).max().item()
+            len_input = self._length_input(bottleneck, cond)
+            T = self.length_head(len_input).squeeze(-1).round().long().clamp(1, self.max_text_tokens).max().item()
         else:
             T = max_tokens
         memory = self.memory_proj(bottleneck)

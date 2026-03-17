@@ -50,6 +50,7 @@ class TextDynamicsModel(nn.Module):
         dropout: float = 0.1,
         alpha_min: float = 0.01,
         num_modes: int = NUM_MODES,
+        vae: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -57,6 +58,7 @@ class TextDynamicsModel(nn.Module):
         self.max_text_tokens = max_text_tokens
         self._text_compressor_layers = text_compressor_layers
         self._text_expander_layers = text_expander_layers
+        self._vae = vae
         d = config.d_model
         dyn_layers = dynamics_layers if dynamics_layers is not None else config.n_layers
         self._dynamics_layers = dyn_layers
@@ -73,15 +75,17 @@ class TextDynamicsModel(nn.Module):
             max_triples=config.max_triples,
             max_text_tokens=max_text_tokens,
             dropout=dropout,
+            vae=vae,
         )
 
-        # Dynamics core
+        # Dynamics core — zero_init so delta starts at 0 with input residual
         self.dynamics = TransformerDynamics(
             d_model=d,
             n_heads=config.n_heads,
             n_layers=dyn_layers,
             d_ff=config.d_ff,
             dropout=dropout,
+            zero_init=True,
         )
 
         # Mode triples: learned vectors in W-space, one triple per mode.
@@ -146,17 +150,22 @@ class TextDynamicsModel(nn.Module):
         return mode_triple
 
     def compress(self, text_token_ids, text_pad_mask):
+        """Compress text to bottleneck. Returns (bottleneck, vae_info) if VAE, else bottleneck."""
         return self.text_compressor(text_token_ids, text_pad_mask, self.config.max_triples)
 
     def forward_dynamics(self, bottleneck, mode_ids):
         """Run dynamics core with mode triple conditioning and input residual.
+
+        The input residual means the core learns a delta, not the full output.
+        For identity mode, the optimal delta is zero — making identity the
+        default behavior from initialization.
 
         Args:
             bottleneck: (B, N*3, d) from compressor
             mode_ids: (B,) integer mode IDs
 
         Returns:
-            (B, N*3, d) transformed bottleneck
+            (B, N*3, d) transformed bottleneck (input + delta)
         """
         B = bottleneck.shape[0]
 
@@ -169,8 +178,11 @@ class TextDynamicsModel(nn.Module):
         # Run dynamics transformer
         x = self.dynamics(x)
 
-        # Strip mode triple, return data positions
-        return x[:, 3:]  # (B, N*3, d)
+        # Strip mode triple, keep data positions
+        delta = x[:, 3:]  # (B, N*3, d)
+
+        # Input residual: core learns the delta, not the full output
+        return bottleneck + delta
 
     def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None):
         return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep)
@@ -200,6 +212,7 @@ class TextDynamicsModel(nn.Module):
             "text_expander_layers": self._text_expander_layers,
             "dynamics_layers": self._dynamics_layers,
             "max_text_tokens": self.max_text_tokens,
+            "vae": self._vae,
             "tokenizer_path": tokenizer_path or str(getattr(self, '_tokenizer_path', '')),
         }
         with open(run_dir / "model_meta.json", "w") as f:
@@ -223,6 +236,7 @@ class TextDynamicsModel(nn.Module):
             text_expander_layers=meta["text_expander_layers"],
             dynamics_layers=meta["dynamics_layers"],
             max_text_tokens=meta["max_text_tokens"],
+            vae=meta.get("vae", False),
         )
         state = torch.load(run_dir / "weights.pt", map_location=device, weights_only=True)
         model.load_state_dict(state)
