@@ -347,9 +347,10 @@ class Trainer:
                 ds_for_assessment = TextPairDataset(
                     assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
                 )
-        else:  # "qa"
+        else:  # "qa", "qa_balanced", or other pair datasets
+            train_file = data_dir / f"{stage.dataset}_train.jsonl"
             train_ds = TextPairDataset(
-                data_dir / "qa_train.jsonl", self.tokenizer,
+                train_file, self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
             )
             n_id = (train_ds._modes == 0).sum().item()
