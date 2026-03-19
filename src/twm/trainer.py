@@ -376,7 +376,9 @@ class Trainer:
             n_id = (train_ds._modes == 0).sum().item()
             n_qa = (train_ds._modes == 1).sum().item()
             print(f"  Dataset: {len(train_ds)} ({n_id} identity, {n_qa} Q&A)")
-            assessment_path = data_dir / "qa_test.jsonl"
+            # Use balanced test set if available and training on balanced data
+            balanced_test = data_dir / f"{stage.dataset}_test.jsonl"
+            assessment_path = balanced_test if balanced_test.exists() else data_dir / "qa_test.jsonl"
             ds_for_assessment = train_ds
             if assessment_path.exists():
                 ds_for_assessment = TextPairDataset(
