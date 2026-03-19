@@ -57,6 +57,8 @@ class TrainingConfig:
     dropout: float = 0.1
     alpha_min: float = 0.01
     vae: bool = False  # enable VAE bottleneck with role-conditioned priors
+    compressor_type: str = "standard"  # "standard" or "diffusion"
+    compressor_denoise_steps: int = 5  # K steps for diffusion compressor
 
     # Data
     data_dir: str = ""

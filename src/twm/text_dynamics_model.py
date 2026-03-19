@@ -51,6 +51,8 @@ class TextDynamicsModel(nn.Module):
         alpha_min: float = 0.01,
         num_modes: int = NUM_MODES,
         vae: bool = False,
+        compressor_type: str = "standard",
+        compressor_denoise_steps: int = 5,
     ):
         super().__init__()
         self.config = config
@@ -59,6 +61,8 @@ class TextDynamicsModel(nn.Module):
         self._text_compressor_layers = text_compressor_layers
         self._text_expander_layers = text_expander_layers
         self._vae = vae
+        self._compressor_type = compressor_type
+        self._compressor_denoise_steps = compressor_denoise_steps
         d = config.d_model
         dyn_layers = dynamics_layers if dynamics_layers is not None else config.n_layers
         self._dynamics_layers = dyn_layers
@@ -67,16 +71,30 @@ class TextDynamicsModel(nn.Module):
         self.shared_token_emb = nn.Embedding(domain_tokenizer.vocab_size, d)
         self.shared_token_emb.weight.requires_grad = False
 
-        self.text_compressor = TextCompressor(
-            token_emb=self.shared_token_emb,
-            d_model=d,
-            n_heads=config.n_heads,
-            n_layers=text_compressor_layers,
-            max_triples=config.max_triples,
-            max_text_tokens=max_text_tokens,
-            dropout=dropout,
-            vae=vae,
-        )
+        if compressor_type == "diffusion":
+            from .diffusion_compressor import DiffusionCompressor
+            self.text_compressor = DiffusionCompressor(
+                token_emb=self.shared_token_emb,
+                d_model=d,
+                n_heads=config.n_heads,
+                n_encoder_layers=text_compressor_layers,
+                n_denoise_layers=text_expander_layers,
+                n_denoise_steps=compressor_denoise_steps,
+                max_triples=config.max_triples,
+                max_text_tokens=max_text_tokens,
+                dropout=dropout,
+            )
+        else:
+            self.text_compressor = TextCompressor(
+                token_emb=self.shared_token_emb,
+                d_model=d,
+                n_heads=config.n_heads,
+                n_layers=text_compressor_layers,
+                max_triples=config.max_triples,
+                max_text_tokens=max_text_tokens,
+                dropout=dropout,
+                vae=vae,
+            )
 
         # Dynamics core — zero_init so delta starts at 0 with input residual
         self.dynamics = TransformerDynamics(

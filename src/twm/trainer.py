@@ -53,6 +53,11 @@ class Trainer:
         c = self.config
         dyn_layers = c.dynamics_layers if c.dynamics_layers is not None else model_config.n_layers
 
+        compressor_kwargs = {}
+        if hasattr(c, 'compressor_type'):
+            compressor_kwargs['compressor_type'] = c.compressor_type
+            compressor_kwargs['compressor_denoise_steps'] = c.compressor_denoise_steps
+
         if c.model_type == "io":
             model = TextWorldModel(
                 config=model_config, domain_tokenizer=self.tokenizer,
@@ -61,6 +66,7 @@ class Trainer:
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
                 vae=c.vae,
+                **compressor_kwargs,
             )
         else:
             model = TextDynamicsModel(
@@ -71,6 +77,7 @@ class Trainer:
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
                 vae=c.vae,
+                **compressor_kwargs,
             )
         model.init_embeddings()
         return model.to(self.device)

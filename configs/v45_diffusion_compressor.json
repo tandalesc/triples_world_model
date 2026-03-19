@@ -1,0 +1,37 @@
+{
+    "model_type": "io",
+    "profile": "mini",
+    "d_model": 64,
+    "max_triples": 16,
+    "text_compressor_layers": 3,
+    "text_expander_layers": 3,
+    "max_text_tokens": 64,
+    "dropout": 0.1,
+    "alpha_min": 0.01,
+    "vae": false,
+    "compressor_type": "diffusion",
+    "compressor_denoise_steps": 5,
+    "data_dir": "data/webnlg_multi",
+    "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
+    "out_dir": "results/v45_diffusion_compressor",
+    "batch_size": 64,
+    "denoise_steps": 10,
+    "aux_ce_weight": 0.1,
+    "length_weight": 0.25,
+    "spectral_weight": 0.1,
+    "log_every": 10,
+    "diagnostic_every": 50,
+    "snapshot_every": 10,
+    "stages": [
+        {
+            "name": "io",
+            "dataset": "identity",
+            "lr": 3e-4,
+            "max_examples": 10000,
+            "phases": [
+                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 400, "patience": 200, "metric": "tok_acc"}
+            ]
+        }
+    ],
+    "device": "cuda"
+}
