@@ -368,21 +368,28 @@ class Trainer:
                     assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
                 )
         else:  # "qa", "qa_balanced", or other pair datasets
+            should_balance = "balanced" in stage.dataset
+            # Try dataset-specific train file first, fall back to qa_train.jsonl
             train_file = data_dir / f"{stage.dataset}_train.jsonl"
+            if not train_file.exists():
+                train_file = data_dir / "qa_train.jsonl"
             train_ds = TextPairDataset(
                 train_file, self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                balance=should_balance,
             )
             n_id = (train_ds._modes == 0).sum().item()
             n_qa = (train_ds._modes == 1).sum().item()
             print(f"  Dataset: {len(train_ds)} ({n_id} identity, {n_qa} Q&A)")
-            # Use balanced test set if available and training on balanced data
-            balanced_test = data_dir / f"{stage.dataset}_test.jsonl"
-            assessment_path = balanced_test if balanced_test.exists() else data_dir / "qa_test.jsonl"
+            # Try dataset-specific test file, fall back to qa_test.jsonl
+            assessment_path = data_dir / f"{stage.dataset}_test.jsonl"
+            if not assessment_path.exists():
+                assessment_path = data_dir / "qa_test.jsonl"
             ds_for_assessment = train_ds
             if assessment_path.exists():
                 ds_for_assessment = TextPairDataset(
-                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
+                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens,
+                    balance=should_balance,
                 )
         return train_ds, ds_for_assessment
 

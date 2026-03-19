@@ -34,6 +34,7 @@ class TextPairDataset(Dataset):
         tokenizer: DomainBPETokenizer,
         max_text_tokens: int = 64,
         max_examples: int = 0,
+        balance: bool = False,
     ):
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
@@ -44,6 +45,20 @@ class TextPairDataset(Dataset):
                 examples.append(json.loads(line))
                 if max_examples > 0 and len(examples) >= max_examples:
                     break
+
+        # Balance modes by downsampling majority class
+        if balance:
+            import random
+            by_mode: dict[str, list] = {}
+            for ex in examples:
+                m = ex.get("mode", "identity")
+                by_mode.setdefault(m, []).append(ex)
+            min_count = min(len(v) for v in by_mode.values())
+            examples = []
+            for mode_examples in by_mode.values():
+                random.shuffle(mode_examples)
+                examples.extend(mode_examples[:min_count])
+            random.shuffle(examples)
 
         n = len(examples)
         T = max_text_tokens
