@@ -57,6 +57,7 @@ class Trainer:
         if hasattr(c, 'compressor_type'):
             compressor_kwargs['compressor_type'] = c.compressor_type
             compressor_kwargs['compressor_denoise_steps'] = c.compressor_denoise_steps
+            compressor_kwargs['compressor_denoise_layers'] = c.compressor_denoise_layers
             compressor_kwargs['compressor_random_k'] = c.compressor_random_k
             compressor_kwargs['compressor_k_min'] = c.compressor_k_min
 

@@ -33,6 +33,7 @@ class TextWorldModel(nn.Module):
         vae: bool = False,
         compressor_type: str = "standard",
         compressor_denoise_steps: int = 5,
+        compressor_denoise_layers: int | None = None,
         compressor_random_k: bool = False,
         compressor_k_min: int = 1,
     ):
@@ -58,7 +59,7 @@ class TextWorldModel(nn.Module):
                 d_model=d,
                 n_heads=config.n_heads,
                 n_encoder_layers=text_compressor_layers,
-                n_denoise_layers=text_expander_layers,
+                n_denoise_layers=compressor_denoise_layers or text_expander_layers,
                 n_denoise_steps=compressor_denoise_steps,
                 max_triples=config.max_triples,
                 max_text_tokens=max_text_tokens,
