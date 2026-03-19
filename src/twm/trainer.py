@@ -170,15 +170,35 @@ class Trainer:
         best_metric = -1.0
         best_epoch = 0
         no_improve = 0
+        start_epoch = 1
         history = []
         pca_basis = None
 
-        # Initial assessment
-        init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
-                        n_examples=64, n_steps=c.denoise_steps)
-        print(f"  init: {format_metrics(init_m)}", flush=True)
+        # Resume from checkpoint if available
+        resume_path = phase_dir / "resume_state.json"
+        if resume_path.exists():
+            with open(resume_path) as rf:
+                rs = json.load(rf)
+            start_epoch = rs["epoch"] + 1
+            best_metric = rs["best_metric"]
+            best_epoch = rs["best_epoch"]
+            no_improve = rs["no_improve"]
+            # Load model and optimizer state
+            latest_ckpt = phase_dir / "model_latest.pt"
+            if latest_ckpt.exists():
+                self.model.load_state_dict(torch.load(latest_ckpt, map_location=self.device, weights_only=True))
+            opt_ckpt = phase_dir / "optimizer.pt"
+            if opt_ckpt.exists():
+                optimizer.load_state_dict(torch.load(opt_ckpt, map_location=self.device, weights_only=True))
+            print(f"  Resumed from epoch {rs['epoch']} (best {metric_key}={best_metric:.4f} at ep{best_epoch})")
 
-        for epoch in range(1, phase.epochs + 1):
+        # Initial assessment (skip if resuming)
+        if start_epoch == 1:
+            init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
+                            n_examples=64, n_steps=c.denoise_steps)
+            print(f"  init: {format_metrics(init_m)}", flush=True)
+
+        for epoch in range(start_epoch, phase.epochs + 1):
             self.model.train()
             epoch_loss = 0.0
             epoch_mse = 0.0
@@ -311,6 +331,16 @@ class Trainer:
                     log += " *"
                 else:
                     no_improve += c.log_every
+
+                # Save resume state every eval
+                resume_state = {
+                    "epoch": epoch, "best_metric": best_metric,
+                    "best_epoch": best_epoch, "no_improve": no_improve,
+                }
+                with open(phase_dir / "resume_state.json", "w") as rf:
+                    json.dump(resume_state, rf)
+                torch.save(optimizer.state_dict(), phase_dir / "optimizer.pt")
+                torch.save(self.model.state_dict(), phase_dir / "model_latest.pt")
 
                 print(log, flush=True)
                 history.append({"epoch": epoch, "loss": avg_loss, **gen_m})
