@@ -59,6 +59,8 @@ class TrainingConfig:
     vae: bool = False  # enable VAE bottleneck with role-conditioned priors
     compressor_type: str = "standard"  # "standard" or "diffusion"
     compressor_denoise_steps: int = 5  # K steps for diffusion compressor
+    compressor_random_k: bool = False  # random K training: sample K ~ U[k_min, steps] each batch
+    compressor_k_min: int = 1  # minimum K when random_k=True
 
     # Data
     data_dir: str = ""

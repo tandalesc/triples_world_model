@@ -53,6 +53,8 @@ class TextDynamicsModel(nn.Module):
         vae: bool = False,
         compressor_type: str = "standard",
         compressor_denoise_steps: int = 5,
+        compressor_random_k: bool = False,
+        compressor_k_min: int = 1,
     ):
         super().__init__()
         self.config = config
@@ -83,6 +85,8 @@ class TextDynamicsModel(nn.Module):
                 max_triples=config.max_triples,
                 max_text_tokens=max_text_tokens,
                 dropout=dropout,
+                random_k=compressor_random_k,
+                k_min=compressor_k_min,
             )
         else:
             self.text_compressor = TextCompressor(

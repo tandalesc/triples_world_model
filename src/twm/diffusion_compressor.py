@@ -50,11 +50,15 @@ class DiffusionCompressor(nn.Module):
         max_triples: int = 8,
         max_text_tokens: int = 64,
         dropout: float = 0.1,
+        random_k: bool = False,
+        k_min: int = 1,
     ):
         super().__init__()
         self.d_model = d_model
         self.max_triples = max_triples
         self.n_denoise_steps = n_denoise_steps
+        self.random_k = random_k
+        self.k_min = k_min
 
         # === Stage A: Text encoding (same as TextCompressor) ===
         self.token_emb = token_emb
@@ -150,9 +154,15 @@ class DiffusionCompressor(nn.Module):
         # === Iterative denoising ===
         x = torch.randn(B, n_queries, self.d_model, device=device)
 
-        schedule = torch.linspace(1.0, 0.0, self.n_denoise_steps + 1, device=device)
+        # Random K: sample number of steps per batch during training
+        if self.training and self.random_k:
+            k = torch.randint(self.k_min, self.n_denoise_steps + 1, (1,)).item()
+        else:
+            k = self.n_denoise_steps
 
-        for i in range(self.n_denoise_steps):
+        schedule = torch.linspace(1.0, 0.0, k + 1, device=device)
+
+        for i in range(k):
             t_now = schedule[i]
             t_next = schedule[i + 1]
 
@@ -175,7 +185,7 @@ class DiffusionCompressor(nn.Module):
             pred_clean = self.ln_f(x_input)
 
             # Re-noise for next step (unless last)
-            if i < self.n_denoise_steps - 1:
+            if i < k - 1:
                 alpha_next = cosine_noise_schedule(t_next.unsqueeze(0))
                 alpha_n = alpha_next.view(1, 1, 1)
                 noise = torch.randn_like(pred_clean)
