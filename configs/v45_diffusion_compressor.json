@@ -13,7 +13,7 @@
     "compressor_denoise_steps": 5,
     "data_dir": "data/webnlg_multi",
     "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
-    "out_dir": "results/v45_diffusion_compressor",
+    "out_dir": "results/v45b_diffusion_compressor",
     "batch_size": 64,
     "denoise_steps": 10,
     "aux_ce_weight": 0.1,
@@ -29,7 +29,7 @@
             "lr": 3e-4,
             "max_examples": 10000,
             "phases": [
-                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 400, "patience": 200, "metric": "tok_acc"}
+                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 800, "patience": 400, "metric": "tok_acc"}
             ]
         }
     ],
