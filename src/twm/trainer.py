@@ -145,7 +145,11 @@ class Trainer:
         metric_key = phase.metric  # "tok_acc" or "exact"
 
         print(f"\n{'='*60}")
-        print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
+        t_min_anneal = phase.t_min_end is not None and phase.t_min_end != phase.t_min
+        if t_min_anneal:
+            print(f"Phase: {name}  t in [{phase.t_min}→{phase.t_min_end}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
+        else:
+            print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
         print(f"{'='*60}")
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -188,7 +192,13 @@ class Trainer:
             for start in range(0, n_train - c.batch_size + 1, c.batch_size):
                 idx = perm[start:start + c.batch_size]
                 B = idx.shape[0]
-                timestep = sample_timestep(B, self.device, phase.t_min, phase.t_max, phase.bias_power)
+                # Anneal t_min if t_min_end is set
+                if t_min_anneal:
+                    progress = (epoch - 1) / max(phase.epochs - 1, 1)
+                    cur_t_min = phase.t_min + (phase.t_min_end - phase.t_min) * progress
+                else:
+                    cur_t_min = phase.t_min
+                timestep = sample_timestep(B, self.device, cur_t_min, phase.t_max, phase.bias_power)
 
                 if is_dynamics:
                     # Dynamics path: route through dynamics core with mode conditioning.

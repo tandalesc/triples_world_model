@@ -17,6 +17,7 @@ from pathlib import Path
 class PhaseConfig:
     """Single training phase within a stage (e.g. high-noise warmup, full range)."""
     t_min: float = 0.0
+    t_min_end: float | None = None  # If set, linearly anneal t_min from t_min to t_min_end over epochs
     t_max: float = 1.0
     bias_power: float = 1.0
     epochs: int = 200
