@@ -7,6 +7,7 @@ Usage:
 """
 
 import json
+from contextlib import nullcontext as nullctx
 from pathlib import Path
 
 import torch
@@ -83,7 +84,11 @@ class Trainer:
                 **compressor_kwargs,
             )
         model.init_embeddings()
-        return model.to(self.device)
+        model = model.to(self.device)
+        if self.config.compile:
+            print("Compiling model with torch.compile...")
+            model = torch.compile(model)
+        return model
 
     def run(self):
         """Run all stages in sequence."""
@@ -91,6 +96,10 @@ class Trainer:
         print(f"Device: {self.device}")
         print(f"Model: {self.config.model_type} ({self.config.profile})")
         print(f"Total: {self.model.param_count():,} params")
+        if self.config.bf16:
+            print(f"Mixed precision: bfloat16")
+        if self.config.compile:
+            print(f"torch.compile: enabled")
 
         for stage in self.config.stages:
             self._run_stage(stage)
@@ -230,49 +239,51 @@ class Trainer:
                     cur_t_min = phase.t_min
                 timestep = sample_timestep(B, self.device, cur_t_min, phase.t_max, phase.bias_power)
 
-                if is_dynamics:
-                    # Dynamics path: route through dynamics core with mode conditioning.
-                    # For joint training on identity data, use same text as input/output
-                    # with mode=0 (identity) so dynamics gradients flow back to compressor.
-                    if stage.joint and stage.dataset == "identity":
-                        in_ids = train_ds._text_token_ids[idx]
-                        in_pad = train_ds._text_pad_mask[idx]
-                        out_ids = in_ids
-                        out_pad = in_pad
-                        out_len = train_ds._text_lengths[idx]
-                        batch_modes = torch.zeros(B, dtype=torch.long)
+                amp_ctx = torch.autocast(self.device.type, dtype=torch.bfloat16) if c.bf16 else nullctx()
+                with amp_ctx:
+                    if is_dynamics:
+                        # Dynamics path: route through dynamics core with mode conditioning.
+                        # For joint training on identity data, use same text as input/output
+                        # with mode=0 (identity) so dynamics gradients flow back to compressor.
+                        if stage.joint and stage.dataset == "identity":
+                            in_ids = train_ds._text_token_ids[idx]
+                            in_pad = train_ds._text_pad_mask[idx]
+                            out_ids = in_ids
+                            out_pad = in_pad
+                            out_len = train_ds._text_lengths[idx]
+                            batch_modes = torch.zeros(B, dtype=torch.long)
+                        else:
+                            in_ids = train_ds._input_token_ids[idx]
+                            in_pad = train_ds._input_pad_mask[idx]
+                            out_ids = train_ds._output_token_ids[idx]
+                            out_pad = train_ds._output_pad_mask[idx]
+                            out_len = train_ds._output_lengths[idx]
+                            batch_modes = train_ds._modes[idx]
+                        loss, batch_m = compute_diffusion_loss(
+                            self.model,
+                            in_ids, in_pad, out_ids, out_pad,
+                            out_len, self.device, timestep,
+                            mode_ids=batch_modes,
+                            aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
+                            bottleneck_weight=c.bottleneck_weight,
+                            role_prior_weight=c.role_prior_weight,
+                            bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
+                            detach_dynamics_expander=c.detach_dynamics_expander,
+                            kl_weight=eff_kl_weight,
+                            spectral_weight=c.spectral_weight,
+                        )
                     else:
-                        in_ids = train_ds._input_token_ids[idx]
-                        in_pad = train_ds._input_pad_mask[idx]
-                        out_ids = train_ds._output_token_ids[idx]
-                        out_pad = train_ds._output_pad_mask[idx]
-                        out_len = train_ds._output_lengths[idx]
-                        batch_modes = train_ds._modes[idx]
-                    loss, batch_m = compute_diffusion_loss(
-                        self.model,
-                        in_ids, in_pad, out_ids, out_pad,
-                        out_len, self.device, timestep,
-                        mode_ids=batch_modes,
-                        aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
-                        bottleneck_weight=c.bottleneck_weight,
-                        role_prior_weight=c.role_prior_weight,
-                        bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
-                        detach_dynamics_expander=c.detach_dynamics_expander,
-                        kl_weight=eff_kl_weight,
-                        spectral_weight=c.spectral_weight,
-                    )
-                else:
-                    loss, batch_m = compute_diffusion_loss(
-                        self.model,
-                        train_ds._text_token_ids[idx], train_ds._text_pad_mask[idx],
-                        None, None,
-                        train_ds._text_lengths[idx], self.device, timestep,
-                        mode_ids=None,
-                        aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
-                        role_prior_weight=c.role_prior_weight,
-                        kl_weight=eff_kl_weight,
-                        spectral_weight=c.spectral_weight,
-                    )
+                        loss, batch_m = compute_diffusion_loss(
+                            self.model,
+                            train_ds._text_token_ids[idx], train_ds._text_pad_mask[idx],
+                            None, None,
+                            train_ds._text_lengths[idx], self.device, timestep,
+                            mode_ids=None,
+                            aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
+                            role_prior_weight=c.role_prior_weight,
+                            kl_weight=eff_kl_weight,
+                            spectral_weight=c.spectral_weight,
+                        )
 
                 optimizer.zero_grad()
                 loss.backward()

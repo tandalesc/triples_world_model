@@ -87,6 +87,10 @@ class TrainingConfig:
     # Stages
     stages: list[StageConfig] = field(default_factory=list)
 
+    # Performance
+    compile: bool = False  # torch.compile the model
+    bf16: bool = False  # bfloat16 mixed precision (requires Ampere+ GPU)
+
     # Output
     out_dir: str = ""
     device: str | None = None
