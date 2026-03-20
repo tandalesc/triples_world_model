@@ -36,7 +36,7 @@
             "lr": 3e-4,
             "max_examples": 60000,
             "phases": [
-                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 1600, "patience": 400, "metric": "tok_acc"}
+                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 1600, "patience": 1600, "metric": "ce"}
             ]
         }
     ],
