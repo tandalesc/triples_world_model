@@ -260,18 +260,16 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
     len_loss = F.mse_loss(len_pred, output_len.float().to(device))
 
     # Bottleneck loss: role-decomposed or uniform
-    # Apply to all non-identity modes (qa=1, reverse=2, etc.)
+    # Apply to ALL modes — identity needs delta≈0 supervision too
     bn_loss = torch.tensor(0.0, device=device)
     if bottleneck_target is not None:
-        transform_mask = mode_ids != 0
-        if transform_mask.any():
-            if bn_role_weights is not None:
-                bn_loss, bn_metrics = _compute_role_decomposed_bn_loss(
-                    bottleneck[transform_mask], bottleneck_target[transform_mask], bn_role_weights
-                )
-                metrics.update(bn_metrics)
-            elif bottleneck_weight > 0:
-                bn_loss = F.mse_loss(bottleneck[transform_mask], bottleneck_target[transform_mask])
+        if bn_role_weights is not None:
+            bn_loss, bn_metrics = _compute_role_decomposed_bn_loss(
+                bottleneck, bottleneck_target, bn_role_weights
+            )
+            metrics.update(bn_metrics)
+        elif bottleneck_weight > 0:
+            bn_loss = F.mse_loss(bottleneck, bottleneck_target)
 
     bn_w = bottleneck_weight if bn_role_weights is None else 1.0
 
