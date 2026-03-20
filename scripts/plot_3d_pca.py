@@ -72,7 +72,7 @@ def main():
     test_file = data_dir / "qa_balanced_test.jsonl"
     if not test_file.exists():
         test_file = data_dir / "test.jsonl"
-    dataset = TextPairDataset(str(test_file), tok, max_triples=cfg["max_triples"])
+    dataset = TextPairDataset(str(test_file), tok, max_text_tokens=cfg["max_text_tokens"])
 
     n = min(args.n, len(dataset))
     input_ids = dataset._input_token_ids[:n]
