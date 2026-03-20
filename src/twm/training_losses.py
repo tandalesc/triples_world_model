@@ -61,7 +61,7 @@ def _compute_spectral_loss(bottleneck, n_roles=3):
         # Covariance: (d, d)
         cov = (vecs.T @ vecs) / (vecs.shape[0] - 1)
         # Eigenvalues (symmetric → real)
-        eigvals = torch.linalg.eigvalsh(cov)  # ascending order
+        eigvals = torch.linalg.eigvalsh(cov.float())  # ascending order; eigvalsh needs fp32
         eigvals = eigvals.clamp(min=1e-8)
         # PC1 ratio = max eigenvalue / sum
         pc1_ratio = eigvals[-1] / eigvals.sum()
