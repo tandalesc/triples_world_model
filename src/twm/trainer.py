@@ -49,6 +49,16 @@ class Trainer:
         # Save config for reproducibility
         self.config.save(self.out_dir / "training_config.json")
 
+        # Load distributional alignment data
+        self.dist_lookup = None
+        self.spectral_target_spectra = None
+        if config.distributional_lookup_path:
+            self.dist_lookup = torch.load(config.distributional_lookup_path, weights_only=False)
+            print(f"Loaded distributional lookup: {config.distributional_lookup_path}")
+        if config.spectral_target_path:
+            self.spectral_target_spectra = torch.load(config.spectral_target_path, weights_only=False)
+            print(f"Loaded spectral targets: {config.spectral_target_path}")
+
     def _build_model(self) -> torch.nn.Module:
         model_config = self.config.build_model_config()
         c = self.config
@@ -219,6 +229,8 @@ class Trainer:
             epoch_role = 0.0
             epoch_kl = 0.0
             epoch_spec = 0.0
+            epoch_cka = 0.0
+            epoch_spec_tgt = 0.0
             n_batches = 0
 
             # β annealing: linear ramp from 0 to kl_weight over kl_anneal_epochs
@@ -259,6 +271,13 @@ class Trainer:
                             out_pad = train_ds._output_pad_mask[idx]
                             out_len = train_ds._output_lengths[idx]
                             batch_modes = train_ds._modes[idx]
+                        # Distributional alignment data for this batch
+                        batch_dist_embs = None
+                        batch_dist_mask = None
+                        if train_ds._dist_embs is not None:
+                            batch_dist_embs = train_ds._dist_embs[idx]
+                            batch_dist_mask = train_ds._dist_mask[idx]
+
                         loss, batch_m = compute_diffusion_loss(
                             self.model,
                             in_ids, in_pad, out_ids, out_pad,
@@ -272,8 +291,21 @@ class Trainer:
                             detach_compressor_expander=c.detach_compressor_expander,
                             kl_weight=eff_kl_weight,
                             spectral_weight=c.spectral_weight,
+                            cka_weight=c.cka_weight,
+                            dist_embs=batch_dist_embs,
+                            dist_mask=batch_dist_mask,
+                            cka_per_role=c.cka_per_role,
+                            spectral_target_weight=c.spectral_target_weight,
+                            spectral_target_spectra=self.spectral_target_spectra,
                         )
                     else:
+                        # Distributional alignment data for this batch
+                        batch_dist_embs = None
+                        batch_dist_mask = None
+                        if train_ds._dist_embs is not None:
+                            batch_dist_embs = train_ds._dist_embs[idx]
+                            batch_dist_mask = train_ds._dist_mask[idx]
+
                         loss, batch_m = compute_diffusion_loss(
                             self.model,
                             train_ds._text_token_ids[idx], train_ds._text_pad_mask[idx],
@@ -285,6 +317,12 @@ class Trainer:
                             detach_compressor_expander=c.detach_compressor_expander,
                             kl_weight=eff_kl_weight,
                             spectral_weight=c.spectral_weight,
+                            cka_weight=c.cka_weight,
+                            dist_embs=batch_dist_embs,
+                            dist_mask=batch_dist_mask,
+                            cka_per_role=c.cka_per_role,
+                            spectral_target_weight=c.spectral_target_weight,
+                            spectral_target_spectra=self.spectral_target_spectra,
                         )
 
                 optimizer.zero_grad()
@@ -302,6 +340,8 @@ class Trainer:
                 epoch_role += batch_m.get("role_loss", 0.0)
                 epoch_kl += batch_m.get("kl", 0.0)
                 epoch_spec += batch_m.get("spec", 0.0)
+                epoch_cka += batch_m.get("cka", 0.0)
+                epoch_spec_tgt += batch_m.get("spec_tgt", 0.0)
                 n_batches += 1
 
             scheduler.step()
@@ -315,6 +355,8 @@ class Trainer:
             avg_role = epoch_role / max(n_batches, 1)
             avg_kl = epoch_kl / max(n_batches, 1)
             avg_spec = epoch_spec / max(n_batches, 1)
+            avg_cka = epoch_cka / max(n_batches, 1)
+            avg_spec_tgt = epoch_spec_tgt / max(n_batches, 1)
 
             if epoch % c.log_every == 0 or epoch == 1:
                 self.model.eval()
@@ -333,6 +375,10 @@ class Trainer:
                     log += f" kl={avg_kl:.4f} (β={eff_kl_weight:.4f})"
                 if c.spectral_weight > 0:
                     log += f" spec={avg_spec:.4f}"
+                if c.cka_weight > 0:
+                    log += f" cka={avg_cka:.4f}"
+                if c.spectral_target_weight > 0:
+                    log += f" spec_tgt={avg_spec_tgt:.4f}"
                 log += f" | {format_metrics(gen_m)}"
 
                 cur_metric = gen_m[metric_key]
@@ -385,21 +431,29 @@ class Trainer:
     def _load_datasets(self, stage: StageConfig, data_dir: Path):
         c = self.config
         max_ex = stage.max_examples if stage.max_examples is not None else c.max_examples
+        mc = c.build_model_config()
+        dist_kw = {}
+        if self.dist_lookup is not None:
+            dist_kw = {"distributional_lookup": self.dist_lookup, "max_triples": mc.max_triples}
+
         if stage.dataset == "identity":
             train_ds = TextDataset(
                 data_dir / "identity_train.jsonl", self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                **dist_kw,
             )
             assessment_path = data_dir / "identity_test.jsonl"
             ds_for_assessment = train_ds
             if assessment_path.exists():
                 ds_for_assessment = TextDataset(
-                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
+                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens,
+                    **dist_kw,
                 )
         elif stage.dataset == "mode_warmup":
             train_ds = TextPairDataset(
                 data_dir / "mode_warmup_train.jsonl", self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                **dist_kw,
             )
             n_id = (train_ds._modes == 0).sum().item()
             n_rev = (train_ds._modes == 2).sum().item()
@@ -420,6 +474,7 @@ class Trainer:
                 train_file, self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
                 balance=should_balance,
+                **dist_kw,
             )
             n_id = (train_ds._modes == 0).sum().item()
             n_qa = (train_ds._modes == 1).sum().item()

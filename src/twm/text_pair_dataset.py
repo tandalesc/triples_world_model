@@ -35,6 +35,8 @@ class TextPairDataset(Dataset):
         max_text_tokens: int = 64,
         max_examples: int = 0,
         balance: bool = False,
+        distributional_lookup: dict | None = None,
+        max_triples: int = 16,
     ):
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
@@ -87,6 +89,46 @@ class TextPairDataset(Dataset):
             self._modes[i] = MODE_MAP.get(ex.get("mode", "identity"), MODE_IDENTITY)
 
         self.examples = examples
+
+        # Distributional embeddings for CKA alignment (keyed on input text)
+        self._dist_embs = None
+        self._dist_mask = None
+        if distributional_lookup is not None:
+            self._build_dist_embs(examples, distributional_lookup, max_triples)
+
+    def _build_dist_embs(self, examples, lookup, max_triples):
+        """Build per-example distributional embedding tensors from lookup."""
+        text_to_triples = lookup["text_to_triples"]
+        span_embs = lookup["span_embeddings"]
+        sample_role = next(iter(span_embs.values()))
+        sample_emb = next(iter(sample_role.values()))
+        d_dist = sample_emb.shape[0]
+
+        n = len(examples)
+        S = max_triples * 3
+        self._dist_embs = torch.zeros((n, S, d_dist), dtype=torch.float16)
+        self._dist_mask = torch.zeros((n, S), dtype=torch.bool)
+
+        role_keys = ["entity", "attribute", "value"]
+        matched = 0
+        for i, ex in enumerate(examples):
+            text = ex["input_text"]
+            triples = text_to_triples.get(text)
+            if triples is None:
+                continue
+            for t_idx, triple in enumerate(triples[:max_triples]):
+                for r_idx, role in enumerate(role_keys):
+                    span = triple[r_idx]
+                    emb = span_embs[role].get(span)
+                    if emb is not None:
+                        slot = t_idx * 3 + r_idx
+                        self._dist_embs[i, slot] = emb.half()
+                        self._dist_mask[i, slot] = True
+            matched += 1
+
+        pct = matched / n * 100 if n > 0 else 0
+        print(f"  Distributional: {matched}/{n} texts matched ({pct:.1f}%), "
+              f"{self._dist_mask.sum().item()} valid slots, {d_dist}d")
 
     def __len__(self):
         return len(self.examples)

@@ -73,6 +73,132 @@ def _compute_spectral_loss(bottleneck, n_roles=3):
     return total, metrics
 
 
+def _linear_cka(X, Y):
+    """Compute linear CKA between X: (M, d1) and Y: (M, d2).
+
+    CKA = ||Y_c^T X_c||_F^2 / sqrt(||X_c^T X_c||_F^2 * ||Y_c^T Y_c||_F^2)
+    """
+    X_c = X - X.mean(0, keepdim=True)
+    Y_c = Y - Y.mean(0, keepdim=True)
+
+    YX = Y_c.T @ X_c
+    XX = X_c.T @ X_c
+    YY = Y_c.T @ Y_c
+
+    hsic_xy = (YX * YX).sum()
+    hsic_xx = (XX * XX).sum()
+    hsic_yy = (YY * YY).sum()
+
+    denom = torch.sqrt(hsic_xx * hsic_yy).clamp(min=1e-8)
+    return hsic_xy / denom
+
+
+def _compute_cka_loss(bottleneck, dist_embs, dist_mask, per_role=True, n_roles=3):
+    """CKA alignment between bottleneck and distributional embeddings.
+
+    Args:
+        bottleneck: (B, N*3, d_model)
+        dist_embs: (B, N*3, d_dist)
+        dist_mask: (B, N*3) — True where valid distributional embedding exists
+        per_role: compute CKA per role (E/A/V) and average
+
+    Returns:
+        scalar loss (1 - CKA), metrics dict
+    """
+    B, T, d_bn = bottleneck.shape
+    d_dist = dist_embs.shape[-1]
+    device = bottleneck.device
+    metrics = {}
+
+    if per_role:
+        role_idx = torch.arange(T, device=device) % n_roles
+        role_names = ["entity", "attribute", "value"]
+        total_cka = torch.tensor(0.0, device=device)
+        n_valid = 0
+
+        for r in range(n_roles):
+            role_mask = role_idx == r
+            bn_role = bottleneck[:, role_mask].reshape(-1, d_bn)
+            dist_role = dist_embs[:, role_mask].reshape(-1, d_dist)
+            mask_role = dist_mask[:, role_mask].reshape(-1)
+
+            if mask_role.sum() < 4:
+                continue
+
+            X = bn_role[mask_role]
+            Y = dist_role[mask_role].float()
+
+            cka = _linear_cka(X, Y)
+            total_cka = total_cka + cka
+            n_valid += 1
+            metrics[f"cka_{role_names[r]}"] = cka.item()
+
+        if n_valid == 0:
+            return torch.tensor(0.0, device=device), metrics
+
+        avg_cka = total_cka / n_valid
+        loss = 1.0 - avg_cka
+        metrics["cka_loss"] = loss.item()
+        return loss, metrics
+    else:
+        valid = dist_mask.reshape(-1)
+        if valid.sum() < 4:
+            return torch.tensor(0.0, device=device), metrics
+        X = bottleneck.reshape(-1, d_bn)[valid]
+        Y = dist_embs.reshape(-1, d_dist)[valid].float()
+        cka = _linear_cka(X, Y)
+        loss = 1.0 - cka
+        metrics["cka_loss"] = loss.item()
+        return loss, metrics
+
+
+def _compute_spectral_target_loss(bottleneck, target_spectra, n_roles=3, top_k=32):
+    """Match bottleneck eigenvalue spectrum to distributional target per role.
+
+    Args:
+        bottleneck: (B, N*3, d_model)
+        target_spectra: dict with keys "entity", "attribute", "value",
+            each a 1D tensor of normalized eigenvalues (descending, sum~1)
+        top_k: number of eigenvalues to compare
+
+    Returns:
+        scalar loss (MSE on normalized spectra), metrics dict
+    """
+    B, T, d = bottleneck.shape
+    device = bottleneck.device
+    role_idx = torch.arange(T, device=device) % n_roles
+    role_names = ["entity", "attribute", "value"]
+    total = torch.tensor(0.0, device=device)
+    metrics = {}
+
+    for r in range(n_roles):
+        mask = role_idx == r
+        vecs = bottleneck[:, mask].reshape(-1, d)
+        if vecs.shape[0] < 2:
+            continue
+
+        vecs = vecs - vecs.mean(0, keepdim=True)
+        cov = (vecs.T @ vecs) / (vecs.shape[0] - 1)
+        eigvals = torch.linalg.eigvalsh(cov.float()).flip(0)  # descending
+        eigvals = eigvals.clamp(min=1e-8)
+
+        K = min(top_k, d, len(eigvals))
+        bn_spectrum = eigvals[:K] / eigvals.sum()
+
+        target = target_spectra[role_names[r]].to(device)[:K]
+        # Renormalize target to same length
+        target = target / target.sum()
+
+        role_loss = F.mse_loss(bn_spectrum, target)
+        total = total + role_loss
+        metrics[f"spec_tgt_{role_names[r]}"] = role_loss.item()
+        metrics[f"spec_{role_names[r]}"] = (eigvals[0] / eigvals.sum()).item()
+
+    total = total / n_roles
+    metrics["spec_tgt_loss"] = total.item()
+    return total, metrics
+
+
 def _compute_role_prior_loss(bottleneck, role_centroids):
     """Pull each slot toward its role-conditioned centroid.
 
@@ -140,7 +266,11 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            bottleneck_weight=0.0, role_prior_weight=0.0,
                            bn_role_weights=None, detach_dynamics_expander=False,
                            detach_compressor_expander=False,
-                           kl_weight=0.0, spectral_weight=0.0):
+                           kl_weight=0.0, spectral_weight=0.0,
+                           cka_weight=0.0, dist_embs=None, dist_mask=None,
+                           cka_per_role=True,
+                           spectral_target_weight=0.0,
+                           spectral_target_spectra=None):
     """Unified diffusion loss for both IO and dynamics modes.
 
     When mode_ids is None: IO mode (input is target, no dynamics).
@@ -177,6 +307,10 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
     else:
         bottleneck = compress_out
         expander_bn = bottleneck
+
+    # Save pre-dynamics compressor output for geometry losses (CKA, spectral target).
+    # These measure compressor geometry, not dynamics output.
+    compressor_bn = expander_bn
 
     # Length bottleneck: pre-dynamics for IO (length = input property),
     # post-dynamics for QA (length = output property, only known after transform).
@@ -298,9 +432,31 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         spec_loss, spec_metrics = _compute_spectral_loss(spec_input)
         metrics.update(spec_metrics)
 
+    # CKA alignment: match pairwise similarity structure to distributional embeddings.
+    # Uses compressor_bn (pre-dynamics) so we measure compressor geometry.
+    # Gradients flow back through compressor even with detach_compressor_expander.
+    cka_loss = torch.tensor(0.0, device=device)
+    if cka_weight > 0 and dist_embs is not None:
+        cka_loss, cka_metrics = _compute_cka_loss(
+            compressor_bn, dist_embs.to(device), dist_mask.to(device),
+            per_role=cka_per_role,
+        )
+        metrics.update(cka_metrics)
+
+    # Spectral target: match per-role eigenvalue spectrum to distributional target.
+    # Also uses compressor_bn (pre-dynamics) for the same reason.
+    spec_tgt_loss = torch.tensor(0.0, device=device)
+    if spectral_target_weight > 0 and spectral_target_spectra is not None:
+        spec_tgt_loss, spec_tgt_metrics = _compute_spectral_target_loss(
+            compressor_bn, spectral_target_spectra,
+        )
+        metrics.update(spec_tgt_metrics)
+
     total = (mse_loss + aux_ce_weight * aux_loss + length_weight * len_loss
              + bn_w * bn_loss + role_prior_weight * role_loss
-             + kl_weight * kl_loss + spectral_weight * spec_loss)
+             + kl_weight * kl_loss + spectral_weight * spec_loss
+             + cka_weight * cka_loss
+             + spectral_target_weight * spec_tgt_loss)
     metrics["loss"] = total.item()
     metrics["mse"] = mse_loss.item()
     metrics["ce"] = aux_loss.item()
@@ -316,4 +472,8 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                 metrics[k] = vae_info[k]
     if spectral_weight > 0:
         metrics["spec"] = spec_loss.item()
+    if cka_weight > 0:
+        metrics["cka"] = cka_loss.item()
+    if spectral_target_weight > 0:
+        metrics["spec_tgt"] = spec_tgt_loss.item()
     return total, metrics

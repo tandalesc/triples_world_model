@@ -81,6 +81,11 @@ class TrainingConfig:
     kl_weight: float = 0.0  # VAE KL weight (β). 0 = no KL. Annealed from 0 to this value.
     kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.
     spectral_weight: float = 0.0  # spectral penalty weight. Penalizes bottleneck collapse to 1D manifold.
+    cka_weight: float = 0.0  # CKA alignment loss weight (distributional topology)
+    cka_per_role: bool = True  # compute CKA per role (E/A/V) and average
+    spectral_target_weight: float = 0.0  # match per-role eigenvalue spectrum to distributional target
+    distributional_lookup_path: str = ""  # path to distributional_lookup.pt for CKA
+    spectral_target_path: str = ""  # path to distributional_spectra.pt for spectral target
     log_every: int = 10
     diagnostic_every: int = 50
     snapshot_every: int = 0  # 0 = disabled; >0 = save latent PCA frame every N epochs
