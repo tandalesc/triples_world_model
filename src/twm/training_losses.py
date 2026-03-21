@@ -139,6 +139,7 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
                            aux_ce_weight=0.1, length_weight=0.1,
                            bottleneck_weight=0.0, role_prior_weight=0.0,
                            bn_role_weights=None, detach_dynamics_expander=False,
+                           detach_compressor_expander=False,
                            kl_weight=0.0, spectral_weight=0.0):
     """Unified diffusion loss for both IO and dynamics modes.
 
@@ -151,6 +152,9 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         detach_dynamics_expander: if True, detach bottleneck before expander
             during dynamics training. Core trains on bn loss only, no token
             gradients fighting its exploration of W-space.
+        detach_compressor_expander: if True, detach bottleneck before expander
+            in ALL modes (IO + dynamics). Fully decouples compressor geometry
+            from expander reconstruction gradients.
         kl_weight: VAE KL weight (β), already annealed by caller.
         spectral_weight: weight for spectral penalty (prevents bottleneck
             collapse to 1D manifold by penalizing dominant eigenvalues).
@@ -216,9 +220,17 @@ def compute_diffusion_loss(model, input_ids, input_pad, output_ids, output_pad,
         target_ids = input_ids
         target_pad = input_pad
 
-    # Detach bottleneck before expander during dynamics: core trains on
-    # bn loss only, token-level gradients don't fight W-space exploration.
-    expander_input = expander_bn.detach() if (detach_dynamics_expander and mode_ids is not None) else expander_bn
+    # Detach bottleneck before expander: compressor/dynamics train on
+    # bn/spectral loss only, token-level gradients don't fight W-space exploration.
+    # detach_dynamics_expander: detach only in dynamics mode (legacy)
+    # detach_compressor_expander: detach always (IO + dynamics) — fully decouples
+    #   compressor geometry from expander reconstruction gradients
+    if detach_compressor_expander:
+        expander_input = expander_bn.detach()
+    elif detach_dynamics_expander and mode_ids is not None:
+        expander_input = expander_bn.detach()
+    else:
+        expander_input = expander_bn
     pred_emb, _ = model.forward_expander(expander_input, target_ids, target_pad, timestep=timestep)
 
     non_pad = ~target_pad

@@ -76,6 +76,7 @@ class TrainingConfig:
     bottleneck_weight: float = 0.0  # direct bottleneck MSE (dynamics only)
     bn_role_weights: list[float] | None = None  # [entity_w, attr_w, value_w] for decomposed bn loss
     detach_dynamics_expander: bool = False  # cut token gradients to dynamics core
+    detach_compressor_expander: bool = False  # cut ALL token gradients to compressor (IO + dynamics)
     role_prior_weight: float = 0.0  # role-conditioned centroid regularization (legacy, use vae instead)
     kl_weight: float = 0.0  # VAE KL weight (β). 0 = no KL. Annealed from 0 to this value.
     kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.

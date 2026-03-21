@@ -269,6 +269,7 @@ class Trainer:
                             role_prior_weight=c.role_prior_weight,
                             bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
                             detach_dynamics_expander=c.detach_dynamics_expander,
+                            detach_compressor_expander=c.detach_compressor_expander,
                             kl_weight=eff_kl_weight,
                             spectral_weight=c.spectral_weight,
                         )
@@ -281,6 +282,7 @@ class Trainer:
                             mode_ids=None,
                             aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
                             role_prior_weight=c.role_prior_weight,
+                            detach_compressor_expander=c.detach_compressor_expander,
                             kl_weight=eff_kl_weight,
                             spectral_weight=c.spectral_weight,
                         )
