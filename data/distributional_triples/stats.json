@@ -1,0 +1,10 @@
+{
+  "n_sentences": 52884,
+  "n_triples": 83655,
+  "triples_per_sentence": 1.581858407079646,
+  "unique_subjects": 13017,
+  "unique_predicates": 935,
+  "unique_objects": 23925,
+  "encoder": "all-MiniLM-L6-v2",
+  "embedding_dim": 384
+}
