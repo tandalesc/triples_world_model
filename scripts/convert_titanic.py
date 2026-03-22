@@ -1,26 +1,48 @@
 #!/usr/bin/env python3
-"""Convert classic Titanic CSV to TWM triple-transition JSONL.
+"""Convert classic Titanic CSV to TWM triple-transition JSONL (v3).
 
-Frames survival prediction as state transition:
-  state_t: passenger attributes (7 triples + mode)
-  state_t+1: same attributes + survived prediction
+Trains on ALL of train.csv (no internal test split — Kaggle submission is the only real eval).
 
-Attributes: class, sex, age_group, family_size, fare, embarked, cabin_known
+Attributes (all optional — missing fields omitted as triples):
+  title, class, sex, age_group, is_child, age_estimated,
+  sibsp, parch, is_alone, fare_pp, embarked, cabin_deck, cabin_known
 """
 
 import csv
 import json
 import random
+import re
 from collections import Counter
 from pathlib import Path
 
 random.seed(42)
 
-# --- Discretization ---
+# --- Feature extraction ---
+
+def extract_title(name: str) -> str | None:
+    match = re.search(r', (\w+)\.', name)
+    if not match:
+        return None
+    title = match.group(1)
+    if title in ("Mr",):
+        return "mr"
+    elif title in ("Mrs", "Mme", "Ms"):
+        return "mrs"
+    elif title in ("Miss", "Mlle"):
+        return "miss"
+    elif title in ("Master",):
+        return "master"
+    else:
+        return "rare"
+
 
 def age_group(age: float) -> str:
-    if age <= 17:
+    if age <= 5:
+        return "infant"
+    elif age <= 12:
         return "child"
+    elif age <= 17:
+        return "teen"
     elif age <= 30:
         return "young_adult"
     elif age <= 50:
@@ -29,25 +51,43 @@ def age_group(age: float) -> str:
         return "senior"
 
 
-def family_size(sibsp: int, parch: int) -> str:
-    total = sibsp + parch
-    if total == 0:
-        return "solo"
-    elif total <= 3:
-        return "small"
+def sibsp_bin(n: int) -> str:
+    if n == 0:
+        return "none"
+    elif n == 1:
+        return "one"
     else:
-        return "large"
+        return "many"
 
 
-def fare_level(fare: float) -> str:
-    if fare <= 10:
+def parch_bin(n: int) -> str:
+    if n == 0:
+        return "none"
+    elif n <= 2:
+        return "one_two"
+    else:
+        return "many"
+
+
+def fare_pp_level(fare: float, family_total: int) -> str:
+    """Fare per person."""
+    fpp = fare / max(1, 1 + family_total)
+    if fpp <= 8:
+        return "very_low"
+    elif fpp <= 15:
         return "low"
-    elif fare <= 30:
+    elif fpp <= 30:
         return "medium"
-    elif fare <= 100:
+    elif fpp <= 60:
         return "high"
     else:
         return "premium"
+
+
+def extract_cabin_deck(cabin: str) -> str | None:
+    if not cabin:
+        return None
+    return cabin[0].lower()
 
 
 EMBARKED_MAP = {
@@ -62,28 +102,15 @@ CLASS_MAP = {
     "3": "third",
 }
 
-# --- Compositional holdout combos ---
-
-HOLDOUT_COMBOS = [
-    {"class": "first", "sex": "male", "age_group": "senior"},
-    {"class": "third", "sex": "female", "embarked": "queenstown"},
-    {"class": "second", "family_size": "large"},
-]
-
-
-def matches_holdout(attrs: dict) -> bool:
-    for combo in HOLDOUT_COMBOS:
-        if all(attrs.get(k) == v for k, v in combo.items()):
-            return True
-    return False
-
-
 # --- Triple builders ---
 
 MODE_ADVANCE = ["#mode", "type", "advance"]
 MODE_IDENTITY = ["#mode", "type", "identity"]
 
-ATTR_KEYS = ["class", "sex", "age_group", "family_size", "fare", "embarked", "cabin_known"]
+ATTR_KEYS = [
+    "title", "class", "sex", "age_group", "is_child", "age_estimated",
+    "sibsp", "parch", "is_alone", "fare_pp", "embarked", "cabin_deck", "cabin_known",
+]
 
 
 def attrs_to_triples(attrs: dict, include_survived: bool = False) -> list[list[str]]:
@@ -113,27 +140,57 @@ def write_jsonl(path: Path, examples: list[dict]):
 
 
 def row_to_attrs(row: dict) -> dict | None:
-    """Convert a CSV row to attribute dict. Skips missing fields instead of dropping rows.
-
-    Returns None only if Sex and Pclass are both missing (too little signal).
-    """
+    """Convert a CSV row to attribute dict. Skips missing fields."""
     if not row.get("Sex") and not row.get("Pclass"):
         return None
 
     attrs = {}
 
+    # Title
+    if row.get("Name"):
+        title = extract_title(row["Name"])
+        if title:
+            attrs["title"] = title
+
+    # Class
     if row.get("Pclass") and row["Pclass"] in CLASS_MAP:
         attrs["class"] = CLASS_MAP[row["Pclass"]]
+
+    # Sex
     if row.get("Sex"):
         attrs["sex"] = row["Sex"].lower()
+
+    # Age features
     if row.get("Age"):
-        attrs["age_group"] = age_group(float(row["Age"]))
-    if row.get("SibSp") is not None and row.get("Parch") is not None:
-        attrs["family_size"] = family_size(int(row["SibSp"]), int(row["Parch"]))
+        age = float(row["Age"])
+        attrs["age_group"] = age_group(age)
+        attrs["is_child"] = "yes" if age < 15 else "no"
+        attrs["age_estimated"] = "yes" if age != int(age) and (age * 2) == int(age * 2) else "no"
+
+    # Family features
+    sibsp = int(row["SibSp"]) if row.get("SibSp") else None
+    parch = int(row["Parch"]) if row.get("Parch") else None
+    if sibsp is not None:
+        attrs["sibsp"] = sibsp_bin(sibsp)
+    if parch is not None:
+        attrs["parch"] = parch_bin(parch)
+    if sibsp is not None and parch is not None:
+        attrs["is_alone"] = "yes" if sibsp == 0 and parch == 0 else "no"
+
+    # Fare per person
     if row.get("Fare"):
-        attrs["fare"] = fare_level(float(row["Fare"]))
+        family_total = (sibsp or 0) + (parch or 0)
+        attrs["fare_pp"] = fare_pp_level(float(row["Fare"]), family_total)
+
+    # Embarked
     if row.get("Embarked") and row["Embarked"] in EMBARKED_MAP:
         attrs["embarked"] = EMBARKED_MAP[row["Embarked"]]
+
+    # Cabin features
+    if row.get("Cabin"):
+        deck = extract_cabin_deck(row["Cabin"])
+        if deck:
+            attrs["cabin_deck"] = deck
     attrs["cabin_known"] = "yes" if row.get("Cabin") else "no"
 
     return attrs
@@ -145,12 +202,10 @@ def main():
     src = Path("data/titanic/train.csv")
     out_dir = Path("data/titanic")
 
-    # 1. Read CSV
     with open(src) as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+        rows = list(csv.DictReader(f))
 
-    # 2. Convert rows to attribute dicts
+    # Convert all rows
     all_attrs = []
     dropped = 0
     for row in rows:
@@ -161,63 +216,34 @@ def main():
         attrs["survived"] = "yes" if row["Survived"] == "1" else "no"
         all_attrs.append(attrs)
 
-    print(f"Classic Titanic → TWM Triples")
+    print(f"Classic Titanic → TWM Triples (v3)")
     print(f"  Total rows: {len(rows)}")
-    print(f"  Dropped (missing fields): {dropped}")
+    print(f"  Dropped: {dropped}")
     print(f"  Valid rows: {len(all_attrs)}")
 
-    # 3. Split into holdout vs train pool
-    test_comp_examples = []
-    train_pool = []
-    for attrs in all_attrs:
-        ex = make_advance(attrs)
-        if matches_holdout(attrs):
-            test_comp_examples.append(ex)
-        else:
-            train_pool.append(ex)
-
-    # 4. Split train pool: 90% train, 10% test_seen
-    random.shuffle(train_pool)
-    n_seen = len(train_pool) // 10
-    test_seen_examples = train_pool[:n_seen]
-    train_examples = train_pool[n_seen:]
-
-    # 5. Add identity examples (~20% of train count)
-    n_identity = len(train_examples) // 5
-    identity_indices = random.sample(range(len(all_attrs)), min(n_identity, len(all_attrs)))
-    for idx in identity_indices:
-        train_examples.append(make_identity(all_attrs[idx]))
-
-    # 6. Shuffle and write
+    # All advance examples go to train (no identity — every example teaches classification)
+    train_examples = [make_advance(attrs) for attrs in all_attrs]
     random.shuffle(train_examples)
-    random.shuffle(test_comp_examples)
-    random.shuffle(test_seen_examples)
 
     print()
     write_jsonl(out_dir / "train.jsonl", train_examples)
-    write_jsonl(out_dir / "test_comp.jsonl", test_comp_examples)
-    write_jsonl(out_dir / "test_seen.jsonl", test_seen_examples)
 
-    # 7. Stats
+    # Stats
     max_in = max_out = 0
     tokens = set()
-    for f in [out_dir / "train.jsonl", out_dir / "test_comp.jsonl", out_dir / "test_seen.jsonl"]:
-        for line in open(f):
-            ex = json.loads(line)
-            max_in = max(max_in, len(ex["state_t"]))
-            max_out = max(max_out, len(ex["state_t+1"]))
-            for t in ex["state_t"] + ex["state_t+1"]:
-                tokens.update(t)
+    for line in open(out_dir / "train.jsonl"):
+        ex = json.loads(line)
+        max_in = max(max_in, len(ex["state_t"]))
+        max_out = max(max_out, len(ex["state_t+1"]))
+        for t in ex["state_t"] + ex["state_t+1"]:
+            tokens.update(t)
 
-    print(f"\n  Train: {len(train_examples)} (incl. {n_identity} identity)")
-    print(f"  Test comp: {len(test_comp_examples)}")
-    print(f"  Test seen: {len(test_seen_examples)}")
+    print(f"\n  Train: {len(train_examples)}")
     print(f"\n  Max input triples: {max_in}")
     print(f"  Max output triples: {max_out}")
     print(f"  Unique tokens: {len(tokens)}")
     print(f"  Tokens: {sorted(tokens)}")
 
-    # Value distributions
     print("\n  Value distributions:")
     for attr in ATTR_KEYS + ["survived"]:
         counts = Counter(a.get(attr, "<missing>") for a in all_attrs)

@@ -35,16 +35,10 @@ def age_group(age: float) -> str:
 
 
 def spend_bin(val: str) -> str | None:
-    """Bin a single spending column: none/low/high."""
+    """Bin a single spending column: zero vs nonzero is the real signal."""
     if not val:
         return None
-    v = float(val)
-    if v == 0:
-        return "none"
-    elif v <= 500:
-        return "low"
-    else:
-        return "high"
+    return "zero" if float(val) == 0 else "nonzero"
 
 
 def cabin_region(num_str: str) -> str:
@@ -205,57 +199,36 @@ def main():
         attrs["transported"] = row["Transported"].lower()
         all_attrs.append(attrs)
 
-    print(f"Spaceship Titanic → TWM Triples (v2)")
+    print(f"Spaceship Titanic → TWM Triples (v3)")
     print(f"  Total rows: {len(rows)}")
     print(f"  Dropped (no Transported label): {dropped}")
     print(f"  Valid rows: {len(all_attrs)}")
 
-    # 3. Split into holdout vs train pool
-    test_comp_examples = []
-    train_pool = []
-    for attrs in all_attrs:
-        ex = make_advance(attrs)
-        if matches_holdout(attrs):
-            test_comp_examples.append(ex)
-        else:
-            train_pool.append(ex)
-
-    # 4. Split train pool: 90% train, 10% test_seen
-    random.shuffle(train_pool)
-    n_seen = len(train_pool) // 10
-    test_seen_examples = train_pool[:n_seen]
-    train_examples = train_pool[n_seen:]
-
-    # 5. Add identity examples (~20% of train count)
-    n_identity = len(train_examples) // 5
-    identity_indices = random.sample(range(len(all_attrs)), min(n_identity, len(all_attrs)))
-    for idx in identity_indices:
-        train_examples.append(make_identity(all_attrs[idx]))
-
-    # 6. Shuffle and write
+    # All advance examples go to train (no identity, no internal splits)
+    train_examples = [make_advance(attrs) for attrs in all_attrs]
     random.shuffle(train_examples)
-    random.shuffle(test_comp_examples)
-    random.shuffle(test_seen_examples)
+
+    # Remove old split files if they exist
+    for old_file in ["test_comp.jsonl", "test_seen.jsonl"]:
+        p = out_dir / old_file
+        if p.exists():
+            p.unlink()
+            print(f"  Removed old {old_file}")
 
     print()
     write_jsonl(out_dir / "train.jsonl", train_examples)
-    write_jsonl(out_dir / "test_comp.jsonl", test_comp_examples)
-    write_jsonl(out_dir / "test_seen.jsonl", test_seen_examples)
 
-    # 7. Stats
+    # Stats
     max_in = max_out = 0
     tokens = set()
-    for f in [out_dir / "train.jsonl", out_dir / "test_comp.jsonl", out_dir / "test_seen.jsonl"]:
-        for line in open(f):
-            ex = json.loads(line)
-            max_in = max(max_in, len(ex["state_t"]))
-            max_out = max(max_out, len(ex["state_t+1"]))
-            for t in ex["state_t"] + ex["state_t+1"]:
-                tokens.update(t)
+    for line in open(out_dir / "train.jsonl"):
+        ex = json.loads(line)
+        max_in = max(max_in, len(ex["state_t"]))
+        max_out = max(max_out, len(ex["state_t+1"]))
+        for t in ex["state_t"] + ex["state_t+1"]:
+            tokens.update(t)
 
-    print(f"\n  Train: {len(train_examples)} (incl. {n_identity} identity)")
-    print(f"  Test comp: {len(test_comp_examples)}")
-    print(f"  Test seen: {len(test_seen_examples)}")
+    print(f"\n  Train: {len(train_examples)}")
     print(f"\n  Max input triples: {max_in}")
     print(f"  Max output triples: {max_out}")
     print(f"  Unique tokens: {len(tokens)}")
