@@ -13,7 +13,7 @@ from .vocab import Vocabulary
 from .dataset import TripleTransitionDataset, collate_fn
 from .config import ModelConfig
 from .model import TripleWorldModel
-from .metrics import compute_metrics, copy_baseline
+from .metrics import compute_metrics, compute_attribute_accuracy, copy_baseline
 
 
 def get_device() -> torch.device:
@@ -224,17 +224,35 @@ def train(args):
                 m = compute_metrics(model, ds, vocab, device, split_vocab=split_vocab)
                 for k, v in m.items():
                     row[f"{name}/{k}"] = v
+                # Attribute-specific accuracy (e.g. transported)
+                if args.target_attr:
+                    am = compute_attribute_accuracy(
+                        model, ds, vocab, device,
+                        target_attr=args.target_attr,
+                        split_vocab=split_vocab,
+                    )
+                    for k, v in am.items():
+                        row[f"{name}/{k}"] = v
 
             log_f.write(json.dumps(row) + "\n")
             log_f.flush()
 
             train_f1 = row.get("train/f1", 0.0)
             parts = [f"  epoch {epoch:4d} | loss {avg_loss:.4f}"]
-            for label in ["train", "test_comp", "test_seen", "test_context", "propara_dev", "openpi_dev"]:
-                key = f"{label}/f1"
-                if key in row:
-                    short = label.replace("test_", "").replace("propara_", "pp_")
-                    parts.append(f"{short}_f1 {row[key]:.3f}")
+            # If target_attr is set, show that accuracy instead of f1
+            if args.target_attr:
+                attr_key = f"{args.target_attr}_acc"
+                for label in ["train", "test_comp", "test_seen", "test_context"]:
+                    key = f"{label}/{attr_key}"
+                    if key in row:
+                        short = label.replace("test_", "")
+                        parts.append(f"{short} {row[key]:.3f}")
+            else:
+                for label in ["train", "test_comp", "test_seen", "test_context", "propara_dev", "openpi_dev"]:
+                    key = f"{label}/f1"
+                    if key in row:
+                        short = label.replace("test_", "").replace("propara_", "pp_")
+                        parts.append(f"{short}_f1 {row[key]:.3f}")
             print(" | ".join(parts))
 
             # Save best model
@@ -260,6 +278,14 @@ def train(args):
         print(f"\n{name}:")
         for k, v in m.items():
             print(f"  {k}: {v:.4f}")
+        if args.target_attr:
+            am = compute_attribute_accuracy(
+                model, ds, vocab, device,
+                target_attr=args.target_attr,
+                split_vocab=split_vocab,
+            )
+            for k, v in am.items():
+                print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
 
     if "train" in test_datasets:
         cb = copy_baseline(test_datasets["train"])
@@ -298,6 +324,8 @@ def main():
                         help="Path to pretrained embedding matrix (.pt)")
     parser.add_argument("--quantize-aware", action="store_true",
                         help="Enable quantization-aware training (simulated int8)")
+    parser.add_argument("--target-attr", type=str, default=None,
+                        help="Track accuracy for a specific attribute (e.g. 'transported')")
 
     args = parser.parse_args()
 
