@@ -10,7 +10,7 @@
     "dynamics_layers": 2,
     "compressor_layers": 3,
     "expander_layers": 3,
-    "max_text_tokens": 64,
+    "max_text_tokens": 128,
     "max_chain_len": 4,
     "dropout": 0.1,
     "alpha_min": 0.01,
