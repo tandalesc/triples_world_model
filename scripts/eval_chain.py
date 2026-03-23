@@ -267,11 +267,11 @@ def main():
                           max_text_tokens=model.max_text_tokens)
             avg_tok = sum(r["tok_accs"]) / len(r["tok_accs"]) if r["tok_accs"] else 0
             print(f"\n[{ex['name']}] mode={mode_labels[ex['mode']]} | avg_tok={avg_tok:.1%}")
-            print(f"  Input:  {r['input'][:80]}")
+            print(f"  Input:  {r['input']}")
             for i, (tgt, pred, acc) in enumerate(zip(r["targets"], r["predictions"], r["tok_accs"])):
                 print(f"  Step {i+1}: tok={acc:.1%}")
-                print(f"    Target: {tgt[:80]}")
-                print(f"    Pred:   {str(pred)[:80]}")
+                print(f"    Target: {tgt}")
+                print(f"    Pred:   {pred}")
 
     print()
 
