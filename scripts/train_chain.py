@@ -58,6 +58,11 @@ def compute_chain_loss(model, batch, device):
     total_tok_acc = 0.0
     n_steps = 0
 
+    # Per-mode accumulators
+    mode_names = {0: "adv", 1: "qry", 2: "id"}
+    mode_tok_sum = {m: 0.0 for m in mode_names}
+    mode_tok_n = {m: 0 for m in mode_names}
+
     max_chain = chain_len.max().item()
 
     for step in range(1, max_chain):
@@ -72,6 +77,7 @@ def compute_chain_loss(model, batch, device):
         target_ids = chain_ids[active, step]    # (B', T)
         target_pad = chain_pad[active, step]    # (B', T)
         active_bn = bottleneck[active]          # (B', N*3, d)
+        active_modes = mode_ids[active]         # (B',)
 
         # Expander: predict clean embeddings from bottleneck
         pred_emb, _ = model.forward_expander(
@@ -110,6 +116,19 @@ def compute_chain_loss(model, batch, device):
             total_mse += step_mse.item()
             n_steps += 1
 
+            # Per-mode tok_acc
+            for m in mode_names:
+                mask = active_modes == m
+                if mask.any():
+                    mode_non_pad = ~target_pad[mask]
+                    if mode_non_pad.any():
+                        mode_pred = pred_emb[mask][mode_non_pad]
+                        mode_tgt = target_ids[mask][mode_non_pad]
+                        mode_pred_n = F.normalize(mode_pred, dim=-1)
+                        mode_nn = torch.matmul(mode_pred_n, emb_norm.T).argmax(-1)
+                        mode_tok_sum[m] += (mode_nn == mode_tgt).float().mean().item()
+                        mode_tok_n[m] += 1
+
     if n_steps > 0:
         total_loss = total_loss / n_steps
 
@@ -120,13 +139,9 @@ def compute_chain_loss(model, batch, device):
         "steps": n_steps,
     }
 
-    # Per-mode token accuracy (computed over all steps)
-    with torch.no_grad():
-        mode_names = {0: "adv", 1: "qry", 2: "id"}
-        for m, name in mode_names.items():
-            mask = mode_ids == m
-            if mask.any():
-                metrics[f"n_{name}"] = mask.sum().item()
+    for m, name in mode_names.items():
+        if mode_tok_n[m] > 0:
+            metrics[f"tok_{name}"] = mode_tok_sum[m] / mode_tok_n[m]
 
     return total_loss, metrics
 
@@ -207,6 +222,8 @@ def main():
         model.train()
         epoch_loss = 0.0
         epoch_tok = 0.0
+        epoch_mode_tok: dict[str, float] = {}
+        epoch_mode_n: dict[str, int] = {}
         n_batches = 0
         t0 = time.time()
 
@@ -220,6 +237,10 @@ def main():
 
             epoch_loss += metrics["loss"]
             epoch_tok += metrics["tok_acc"]
+            for k in ("tok_adv", "tok_qry", "tok_id"):
+                if k in metrics:
+                    epoch_mode_tok[k] = epoch_mode_tok.get(k, 0.0) + metrics[k]
+                    epoch_mode_n[k] = epoch_mode_n.get(k, 0) + 1
             n_batches += 1
 
         epoch_loss /= max(n_batches, 1)
@@ -227,7 +248,11 @@ def main():
         dt = time.time() - t0
 
         if epoch % log_every == 0 or epoch == 1:
-            msg = f"ep {epoch:4d} | loss {epoch_loss:.4f} | tok {epoch_tok:.3f} | {dt:.1f}s"
+            mode_str = ""
+            for k in ("tok_adv", "tok_qry", "tok_id"):
+                if epoch_mode_n.get(k, 0) > 0:
+                    mode_str += f" | {k.replace('tok_', '')}: {epoch_mode_tok[k]/epoch_mode_n[k]:.3f}"
+            msg = f"ep {epoch:4d} | loss {epoch_loss:.4f} | tok {epoch_tok:.3f}{mode_str} | {dt:.1f}s"
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
@@ -237,17 +262,27 @@ def main():
             model.eval()
             eval_loss = 0.0
             eval_tok = 0.0
+            eval_mode_tok: dict[str, float] = {}
+            eval_mode_n: dict[str, int] = {}
             n_eval = 0
             with torch.no_grad():
                 for batch in test_loader:
                     _, metrics = compute_chain_loss(model, batch, device)
                     eval_loss += metrics["loss"]
                     eval_tok += metrics["tok_acc"]
+                    for k in ("tok_adv", "tok_qry", "tok_id"):
+                        if k in metrics:
+                            eval_mode_tok[k] = eval_mode_tok.get(k, 0.0) + metrics[k]
+                            eval_mode_n[k] = eval_mode_n.get(k, 0) + 1
                     n_eval += 1
             eval_loss /= max(n_eval, 1)
             eval_tok /= max(n_eval, 1)
 
-            msg = f"  eval | loss {eval_loss:.4f} | tok {eval_tok:.3f}"
+            eval_mode_str = ""
+            for k in ("tok_adv", "tok_qry", "tok_id"):
+                if eval_mode_n.get(k, 0) > 0:
+                    eval_mode_str += f" | {k.replace('tok_', '')}: {eval_mode_tok[k]/eval_mode_n[k]:.3f}"
+            msg = f"  eval | loss {eval_loss:.4f} | tok {eval_tok:.3f}{eval_mode_str}"
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
