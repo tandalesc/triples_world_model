@@ -14,7 +14,7 @@
     "max_chain_len": 4,
     "dropout": 0.1,
     "alpha_min": 0.01,
-    "batch_size": 32,
+    "batch_size": 64,
     "lr": 3e-4,
     "epochs": 200,
     "log_every": 5,
