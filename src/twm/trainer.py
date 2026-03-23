@@ -7,6 +7,7 @@ Usage:
 """
 
 import json
+from contextlib import nullcontext as nullctx
 from pathlib import Path
 
 import torch
@@ -48,10 +49,28 @@ class Trainer:
         # Save config for reproducibility
         self.config.save(self.out_dir / "training_config.json")
 
+        # Load distributional alignment data
+        self.dist_lookup = None
+        self.spectral_target_spectra = None
+        if config.distributional_lookup_path:
+            self.dist_lookup = torch.load(config.distributional_lookup_path, weights_only=False)
+            print(f"Loaded distributional lookup: {config.distributional_lookup_path}")
+        if config.spectral_target_path:
+            self.spectral_target_spectra = torch.load(config.spectral_target_path, weights_only=False)
+            print(f"Loaded spectral targets: {config.spectral_target_path}")
+
     def _build_model(self) -> torch.nn.Module:
         model_config = self.config.build_model_config()
         c = self.config
         dyn_layers = c.dynamics_layers if c.dynamics_layers is not None else model_config.n_layers
+
+        compressor_kwargs = {}
+        if hasattr(c, 'compressor_type'):
+            compressor_kwargs['compressor_type'] = c.compressor_type
+            compressor_kwargs['compressor_denoise_steps'] = c.compressor_denoise_steps
+            compressor_kwargs['compressor_denoise_layers'] = c.compressor_denoise_layers
+            compressor_kwargs['compressor_random_k'] = c.compressor_random_k
+            compressor_kwargs['compressor_k_min'] = c.compressor_k_min
 
         if c.model_type == "io":
             model = TextWorldModel(
@@ -61,6 +80,7 @@ class Trainer:
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
                 vae=c.vae,
+                **compressor_kwargs,
             )
         else:
             model = TextDynamicsModel(
@@ -71,9 +91,14 @@ class Trainer:
                 max_text_tokens=c.max_text_tokens,
                 dropout=c.dropout, alpha_min=c.alpha_min,
                 vae=c.vae,
+                **compressor_kwargs,
             )
         model.init_embeddings()
-        return model.to(self.device)
+        model = model.to(self.device)
+        if self.config.compile:
+            print("Compiling model with torch.compile...")
+            model = torch.compile(model)
+        return model
 
     def run(self):
         """Run all stages in sequence."""
@@ -81,6 +106,10 @@ class Trainer:
         print(f"Device: {self.device}")
         print(f"Model: {self.config.model_type} ({self.config.profile})")
         print(f"Total: {self.model.param_count():,} params")
+        if self.config.bf16:
+            print(f"Mixed precision: bfloat16")
+        if self.config.compile:
+            print(f"torch.compile: enabled")
 
         for stage in self.config.stages:
             self._run_stage(stage)
@@ -145,7 +174,11 @@ class Trainer:
         metric_key = phase.metric  # "tok_acc" or "exact"
 
         print(f"\n{'='*60}")
-        print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
+        t_min_anneal = phase.t_min_end is not None and phase.t_min_end != phase.t_min
+        if t_min_anneal:
+            print(f"Phase: {name}  t in [{phase.t_min}→{phase.t_min_end}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
+        else:
+            print(f"Phase: {name}  t in [{phase.t_min}, {phase.t_max}]  bias={phase.bias_power}  metric={metric_key}")
         print(f"{'='*60}")
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -156,15 +189,35 @@ class Trainer:
         best_metric = -1.0
         best_epoch = 0
         no_improve = 0
+        start_epoch = 1
         history = []
         pca_basis = None
 
-        # Initial assessment
-        init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
-                        n_examples=64, n_steps=c.denoise_steps)
-        print(f"  init: {format_metrics(init_m)}", flush=True)
+        # Resume from checkpoint if available
+        resume_path = phase_dir / "resume_state.json"
+        if resume_path.exists():
+            with open(resume_path) as rf:
+                rs = json.load(rf)
+            start_epoch = rs["epoch"] + 1
+            best_metric = rs["best_metric"]
+            best_epoch = rs["best_epoch"]
+            no_improve = rs["no_improve"]
+            # Load model and optimizer state
+            latest_ckpt = phase_dir / "model_latest.pt"
+            if latest_ckpt.exists():
+                self.model.load_state_dict(torch.load(latest_ckpt, map_location=self.device, weights_only=True))
+            opt_ckpt = phase_dir / "optimizer.pt"
+            if opt_ckpt.exists():
+                optimizer.load_state_dict(torch.load(opt_ckpt, map_location=self.device, weights_only=True))
+            print(f"  Resumed from epoch {rs['epoch']} (best {metric_key}={best_metric:.4f} at ep{best_epoch})")
 
-        for epoch in range(1, phase.epochs + 1):
+        # Initial assessment (skip if resuming)
+        if start_epoch == 1:
+            init_m = assess(self.model, ds_for_assessment, self.device, self.tokenizer,
+                            n_examples=64, n_steps=c.denoise_steps)
+            print(f"  init: {format_metrics(init_m)}", flush=True)
+
+        for epoch in range(start_epoch, phase.epochs + 1):
             self.model.train()
             epoch_loss = 0.0
             epoch_mse = 0.0
@@ -176,6 +229,8 @@ class Trainer:
             epoch_role = 0.0
             epoch_kl = 0.0
             epoch_spec = 0.0
+            epoch_cka = 0.0
+            epoch_spec_tgt = 0.0
             n_batches = 0
 
             # β annealing: linear ramp from 0 to kl_weight over kl_anneal_epochs
@@ -188,51 +243,87 @@ class Trainer:
             for start in range(0, n_train - c.batch_size + 1, c.batch_size):
                 idx = perm[start:start + c.batch_size]
                 B = idx.shape[0]
-                timestep = sample_timestep(B, self.device, phase.t_min, phase.t_max, phase.bias_power)
-
-                if is_dynamics:
-                    # Dynamics path: route through dynamics core with mode conditioning.
-                    # For joint training on identity data, use same text as input/output
-                    # with mode=0 (identity) so dynamics gradients flow back to compressor.
-                    if stage.joint and stage.dataset == "identity":
-                        in_ids = train_ds._text_token_ids[idx]
-                        in_pad = train_ds._text_pad_mask[idx]
-                        out_ids = in_ids
-                        out_pad = in_pad
-                        out_len = train_ds._text_lengths[idx]
-                        batch_modes = torch.zeros(B, dtype=torch.long)
-                    else:
-                        in_ids = train_ds._input_token_ids[idx]
-                        in_pad = train_ds._input_pad_mask[idx]
-                        out_ids = train_ds._output_token_ids[idx]
-                        out_pad = train_ds._output_pad_mask[idx]
-                        out_len = train_ds._output_lengths[idx]
-                        batch_modes = train_ds._modes[idx]
-                    loss, batch_m = compute_diffusion_loss(
-                        self.model,
-                        in_ids, in_pad, out_ids, out_pad,
-                        out_len, self.device, timestep,
-                        mode_ids=batch_modes,
-                        aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
-                        bottleneck_weight=c.bottleneck_weight,
-                        role_prior_weight=c.role_prior_weight,
-                        bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
-                        detach_dynamics_expander=c.detach_dynamics_expander,
-                        kl_weight=eff_kl_weight,
-                        spectral_weight=c.spectral_weight,
-                    )
+                # Anneal t_min if t_min_end is set
+                if t_min_anneal:
+                    progress = (epoch - 1) / max(phase.epochs - 1, 1)
+                    cur_t_min = phase.t_min + (phase.t_min_end - phase.t_min) * progress
                 else:
-                    loss, batch_m = compute_diffusion_loss(
-                        self.model,
-                        train_ds._text_token_ids[idx], train_ds._text_pad_mask[idx],
-                        None, None,
-                        train_ds._text_lengths[idx], self.device, timestep,
-                        mode_ids=None,
-                        aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
-                        role_prior_weight=c.role_prior_weight,
-                        kl_weight=eff_kl_weight,
-                        spectral_weight=c.spectral_weight,
-                    )
+                    cur_t_min = phase.t_min
+                timestep = sample_timestep(B, self.device, cur_t_min, phase.t_max, phase.bias_power)
+
+                amp_ctx = torch.autocast(self.device.type, dtype=torch.bfloat16) if c.bf16 else nullctx()
+                with amp_ctx:
+                    if is_dynamics:
+                        # Dynamics path: route through dynamics core with mode conditioning.
+                        # For joint training on identity data, use same text as input/output
+                        # with mode=0 (identity) so dynamics gradients flow back to compressor.
+                        if stage.joint and stage.dataset == "identity":
+                            in_ids = train_ds._text_token_ids[idx]
+                            in_pad = train_ds._text_pad_mask[idx]
+                            out_ids = in_ids
+                            out_pad = in_pad
+                            out_len = train_ds._text_lengths[idx]
+                            batch_modes = torch.zeros(B, dtype=torch.long)
+                        else:
+                            in_ids = train_ds._input_token_ids[idx]
+                            in_pad = train_ds._input_pad_mask[idx]
+                            out_ids = train_ds._output_token_ids[idx]
+                            out_pad = train_ds._output_pad_mask[idx]
+                            out_len = train_ds._output_lengths[idx]
+                            batch_modes = train_ds._modes[idx]
+                        # Distributional alignment data for this batch
+                        batch_dist_embs = None
+                        batch_dist_mask = None
+                        if train_ds._dist_embs is not None:
+                            batch_dist_embs = train_ds._dist_embs[idx]
+                            batch_dist_mask = train_ds._dist_mask[idx]
+
+                        loss, batch_m = compute_diffusion_loss(
+                            self.model,
+                            in_ids, in_pad, out_ids, out_pad,
+                            out_len, self.device, timestep,
+                            mode_ids=batch_modes,
+                            aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
+                            bottleneck_weight=c.bottleneck_weight,
+                            role_prior_weight=c.role_prior_weight,
+                            bn_role_weights=tuple(c.bn_role_weights) if c.bn_role_weights else None,
+                            detach_dynamics_expander=c.detach_dynamics_expander,
+                            detach_compressor_expander=c.detach_compressor_expander,
+                            kl_weight=eff_kl_weight,
+                            spectral_weight=c.spectral_weight,
+                            cka_weight=c.cka_weight,
+                            dist_embs=batch_dist_embs,
+                            dist_mask=batch_dist_mask,
+                            cka_per_role=c.cka_per_role,
+                            spectral_target_weight=c.spectral_target_weight,
+                            spectral_target_spectra=self.spectral_target_spectra,
+                        )
+                    else:
+                        # Distributional alignment data for this batch
+                        batch_dist_embs = None
+                        batch_dist_mask = None
+                        if train_ds._dist_embs is not None:
+                            batch_dist_embs = train_ds._dist_embs[idx]
+                            batch_dist_mask = train_ds._dist_mask[idx]
+
+                        loss, batch_m = compute_diffusion_loss(
+                            self.model,
+                            train_ds._text_token_ids[idx], train_ds._text_pad_mask[idx],
+                            None, None,
+                            train_ds._text_lengths[idx], self.device, timestep,
+                            mode_ids=None,
+                            aux_ce_weight=c.aux_ce_weight, length_weight=c.length_weight,
+                            role_prior_weight=c.role_prior_weight,
+                            detach_compressor_expander=c.detach_compressor_expander,
+                            kl_weight=eff_kl_weight,
+                            spectral_weight=c.spectral_weight,
+                            cka_weight=c.cka_weight,
+                            dist_embs=batch_dist_embs,
+                            dist_mask=batch_dist_mask,
+                            cka_per_role=c.cka_per_role,
+                            spectral_target_weight=c.spectral_target_weight,
+                            spectral_target_spectra=self.spectral_target_spectra,
+                        )
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -249,6 +340,8 @@ class Trainer:
                 epoch_role += batch_m.get("role_loss", 0.0)
                 epoch_kl += batch_m.get("kl", 0.0)
                 epoch_spec += batch_m.get("spec", 0.0)
+                epoch_cka += batch_m.get("cka", 0.0)
+                epoch_spec_tgt += batch_m.get("spec_tgt", 0.0)
                 n_batches += 1
 
             scheduler.step()
@@ -262,6 +355,8 @@ class Trainer:
             avg_role = epoch_role / max(n_batches, 1)
             avg_kl = epoch_kl / max(n_batches, 1)
             avg_spec = epoch_spec / max(n_batches, 1)
+            avg_cka = epoch_cka / max(n_batches, 1)
+            avg_spec_tgt = epoch_spec_tgt / max(n_batches, 1)
 
             if epoch % c.log_every == 0 or epoch == 1:
                 self.model.eval()
@@ -280,6 +375,10 @@ class Trainer:
                     log += f" kl={avg_kl:.4f} (β={eff_kl_weight:.4f})"
                 if c.spectral_weight > 0:
                     log += f" spec={avg_spec:.4f}"
+                if c.cka_weight > 0:
+                    log += f" cka={avg_cka:.4f}"
+                if c.spectral_target_weight > 0:
+                    log += f" spec_tgt={avg_spec_tgt:.4f}"
                 log += f" | {format_metrics(gen_m)}"
 
                 cur_metric = gen_m[metric_key]
@@ -291,6 +390,16 @@ class Trainer:
                     log += " *"
                 else:
                     no_improve += c.log_every
+
+                # Save resume state every eval
+                resume_state = {
+                    "epoch": epoch, "best_metric": best_metric,
+                    "best_epoch": best_epoch, "no_improve": no_improve,
+                }
+                with open(phase_dir / "resume_state.json", "w") as rf:
+                    json.dump(resume_state, rf)
+                torch.save(optimizer.state_dict(), phase_dir / "optimizer.pt")
+                torch.save(self.model.state_dict(), phase_dir / "model_latest.pt")
 
                 print(log, flush=True)
                 history.append({"epoch": epoch, "loss": avg_loss, **gen_m})
@@ -322,21 +431,29 @@ class Trainer:
     def _load_datasets(self, stage: StageConfig, data_dir: Path):
         c = self.config
         max_ex = stage.max_examples if stage.max_examples is not None else c.max_examples
+        mc = c.build_model_config()
+        dist_kw = {}
+        if self.dist_lookup is not None:
+            dist_kw = {"distributional_lookup": self.dist_lookup, "max_triples": mc.max_triples}
+
         if stage.dataset == "identity":
             train_ds = TextDataset(
                 data_dir / "identity_train.jsonl", self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                **dist_kw,
             )
             assessment_path = data_dir / "identity_test.jsonl"
             ds_for_assessment = train_ds
             if assessment_path.exists():
                 ds_for_assessment = TextDataset(
-                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
+                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens,
+                    **dist_kw,
                 )
         elif stage.dataset == "mode_warmup":
             train_ds = TextPairDataset(
                 data_dir / "mode_warmup_train.jsonl", self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                **dist_kw,
             )
             n_id = (train_ds._modes == 0).sum().item()
             n_rev = (train_ds._modes == 2).sum().item()
@@ -347,19 +464,30 @@ class Trainer:
                 ds_for_assessment = TextPairDataset(
                     assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
                 )
-        else:  # "qa"
+        else:  # "qa", "qa_balanced", or other pair datasets
+            should_balance = "balanced" in stage.dataset
+            # Try dataset-specific train file first, fall back to qa_train.jsonl
+            train_file = data_dir / f"{stage.dataset}_train.jsonl"
+            if not train_file.exists():
+                train_file = data_dir / "qa_train.jsonl"
             train_ds = TextPairDataset(
-                data_dir / "qa_train.jsonl", self.tokenizer,
+                train_file, self.tokenizer,
                 max_text_tokens=c.max_text_tokens, max_examples=max_ex,
+                balance=should_balance,
+                **dist_kw,
             )
             n_id = (train_ds._modes == 0).sum().item()
             n_qa = (train_ds._modes == 1).sum().item()
             print(f"  Dataset: {len(train_ds)} ({n_id} identity, {n_qa} Q&A)")
-            assessment_path = data_dir / "qa_test.jsonl"
+            # Try dataset-specific test file, fall back to qa_test.jsonl
+            assessment_path = data_dir / f"{stage.dataset}_test.jsonl"
+            if not assessment_path.exists():
+                assessment_path = data_dir / "qa_test.jsonl"
             ds_for_assessment = train_ds
             if assessment_path.exists():
                 ds_for_assessment = TextPairDataset(
-                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens
+                    assessment_path, self.tokenizer, max_text_tokens=c.max_text_tokens,
+                    balance=should_balance,
                 )
         return train_ds, ds_for_assessment
 

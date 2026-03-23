@@ -201,6 +201,65 @@ def compute_delta_metrics(
     }
 
 
+def compute_attribute_accuracy(
+    model: TripleWorldModel,
+    dataset: TripleTransitionDataset,
+    vocab: Vocabulary,
+    device: torch.device,
+    target_attr: str = "transported",
+    split_vocab: bool = False,
+) -> dict[str, float]:
+    """Compute accuracy for a specific attribute triple in the output.
+
+    Looks for triples of the form (entity, target_attr, value) in both
+    predicted and target outputs, and computes classification accuracy.
+    """
+    was_training = model.training
+    model.train(False)
+
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for i in range(len(dataset)):
+            ex = dataset[i]
+            pred_ids = model.predict(ex["input_ids"].unsqueeze(0).to(device))[0].cpu().tolist()
+            tgt_ids = ex["target_ids"].tolist()
+
+            decode = vocab.decode_triples_split if split_vocab else vocab.decode_triples
+            pred_triples = decode(pred_ids)
+            tgt_triples = decode(tgt_ids)
+
+            # Find target attribute value in ground truth
+            tgt_val = None
+            for t in tgt_triples:
+                if len(t) == 3 and t[1] == target_attr:
+                    tgt_val = t[2]
+                    break
+
+            if tgt_val is None:
+                continue  # skip identity examples without this attribute
+
+            # Find predicted attribute value
+            pred_val = None
+            for t in pred_triples:
+                if len(t) == 3 and t[1] == target_attr:
+                    pred_val = t[2]
+                    break
+
+            total += 1
+            if pred_val == tgt_val:
+                correct += 1
+
+    if was_training:
+        model.train(True)
+
+    return {
+        f"{target_attr}_acc": correct / max(total, 1),
+        f"{target_attr}_n": total,
+    }
+
+
 def copy_baseline(dataset: TripleTransitionDataset) -> dict[str, float]:
     """Compute metrics for the trivial baseline: predict output = input."""
     sum_f1 = 0.0

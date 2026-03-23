@@ -31,6 +31,11 @@ class TextWorldModel(nn.Module):
         dropout: float = 0.1,
         alpha_min: float = 0.01,
         vae: bool = False,
+        compressor_type: str = "standard",
+        compressor_denoise_steps: int = 5,
+        compressor_denoise_layers: int | None = None,
+        compressor_random_k: bool = False,
+        compressor_k_min: int = 1,
     ):
         super().__init__()
         self.config = config
@@ -39,22 +44,40 @@ class TextWorldModel(nn.Module):
         self._text_compressor_layers = text_compressor_layers
         self._text_expander_layers = text_expander_layers
         self._vae = vae
+        self._compressor_type = compressor_type
+        self._compressor_denoise_steps = compressor_denoise_steps
         d = config.d_model
 
         # Shared frozen embedding table
         self.shared_token_emb = nn.Embedding(domain_tokenizer.vocab_size, d)
         self.shared_token_emb.weight.requires_grad = False
 
-        self.text_compressor = TextCompressor(
-            token_emb=self.shared_token_emb,
-            d_model=d,
-            n_heads=config.n_heads,
-            n_layers=text_compressor_layers,
-            max_triples=config.max_triples,
-            max_text_tokens=max_text_tokens,
-            dropout=dropout,
-            vae=vae,
-        )
+        if compressor_type == "diffusion":
+            from .diffusion_compressor import DiffusionCompressor
+            self.text_compressor = DiffusionCompressor(
+                token_emb=self.shared_token_emb,
+                d_model=d,
+                n_heads=config.n_heads,
+                n_encoder_layers=text_compressor_layers,
+                n_denoise_layers=compressor_denoise_layers or text_expander_layers,
+                n_denoise_steps=compressor_denoise_steps,
+                max_triples=config.max_triples,
+                max_text_tokens=max_text_tokens,
+                dropout=dropout,
+                random_k=compressor_random_k,
+                k_min=compressor_k_min,
+            )
+        else:
+            self.text_compressor = TextCompressor(
+                token_emb=self.shared_token_emb,
+                d_model=d,
+                n_heads=config.n_heads,
+                n_layers=text_compressor_layers,
+                max_triples=config.max_triples,
+                max_text_tokens=max_text_tokens,
+                dropout=dropout,
+                vae=vae,
+            )
 
         # Role centroids for bottleneck structure prior.
         self.role_centroids = nn.Embedding(3, d)

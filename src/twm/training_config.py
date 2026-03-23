@@ -17,6 +17,7 @@ from pathlib import Path
 class PhaseConfig:
     """Single training phase within a stage (e.g. high-noise warmup, full range)."""
     t_min: float = 0.0
+    t_min_end: float | None = None  # If set, linearly anneal t_min from t_min to t_min_end over epochs
     t_max: float = 1.0
     bias_power: float = 1.0
     epochs: int = 200
@@ -56,6 +57,11 @@ class TrainingConfig:
     dropout: float = 0.1
     alpha_min: float = 0.01
     vae: bool = False  # enable VAE bottleneck with role-conditioned priors
+    compressor_type: str = "standard"  # "standard" or "diffusion"
+    compressor_denoise_steps: int = 5  # K steps for diffusion compressor
+    compressor_denoise_layers: int | None = None  # None = match text_expander_layers
+    compressor_random_k: bool = False  # random K training: sample K ~ U[k_min, steps] each batch
+    compressor_k_min: int = 1  # minimum K when random_k=True
 
     # Data
     data_dir: str = ""
@@ -70,16 +76,26 @@ class TrainingConfig:
     bottleneck_weight: float = 0.0  # direct bottleneck MSE (dynamics only)
     bn_role_weights: list[float] | None = None  # [entity_w, attr_w, value_w] for decomposed bn loss
     detach_dynamics_expander: bool = False  # cut token gradients to dynamics core
+    detach_compressor_expander: bool = False  # cut ALL token gradients to compressor (IO + dynamics)
     role_prior_weight: float = 0.0  # role-conditioned centroid regularization (legacy, use vae instead)
     kl_weight: float = 0.0  # VAE KL weight (β). 0 = no KL. Annealed from 0 to this value.
     kl_anneal_epochs: int = 0  # linear anneal from 0 to kl_weight over this many epochs. 0 = constant.
     spectral_weight: float = 0.0  # spectral penalty weight. Penalizes bottleneck collapse to 1D manifold.
+    cka_weight: float = 0.0  # CKA alignment loss weight (distributional topology)
+    cka_per_role: bool = True  # compute CKA per role (E/A/V) and average
+    spectral_target_weight: float = 0.0  # match per-role eigenvalue spectrum to distributional target
+    distributional_lookup_path: str = ""  # path to distributional_lookup.pt for CKA
+    spectral_target_path: str = ""  # path to distributional_spectra.pt for spectral target
     log_every: int = 10
     diagnostic_every: int = 50
     snapshot_every: int = 0  # 0 = disabled; >0 = save latent PCA frame every N epochs
 
     # Stages
     stages: list[StageConfig] = field(default_factory=list)
+
+    # Performance
+    compile: bool = False  # torch.compile the model
+    bf16: bool = False  # bfloat16 mixed precision (requires Ampere+ GPU)
 
     # Output
     out_dir: str = ""

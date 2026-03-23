@@ -1,0 +1,43 @@
+{
+    "model_type": "dynamics",
+    "profile": "mini",
+    "d_model": 64,
+    "max_triples": 16,
+    "text_compressor_layers": 3,
+    "text_expander_layers": 3,
+    "dynamics_layers": 4,
+    "max_text_tokens": 64,
+    "dropout": 0.1,
+    "alpha_min": 0.01,
+    "vae": false,
+    "compressor_type": "diffusion",
+    "compressor_denoise_steps": 10,
+    "data_dir": "data/webnlg_multi",
+    "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
+    "out_dir": "results/v48_diffcomp_joint",
+    "batch_size": 64,
+    "denoise_steps": 10,
+    "aux_ce_weight": 0.1,
+    "length_weight": 0.25,
+    "kl_weight": 0.0,
+    "kl_anneal_epochs": 0,
+    "spectral_weight": 0.1,
+    "bn_role_weights": [1.0, 1.0, 2.0],
+    "detach_dynamics_expander": false,
+    "log_every": 10,
+    "diagnostic_every": 50,
+    "snapshot_every": 10,
+    "stages": [
+        {
+            "name": "joint_all",
+            "dataset": "qa_balanced",
+            "joint": true,
+            "lr": 3e-4,
+            "max_examples": 60000,
+            "phases": [
+                {"t_min": 0.5, "t_min_end": 0.3, "t_max": 1.0, "epochs": 1600, "patience": 400, "metric": "tok_acc"}
+            ]
+        }
+    ],
+    "device": "cuda"
+}
