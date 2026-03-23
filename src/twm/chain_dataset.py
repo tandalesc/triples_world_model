@@ -1,10 +1,11 @@
 """Dataset for multi-turn chain dynamics training.
 
-Reads JSONL with {"chain": [text_0, text_1, text_2]} format where each
-chain step is a natural language string. The dynamics core is unrolled
-N-1 times for an N-step chain, with loss at each intermediate step.
+Reads JSONL with {"chain": [text_0, text_1, ...], "mode": int} format.
+The dynamics core is unrolled N-1 times for an N-step chain, with loss
+at each intermediate step.
 
-Step 0 is the compressor input; steps 1+ are dynamics targets.
+Modes: 0=advance, 1=query, 2=identity (matches TextDynamicsModel conventions).
+If "mode" is absent, defaults to 0 (advance).
 """
 
 import json
@@ -17,10 +18,10 @@ from .domain_bpe import DomainBPETokenizer
 
 
 class ChainDataset(Dataset):
-    """Text chains for multi-turn dynamics.
+    """Text chains for multi-turn dynamics with mode conditioning.
 
-    Each example is a sequence of 2-3 text states. The compressor encodes
-    step 0; dynamics unrolls to predict steps 1, 2, ...
+    Each example is a sequence of 2-3 text states plus a mode ID.
+    The compressor encodes step 0; dynamics unrolls to predict steps 1, 2, ...
     """
 
     def __init__(
@@ -35,23 +36,25 @@ class ChainDataset(Dataset):
         self.max_chain_len = max_chain_len
 
         chains: list[list[str]] = []
+        modes: list[int] = []
         with open(path) as f:
             for line in f:
                 data = json.loads(line)
                 chain = data["chain"]
                 if len(chain) >= 2:
                     chains.append(chain[:max_chain_len])
+                    modes.append(data.get("mode", 0))
 
         n = len(chains)
         C = max_chain_len
         T = max_text_tokens
         pad_id = tokenizer.pad_token_id
 
-        # Per-step text encoding: (n, C, T)
         self._token_ids = torch.zeros((n, C, T), dtype=torch.long)
         self._pad_mask = torch.ones((n, C, T), dtype=torch.bool)
         self._text_lengths = torch.zeros((n, C), dtype=torch.long)
         self._chain_lengths = torch.zeros(n, dtype=torch.long)
+        self._mode_ids = torch.tensor(modes, dtype=torch.long)
 
         for i, chain in enumerate(chains):
             self._chain_lengths[i] = len(chain)
@@ -68,12 +71,11 @@ class ChainDataset(Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         return {
-            # Step 0: compressor input
-            "input_ids": self._token_ids[idx, 0],          # (T,)
-            "input_pad": self._pad_mask[idx, 0],            # (T,)
-            # All steps: for dynamics targets
-            "chain_ids": self._token_ids[idx],              # (C, T)
-            "chain_pad": self._pad_mask[idx],               # (C, T)
-            "chain_lengths": self._text_lengths[idx],       # (C,)
-            "chain_len": self._chain_lengths[idx],          # scalar
+            "input_ids": self._token_ids[idx, 0],
+            "input_pad": self._pad_mask[idx, 0],
+            "chain_ids": self._token_ids[idx],
+            "chain_pad": self._pad_mask[idx],
+            "chain_lengths": self._text_lengths[idx],
+            "chain_len": self._chain_lengths[idx],
+            "mode_id": self._mode_ids[idx],
         }

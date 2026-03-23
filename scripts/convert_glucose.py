@@ -10,11 +10,16 @@ Each dimension has a natural-language annotation with a causal connective
   precondition texts → event texts → consequence texts
 
 Output format:
-  {"chain": ["precondition sentence", "event sentence", "consequence sentence"]}
+  {"chain": ["text_0", "text_1", "text_2"], "mode": 0}
+
+Modes:
+  0 = advance:  preconditions → event → consequences
+  1 = query:    consequences → event → preconditions (reverse)
+  2 = identity: step → step → step (reconstruct)
 
 Usage:
   uv run python scripts/convert_glucose.py --annotation both
-  uv run python scripts/convert_glucose.py --annotation general
+  uv run python scripts/convert_glucose.py --annotation general --augment
 """
 
 import argparse
@@ -110,27 +115,33 @@ def texts_to_sentence(texts: list[str]) -> str:
 
 
 def generate_chain(processed: dict) -> dict:
-    """Generate a 3-step text chain."""
+    """Generate a 3-step text chain (advance mode)."""
     return {
         "chain": [
             texts_to_sentence(processed["pre_texts"]),
             texts_to_sentence(processed["event_texts"]),
             texts_to_sentence(processed["post_texts"]),
-        ]
+        ],
+        "mode": 0,
     }
 
 
-def generate_pairs(processed: dict) -> list[dict]:
-    """Generate single-turn text pairs (for baseline comparison)."""
-    pairs = []
+def generate_augmented(processed: dict) -> list[dict]:
+    """Generate advance + query + identity chains from one example."""
     pre = texts_to_sentence(processed["pre_texts"])
     event = texts_to_sentence(processed["event_texts"])
     post = texts_to_sentence(processed["post_texts"])
-    # pre → event
-    pairs.append({"text_t": pre, "text_t1": event})
-    # event → post
-    pairs.append({"text_t": event, "text_t1": post})
-    return pairs
+
+    examples = []
+    # Advance: pre → event → post
+    examples.append({"chain": [pre, event, post], "mode": 0})
+    # Query: post → event → pre (reverse causal chain)
+    examples.append({"chain": [post, event, pre], "mode": 1})
+    # Identity: reconstruct one step (rotate through to balance)
+    steps = [pre, event, post]
+    pick = hash(pre) % 3  # deterministic but varied
+    examples.append({"chain": [steps[pick], steps[pick]], "mode": 2})
+    return examples
 
 
 def write_jsonl(data: list[dict], path: Path) -> None:
@@ -159,6 +170,10 @@ def main():
     parser.add_argument("--min-quality", type=int, default=2)
     parser.add_argument("--test-frac", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--augment", action="store_true",
+        help="Generate advance + query + identity augmentations",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -170,7 +185,6 @@ def main():
         print(f"\nProcessing {annotation} annotations...")
 
         chains = []
-        pairs = []
         total = 0
         skipped = 0
 
@@ -187,32 +201,38 @@ def main():
                 if not processed:
                     continue
 
-                chains.append(generate_chain(processed))
-                pairs.extend(generate_pairs(processed))
+                if args.augment:
+                    chains.extend(generate_augmented(processed))
+                else:
+                    chains.append(generate_chain(processed))
 
         print(f"  Total rows: {total}, skipped (quality < {args.min_quality}): {skipped}")
 
         # Shuffle and split
         rng = random.Random(args.seed)
+        prefix = "augmented_chain" if args.augment else "chain"
 
-        for name, data in [("chain", chains), ("pair", pairs)]:
-            rng.shuffle(data)
-            n_test = int(len(data) * args.test_frac)
-            write_jsonl(data[n_test:], out_dir / f"{name}_{annotation}_train.jsonl")
-            write_jsonl(data[:n_test], out_dir / f"{name}_{annotation}_test.jsonl")
+        rng.shuffle(chains)
+        n_test = int(len(chains) * args.test_frac)
+        write_jsonl(chains[n_test:], out_dir / f"{prefix}_{annotation}_train.jsonl")
+        write_jsonl(chains[:n_test], out_dir / f"{prefix}_{annotation}_test.jsonl")
+
+        # Print mode distribution
+        if args.augment:
+            from collections import Counter
+            mode_counts = Counter(c["mode"] for c in chains)
+            mode_names = {0: "advance", 1: "query", 2: "identity"}
+            for m, cnt in sorted(mode_counts.items()):
+                print(f"  {mode_names[m]}: {cnt}")
 
         # Print samples
         if chains:
-            print(f"\n  Sample chain ({annotation}):")
-            c = chains[0]["chain"]
-            for i, step in enumerate(c):
-                print(f"    step {i}: {step[:100]}")
-
-        if pairs:
-            print(f"\n  Sample pair ({annotation}):")
-            p = pairs[0]
-            print(f"    in:  {p['text_t'][:100]}")
-            print(f"    out: {p['text_t1'][:100]}")
+            print(f"\n  Sample ({annotation}):")
+            for c in chains[:3]:
+                mode_names = {0: "advance", 1: "query", 2: "identity"}
+                print(f"    mode={mode_names[c['mode']]}, steps={len(c['chain'])}")
+                for i, step in enumerate(c["chain"]):
+                    print(f"      {i}: {step[:80]}")
 
 
 if __name__ == "__main__":

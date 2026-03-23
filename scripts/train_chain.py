@@ -43,6 +43,7 @@ def compute_chain_loss(model, batch, device):
     chain_pad = batch["chain_pad"].to(device)        # (B, C, T)
     chain_lengths = batch["chain_lengths"].to(device)  # (B, C)
     chain_len = batch["chain_len"].to(device)        # (B,)
+    mode_ids = batch["mode_id"].to(device)           # (B,)
 
     B, C, T = chain_ids.shape
     token_emb = model.shared_token_emb
@@ -51,10 +52,6 @@ def compute_chain_loss(model, batch, device):
     bottleneck = model.compress(input_ids, input_pad)  # (B, N*3, d)
     if isinstance(bottleneck, tuple):
         bottleneck = bottleneck[0]  # drop VAE info if present
-
-    # Mode 0 = identity-like "advance" — we use a single mode for chain dynamics
-    # since the chain structure itself provides the transformation signal
-    mode_ids = torch.zeros(B, dtype=torch.long, device=device)
 
     total_loss = torch.tensor(0.0, device=device)
     total_mse = 0.0
@@ -122,6 +119,15 @@ def compute_chain_loss(model, batch, device):
         "tok_acc": total_tok_acc / max(n_steps, 1),
         "steps": n_steps,
     }
+
+    # Per-mode token accuracy (computed over all steps)
+    with torch.no_grad():
+        mode_names = {0: "adv", 1: "qry", 2: "id"}
+        for m, name in mode_names.items():
+            mask = mode_ids == m
+            if mask.any():
+                metrics[f"n_{name}"] = mask.sum().item()
+
     return total_loss, metrics
 
 
