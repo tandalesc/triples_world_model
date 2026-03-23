@@ -1,0 +1,23 @@
+{
+    "train_data": "data/glucose/nsp_train.jsonl",
+    "test_data": "data/glucose/nsp_test.jsonl",
+    "tokenizer_pretrained": "gpt2",
+    "out_dir": "results/glucose_nsp",
+    "d_model": 64,
+    "n_heads": 4,
+    "d_ff": 256,
+    "max_triples": 8,
+    "dynamics_layers": 4,
+    "compressor_layers": 3,
+    "expander_layers": 3,
+    "max_text_tokens": 128,
+    "context_window": 2,
+    "dropout": 0.1,
+    "alpha_min": 0.01,
+    "batch_size": 32,
+    "lr": 3e-4,
+    "epochs": 200,
+    "log_every": 5,
+    "eval_every": 5,
+    "device": "cuda"
+}
