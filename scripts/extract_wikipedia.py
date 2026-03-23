@@ -125,8 +125,8 @@ def main():
 
     print("Loading Wikipedia dataset...")
     from datasets import load_dataset
-    ds = load_dataset("wikipedia", "20220301.en", split="train",
-                      streaming=True, trust_remote_code=True)
+    ds = load_dataset("wikimedia/wikipedia", "20231101.en", split="train",
+                      streaming=True)
 
     chains = []
     n_processed = 0
