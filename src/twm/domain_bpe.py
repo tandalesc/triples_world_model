@@ -18,9 +18,10 @@ UNK_ID = 2
 class DomainBPETokenizer:
     """BPE tokenizer with T5Tokenizer-compatible encode/decode interface."""
 
-    def __init__(self, tokenizer: Tokenizer, max_length: int = 12):
+    def __init__(self, tokenizer: Tokenizer, max_length: int = 12, normalize: bool = True):
         self._tok = tokenizer
         self.max_length = max_length
+        self.normalize = normalize
         self.pad_token_id = tokenizer.token_to_id("<pad>")
         self.mask_token_id = tokenizer.token_to_id("<mask>")
         self.unk_token_id = tokenizer.token_to_id("<unk>")
@@ -29,17 +30,46 @@ class DomainBPETokenizer:
     @classmethod
     def load(cls, path: str | Path, max_length: int = 12) -> "DomainBPETokenizer":
         tokenizer = Tokenizer.from_file(str(path))
-        return cls(tokenizer, max_length=max_length)
+        return cls(tokenizer, max_length=max_length, normalize=True)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        name: str = "gpt2",
+        max_length: int = 64,
+        save_path: str | Path | None = None,
+    ) -> "DomainBPETokenizer":
+        """Load a pretrained HF tokenizer, adding special tokens if needed.
+
+        Adds <pad>, <mask>, <unk> as special tokens so the interface is
+        compatible with the rest of the TWM pipeline. Optionally saves
+        the adapted tokenizer to disk for reproducibility.
+        """
+        tokenizer = Tokenizer.from_pretrained(name)
+
+        # Add special tokens if missing
+        from tokenizers import AddedToken
+        special = ["<pad>", "<mask>", "<unk>"]
+        existing = set(tokenizer.get_vocab().keys())
+        to_add = [AddedToken(t, special=True) for t in special if t not in existing]
+        if to_add:
+            tokenizer.add_special_tokens(to_add)
+
+        if save_path:
+            tokenizer.save(str(save_path))
+
+        return cls(tokenizer, max_length=max_length, normalize=False)
 
     def encode(self, text: str, max_length: int | None = None) -> list[int]:
         """Encode text to token IDs, padded/truncated to max_length."""
         import re
         ml = max_length or self.max_length
-        normalized = text.replace("_", " ").lower().strip()
-        # Collapse spaces before punctuation so BPE doesn't create phantom
-        # space tokens (e.g., "airport ?" → "airport?" = 2 tokens not 3)
-        normalized = re.sub(r'\s+([?.!,;:])', r'\1', normalized)
-        enc = self._tok.encode(normalized)
+        if self.normalize:
+            text = text.replace("_", " ").lower().strip()
+            text = re.sub(r'\s+([?.!,;:])', r'\1', text)
+        else:
+            text = text.strip()
+        enc = self._tok.encode(text)
         ids = enc.ids[:ml]
         ids += [self.pad_token_id] * (ml - len(ids))
         return ids

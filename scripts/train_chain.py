@@ -163,17 +163,26 @@ def main():
         json.dump(cfg, f, indent=2)
 
     # Tokenizer
-    tokenizer = DomainBPETokenizer.load(
-        cfg["tokenizer_path"], max_length=cfg.get("max_text_tokens", 64)
-    )
+    max_text_tokens = cfg.get("max_text_tokens", 64)
+    if cfg.get("tokenizer_pretrained"):
+        tokenizer = DomainBPETokenizer.from_pretrained(
+            cfg["tokenizer_pretrained"], max_length=max_text_tokens,
+            save_path=out_dir / "tokenizer.json",
+        )
+    else:
+        tokenizer = DomainBPETokenizer.load(
+            cfg["tokenizer_path"], max_length=max_text_tokens
+        )
 
     # Dataset
-    max_text_tokens = cfg.get("max_text_tokens", 64)
+    max_chain_len = cfg.get("max_chain_len", 3)
     train_ds = ChainDataset(
-        cfg["train_data"], tokenizer, max_text_tokens=max_text_tokens
+        cfg["train_data"], tokenizer, max_text_tokens=max_text_tokens,
+        max_chain_len=max_chain_len,
     )
     test_ds = ChainDataset(
-        cfg["test_data"], tokenizer, max_text_tokens=max_text_tokens
+        cfg["test_data"], tokenizer, max_text_tokens=max_text_tokens,
+        max_chain_len=max_chain_len,
     )
 
     batch_size = cfg.get("batch_size", 64)
