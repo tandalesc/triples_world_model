@@ -298,7 +298,8 @@ def main():
 
             if eval_tok > best_tok_acc:
                 best_tok_acc = eval_tok
-                model.save(out_dir, tokenizer_path=cfg["tokenizer_path"])
+                tok_path = cfg.get("tokenizer_path") or str(out_dir / "tokenizer.json")
+                model.save(out_dir, tokenizer_path=tok_path)
                 print(f"  saved (best tok_acc: {best_tok_acc:.3f})")
 
     log_file.close()
