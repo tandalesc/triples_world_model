@@ -59,7 +59,8 @@ def eval_chain(model, text_chain, mode_id, tokenizer, device, max_text_tokens=64
         bottleneck = model.forward_dynamics(bottleneck, mode)
 
         # Generate prediction
-        pred_text = model.generate(bottleneck, n_steps=10)
+        pred_ids = model.generate(bottleneck, n_steps=10)  # (1, T)
+        pred_text = tokenizer.decode(pred_ids[0].tolist())
         results["predictions"].append(pred_text)
         results["targets"].append(text_chain[step])
 
