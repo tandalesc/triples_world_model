@@ -13,6 +13,7 @@ import argparse
 import json
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -80,42 +81,42 @@ def compute_chain_loss(model, batch, device, cfg=None):
         target_pad = chain_pad[active, step]    # (B', T)
         active_modes = mode_ids[active]         # (B',)
 
-        # Detach intermediate bottlenecks before expander to save memory.
-        # Full chain gradient flows through the final step only.
         is_final = (step == max_chain - 1)
-        if detach_intermediates and not is_final:
-            active_bn = bottleneck[active].detach()
-        else:
+        skip_grad = detach_intermediates and not is_final
+
+        # For intermediate steps with detach: metrics only, no grad
+        # For final step (or no detach): full training loss with grad
+        grad_ctx = torch.no_grad() if skip_grad else nullcontext()
+
+        with grad_ctx:
             active_bn = bottleneck[active]
+            if skip_grad:
+                active_bn = active_bn.detach()
 
-        # Expander: predict clean embeddings from bottleneck
-        pred_emb, _ = model.forward_expander(
-            active_bn, target_ids, target_pad
-        )  # (B', T, d)
+            pred_emb, _ = model.forward_expander(
+                active_bn, target_ids, target_pad
+            )  # (B', T, d)
 
-        # MSE loss in embedding space
-        non_pad = ~target_pad
-        if not non_pad.any():
-            continue
+            non_pad = ~target_pad
+            if not non_pad.any():
+                continue
 
-        target_clean = token_emb(target_ids)
-        step_mse = F.mse_loss(pred_emb[non_pad], target_clean[non_pad])
-        total_loss = total_loss + step_mse
+            target_clean = token_emb(target_ids)
+            step_mse = F.mse_loss(pred_emb[non_pad], target_clean[non_pad])
 
-        # Aux CE loss via decode projection
-        if model.text_expander.use_decode_proj:
-            logits = model.text_expander.decode_proj_logits(pred_emb)
-            ce = F.cross_entropy(
-                logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0
-            )
-            total_loss = total_loss + 0.1 * ce
+            if not skip_grad:
+                total_loss = total_loss + step_mse
+                if model.text_expander.use_decode_proj:
+                    logits = model.text_expander.decode_proj_logits(pred_emb)
+                    ce = F.cross_entropy(
+                        logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0
+                    )
+                    total_loss = total_loss + 0.1 * ce
+                len_pred = model.forward_length(active_bn)
+                target_len = chain_lengths[active, step].float()
+                total_loss = total_loss + 0.1 * F.mse_loss(len_pred, target_len)
 
-        # Length loss
-        len_pred = model.forward_length(active_bn)  # (B',)
-        target_len = chain_lengths[active, step].float()
-        total_loss = total_loss + 0.1 * F.mse_loss(len_pred, target_len)
-
-        # Metrics (no grad)
+        # Metrics (always no_grad)
         with torch.no_grad():
             pred_norm = F.normalize(pred_emb[non_pad], dim=-1)
             emb_norm = F.normalize(token_emb.weight, dim=-1)
@@ -125,7 +126,6 @@ def compute_chain_loss(model, batch, device, cfg=None):
             total_mse += step_mse.item()
             n_steps += 1
 
-            # Per-mode tok_acc
             for m in mode_names:
                 mask = active_modes == m
                 if mask.any():
