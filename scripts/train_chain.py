@@ -27,7 +27,7 @@ from twm.text_dynamics_model import TextDynamicsModel
 from twm.chain_dataset import ChainDataset
 
 
-def compute_chain_loss(model, batch, device):
+def compute_chain_loss(model, batch, device, cfg=None):
     """Compute loss over an unrolled chain.
 
     For each step 1..chain_len-1:
@@ -65,6 +65,8 @@ def compute_chain_loss(model, batch, device):
 
     max_chain = chain_len.max().item()
 
+    detach_intermediates = cfg.get("detach_intermediates", False) if isinstance(cfg, dict) else False
+
     for step in range(1, max_chain):
         # Advance dynamics
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
@@ -76,8 +78,15 @@ def compute_chain_loss(model, batch, device):
 
         target_ids = chain_ids[active, step]    # (B', T)
         target_pad = chain_pad[active, step]    # (B', T)
-        active_bn = bottleneck[active]          # (B', N*3, d)
         active_modes = mode_ids[active]         # (B',)
+
+        # Detach intermediate bottlenecks before expander to save memory.
+        # Full chain gradient flows through the final step only.
+        is_final = (step == max_chain - 1)
+        if detach_intermediates and not is_final:
+            active_bn = bottleneck[active].detach()
+        else:
+            active_bn = bottleneck[active]
 
         # Expander: predict clean embeddings from bottleneck
         pred_emb, _ = model.forward_expander(
@@ -238,7 +247,7 @@ def main():
         t0 = time.time()
 
         for batch in train_loader:
-            loss, metrics = compute_chain_loss(model, batch, device)
+            loss, metrics = compute_chain_loss(model, batch, device, cfg)
             if loss.requires_grad:
                 optimizer.zero_grad()
                 loss.backward()
@@ -277,7 +286,7 @@ def main():
             n_eval = 0
             with torch.no_grad():
                 for batch in test_loader:
-                    _, metrics = compute_chain_loss(model, batch, device)
+                    _, metrics = compute_chain_loss(model, batch, device, cfg)
                     eval_loss += metrics["loss"]
                     eval_tok += metrics["tok_acc"]
                     for k in ("tok_adv", "tok_qry", "tok_id"):
