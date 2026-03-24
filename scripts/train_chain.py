@@ -306,6 +306,99 @@ def main():
             log_file.write(msg + "\n")
             log_file.flush()
 
+            # BLEU: generate from bottleneck and compare to target (subset)
+            bleu_samples = cfg.get("bleu_samples", 0)
+            if bleu_samples > 0:
+                from sacrebleu.metrics import BLEU
+                bleu_metric = BLEU()
+                refs = []
+                hyps = []
+                bleu_n = 0
+                with torch.no_grad():
+                    for batch in test_loader:
+                        if bleu_n >= bleu_samples:
+                            break
+                        input_ids = batch["input_ids"].to(device)
+                        input_pad = batch["input_pad"].to(device)
+                        chain_ids = batch["chain_ids"].to(device)
+                        chain_pad = batch["chain_pad"].to(device)
+                        chain_len_b = batch["chain_len"].to(device)
+                        mode_ids_b = batch["mode_id"].to(device)
+
+                        bn = model.compress(input_ids, input_pad)
+                        if isinstance(bn, tuple):
+                            bn = bn[0]
+
+                        # Unroll to final step, generate
+                        max_c = chain_len_b.max().item()
+                        for s in range(1, max_c):
+                            bn = model.forward_dynamics(bn, mode_ids_b)
+
+                        # Generate from final bottleneck
+                        gen_ids = model.generate(bn, n_steps=10)
+                        for i in range(len(input_ids)):
+                            if bleu_n >= bleu_samples:
+                                break
+                            last = chain_len_b[i].item() - 1
+                            tgt_ids = chain_ids[i, last]
+                            tgt_pad = chain_pad[i, last]
+                            ref = tokenizer.decode(tgt_ids[~tgt_pad].tolist())
+                            hyp = tokenizer.decode(gen_ids[i].tolist())
+                            refs.append(ref)
+                            hyps.append(hyp)
+                            bleu_n += 1
+
+                bleu_score = bleu_metric.corpus_score(hyps, [refs]).score
+                bleu_str = f" | bleu: {bleu_score:.1f}"
+                msg = msg + bleu_str
+                # Reprint with BLEU
+                print(f"  bleu: {bleu_score:.1f} ({bleu_n} samples)")
+                log_file.write(f"  bleu: {bleu_score:.1f}\n")
+                log_file.flush()
+
+            # PCA snapshot
+            if cfg.get("pca_snapshots", False):
+                import numpy as np
+                from sklearn.decomposition import PCA
+                import matplotlib
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+
+                snap_pts = []
+                snap_modes = []
+                snap_n = 0
+                with torch.no_grad():
+                    for batch in test_loader:
+                        if snap_n >= 200:
+                            break
+                        ids_b = batch["input_ids"].to(device)
+                        pad_b = batch["input_pad"].to(device)
+                        mode_b = batch["mode_id"].to(device)
+                        bn = model.compress(ids_b, pad_b)
+                        if isinstance(bn, tuple):
+                            bn = bn[0]
+                        snap_pts.append(bn.mean(dim=1).cpu().numpy())
+                        snap_modes.append(mode_b.cpu().numpy())
+                        snap_n += len(ids_b)
+
+                pts = np.concatenate(snap_pts)[:200]
+                mds = np.concatenate(snap_modes)[:200]
+                pca = PCA(n_components=2).fit(pts)
+                pts_2d = pca.transform(pts)
+
+                fig, ax = plt.subplots(figsize=(6, 5))
+                colors = {0: "#e74c3c", 1: "#3498db", 2: "#2ecc71"}
+                for m, name in [(0, "adv"), (1, "qry"), (2, "id")]:
+                    mask = mds == m
+                    if mask.any():
+                        ax.scatter(pts_2d[mask, 0], pts_2d[mask, 1], c=colors[m], s=8, alpha=0.5, label=name)
+                ax.legend()
+                ax.set_title(f"ep {epoch} | tok {eval_tok:.3f}")
+                frames_dir = out_dir / "frames"
+                frames_dir.mkdir(exist_ok=True)
+                fig.savefig(frames_dir / f"pca_{epoch:04d}.png", dpi=100, bbox_inches="tight")
+                plt.close(fig)
+
             if eval_tok > best_tok_acc:
                 best_tok_acc = eval_tok
                 tok_path = cfg.get("tokenizer_path") or str(out_dir / "tokenizer.json")

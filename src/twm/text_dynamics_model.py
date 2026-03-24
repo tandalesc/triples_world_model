@@ -233,6 +233,7 @@ class TextDynamicsModel(nn.Module):
             "dynamics_layers": self._dynamics_layers,
             "max_text_tokens": self.max_text_tokens,
             "vae": self._vae,
+            "bottleneck_dim": self._bottleneck_dim,
             "tokenizer_path": tokenizer_path or str(getattr(self, '_tokenizer_path', '')),
         }
         with open(run_dir / "model_meta.json", "w") as f:
@@ -257,6 +258,7 @@ class TextDynamicsModel(nn.Module):
             dynamics_layers=meta["dynamics_layers"],
             max_text_tokens=meta["max_text_tokens"],
             vae=meta.get("vae", False),
+            bottleneck_dim=meta.get("bottleneck_dim"),
         )
         state = torch.load(run_dir / "weights.pt", map_location=device, weights_only=True)
         model.load_state_dict(state)
