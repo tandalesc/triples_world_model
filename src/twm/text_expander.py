@@ -48,9 +48,11 @@ class TextExpander(nn.Module):
         alpha_min: float = 0.01,
         timestep_bias_power: float = 1.0,
         use_decode_proj: bool = True,
+        bottleneck_dim: int | None = None,
     ):
         super().__init__()
         self.d_model = d_model
+        self.bottleneck_dim = bottleneck_dim or d_model
         self.max_text_tokens = max_text_tokens
         self.max_triples = max_triples
         self.alpha_min = alpha_min
@@ -69,6 +71,9 @@ class TextExpander(nn.Module):
         # Conditioning: learned attention pool over bottleneck vectors.
         # Single learned query cross-attends to all N*3 positions, preserving
         # per-position gradient flow (no mean-pool division by 36).
+        # If bottleneck_dim != d_model, project bottleneck up to d_model first.
+        bn_d = self.bottleneck_dim
+        self.bn_input_proj = nn.Linear(bn_d, d_model) if bn_d != d_model else nn.Identity()
         self.cond_query = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
         self.cond_attn = nn.MultiheadAttention(
             d_model, n_heads, batch_first=True, dropout=dropout,
@@ -110,6 +115,10 @@ class TextExpander(nn.Module):
         if use_decode_proj:
             self.decode_proj = nn.Linear(d_model, d_model)
 
+    def _project_bottleneck(self, bottleneck: torch.Tensor) -> torch.Tensor:
+        """Project bottleneck from bottleneck_dim to d_model if needed."""
+        return self.bn_input_proj(bottleneck)
+
     def _pool_conditioning(
         self,
         bottleneck: torch.Tensor,
@@ -122,12 +131,13 @@ class TextExpander(nn.Module):
         and lets the model decide what's globally relevant.
 
         Args:
-            bottleneck: (B, N*3, d_model) triple-level vectors
+            bottleneck: (B, N*3, bottleneck_dim) triple-level vectors
             triple_pad_mask: (B, N) True where triple is pad
 
         Returns:
             (B, d_model) pooled conditioning
         """
+        bottleneck = self._project_bottleneck(bottleneck)
         B = bottleneck.shape[0]
 
         # Build key padding mask for attention (over N*3 positions)
@@ -191,7 +201,7 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)  # (B, d_model)
 
         # Cross-attention memory: project bottleneck vectors
-        memory = self.memory_proj(bottleneck)  # (B, N*3, d_model)
+        memory = self.memory_proj(self._project_bottleneck(bottleneck))  # (B, N*3, d_model)
 
         # Sample timestep
         if timestep is None:
@@ -281,7 +291,7 @@ class TextExpander(nn.Module):
             T = self.length_head(len_input).squeeze(-1).round().long().clamp(1, self.max_text_tokens).max().item()
         else:
             T = max_tokens
-        memory = self.memory_proj(bottleneck)
+        memory = self.memory_proj(self._project_bottleneck(bottleneck))
 
         # Start from noise
         x = self._make_noise(torch.zeros(B, T, self.d_model, device=device))

@@ -40,9 +40,11 @@ class TextCompressor(nn.Module):
         max_text_tokens: int = 64,
         dropout: float = 0.1,
         vae: bool = False,
+        bottleneck_dim: int | None = None,
     ):
         super().__init__()
         self.d_model = d_model
+        self.bottleneck_dim = bottleneck_dim or d_model
         self.max_triples = max_triples
         self.max_text_tokens = max_text_tokens
         self.vae = vae
@@ -97,8 +99,13 @@ class TextCompressor(nn.Module):
         self.role_emb = nn.Embedding(3, d_model)
         self.triple_pos_emb = nn.Embedding(max_triples, d_model)
 
-        # Output normalization
-        self.out_ln = nn.LayerNorm(d_model)
+        # Output: project to bottleneck dimension and normalize
+        bn_d = self.bottleneck_dim
+        if bn_d != d_model:
+            self.out_proj = nn.Linear(d_model, bn_d)
+        else:
+            self.out_proj = nn.Identity()
+        self.out_ln = nn.LayerNorm(bn_d)
 
         # VAE heads: project to μ and log_σ, with learned role priors
         if vae:
@@ -170,10 +177,13 @@ class TextCompressor(nn.Module):
         extracted = self.query_self_ln(extracted + sa_out)
         extracted = self.query_ffn_ln(extracted + self.query_ffn(extracted))
 
+        # Project to bottleneck dimension
+        extracted = self.out_proj(extracted)
+
         # Pad to max_triples * 3 if n_triples < max_triples
         if n_triples < self.max_triples:
             pad_size = (self.max_triples - n_triples) * 3
-            pad = torch.zeros(B, pad_size, self.d_model, device=device)
+            pad = torch.zeros(B, pad_size, self.bottleneck_dim, device=device)
             extracted = torch.cat([extracted, pad], dim=1)
 
         extracted = self.out_ln(extracted)

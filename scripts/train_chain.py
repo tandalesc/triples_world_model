@@ -209,6 +209,7 @@ def main():
         dropout=cfg.get("dropout", 0.1),
         alpha_min=cfg.get("alpha_min", 0.01),
         vae=False,
+        bottleneck_dim=cfg.get("bottleneck_dim"),
     )
     model.init_embeddings()
     model.to(device)
