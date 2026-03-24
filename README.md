@@ -39,18 +39,23 @@ See [`configs/README.md`](configs/README.md) for training recipes and curriculum
 
 ## Results
 
-### Multi-Turn Chain Dynamics: GLUCOSE (36K chains)
+### Multi-Turn Chain Dynamics (Sprint 6, latest)
 
-Causal reasoning over GLUCOSE story annotations. The dynamics core unrolls twice per chain: preconditions → event → consequences. No spectral loss, no VAE, no staging.
+Multi-turn unrolling replaces all prior regularization (spectral loss, VAE, staged training). A 947K param model learns bidirectional causal reasoning and game state prediction across multiple datasets with zero architecture changes. The dynamics core (104K params) is unrolled N times with loss at each step — deeper chains learn *faster*, not slower.
 
-| Run | Modes | Train examples | Eval tok_acc | Epochs |
-|-----|-------|---------------:|-------------:|-------:|
-| v1 | advance only | 36K | 87.8% | 90 |
-| v2 | advance + query + identity | 120K | *running* | — |
+| Dataset | Chain depth | Modes | Eval tok_acc | Epochs |
+|---------|:----------:|-------|-------------:|-------:|
+| GLUCOSE (causal) | 3-step | adv+qry+id | 88.0% | 45 |
+| GLUCOSE (GPT-2 tok) | 4-step | adv+qry+id | 85.4% | 75 |
+| TextWorld (games) | 6-step | adv+qry+id | 87.1% | 100 |
 
-Multi-turn unrolling naturally regularizes bottleneck geometry — the dynamics output must be a valid input to itself, preventing collapse without explicit penalties.
+**Out-of-distribution generalization:** 93% tok_acc on 4-step chains (trained on 3-step only). Correct game command templates on novel TextWorld scenarios. Reverse causal inference (query mode) matches forward accuracy.
 
-### Open-Vocab IO: WebNLG (210K+ pairs)
+**Speed:** 149 state transitions/sec on M5 Pro — 400-2000x faster than LLMs for equivalent output.
+
+Details: [research/sprint6_chain_dynamics.md](research/sprint6_chain_dynamics.md)
+
+### Open-Vocab IO (Sprint 5)
 
 Compressor/expander learns to encode/decode free text through a bottleneck, then the dynamics core learns transformations.
 
