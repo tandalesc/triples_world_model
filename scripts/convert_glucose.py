@@ -174,6 +174,10 @@ def main():
         "--augment", action="store_true",
         help="Generate advance + query + identity augmentations",
     )
+    parser.add_argument(
+        "--long-chains", action="store_true",
+        help="Build longer chains from multi-sentence stories",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -187,6 +191,10 @@ def main():
         chains = []
         total = 0
         skipped = 0
+
+        # Group by story + sentence index for long chains
+        from collections import defaultdict
+        story_events: dict[str, dict[int, dict]] = defaultdict(dict)
 
         with open(args.csv, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -205,6 +213,38 @@ def main():
                     chains.extend(generate_augmented(processed))
                 else:
                     chains.append(generate_chain(processed))
+
+                # Collect for long chains
+                if args.long_chains:
+                    story_id = row.get("story_id", "")
+                    sent_idx = int(row.get("selected_sentence_index", "0") or "0")
+                    if story_id and sent_idx > 0:
+                        # Keep the best quality annotation per story+sentence
+                        existing = story_events[story_id].get(sent_idx)
+                        if existing is None or quality > existing.get("_quality", 0):
+                            processed["_quality"] = quality
+                            story_events[story_id][sent_idx] = processed
+
+        # Build long chains from story-level event sequences
+        if args.long_chains:
+            long_count = 0
+            for story_id, events in story_events.items():
+                if len(events) < 2:
+                    continue
+                # Sort by sentence index
+                sorted_idxs = sorted(events.keys())
+                # Build chain: event_text from each sentence in order
+                steps = []
+                for idx in sorted_idxs:
+                    ev = events[idx]
+                    steps.append(texts_to_sentence(ev["event_texts"]))
+                if len(steps) >= 3:
+                    chains.append({"chain": steps, "mode": 0})
+                    # Reverse long chain for query mode
+                    if args.augment:
+                        chains.append({"chain": steps[::-1], "mode": 1})
+                    long_count += 1
+            print(f"  Long chains (3+ steps): {long_count}")
 
         print(f"  Total rows: {total}, skipped (quality < {args.min_quality}): {skipped}")
 
