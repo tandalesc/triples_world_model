@@ -328,19 +328,25 @@ def main():
                         for s in range(1, max_c):
                             bn = model.forward_dynamics(bn, mode_ids_b)
 
-                        # Generate from final bottleneck
-                        gen_ids = model.generate(bn, n_steps=10)
-                        for i in range(len(input_ids)):
+                        # Generate in small batches to avoid memory spikes
+                        gen_bs = 8
+                        for gi in range(0, len(input_ids), gen_bs):
                             if bleu_n >= bleu_samples:
                                 break
-                            last = chain_len_b[i].item() - 1
-                            tgt_ids = chain_ids[i, last]
-                            tgt_pad = chain_pad[i, last]
-                            ref = tokenizer.decode(tgt_ids[~tgt_pad].tolist())
-                            hyp = tokenizer.decode(gen_ids[i].tolist())
-                            refs.append(ref)
-                            hyps.append(hyp)
-                            bleu_n += 1
+                            ge = min(gi + gen_bs, len(input_ids))
+                            gen_ids = model.generate(bn[gi:ge], n_steps=10)
+                            for j in range(gen_ids.shape[0]):
+                                if bleu_n >= bleu_samples:
+                                    break
+                                idx = gi + j
+                                last = chain_len_b[idx].item() - 1
+                                tgt_ids = chain_ids[idx, last]
+                                tgt_pad = chain_pad[idx, last]
+                                ref = tokenizer.decode(tgt_ids[~tgt_pad].tolist())
+                                hyp = tokenizer.decode(gen_ids[j].tolist())
+                                refs.append(ref)
+                                hyps.append(hyp)
+                                bleu_n += 1
 
                 bleu_score = bleu_metric.corpus_score(hyps, [refs]).score
                 bleu_str = f" | bleu: {bleu_score:.1f}"
