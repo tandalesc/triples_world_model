@@ -92,12 +92,10 @@ def compute_chain_loss(model, batch, device, cfg=None):
         step_mse = F.mse_loss(pred_emb[non_pad], target_clean[non_pad])
         total_loss = total_loss + step_mse
 
-        if model.text_expander.use_decode_proj:
-            logits = model.text_expander.decode_proj_logits(pred_emb)
-            ce = F.cross_entropy(
-                logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0
-            )
-            total_loss = total_loss + 0.1 * ce
+        # NOTE: aux CE loss (decode_proj_logits) removed — it creates
+        # (B, T, 50K) logits tensors at every chain step, consuming ~800MB each.
+        # 5 chain steps = 4GB just for a 0.1-weighted auxiliary loss.
+        # MSE in embedding space is sufficient.
 
         len_pred = model.forward_length(active_bn)
         target_len = chain_lengths[active, step].float()
