@@ -13,6 +13,7 @@
     "max_text_tokens": 128,
     "max_chain_len": 6,
     "bleu_samples": 200,
+    "pca_snapshots": true,
     "dropout": 0.1,
     "alpha_min": 0.01,
     "batch_size": 64,
