@@ -83,9 +83,11 @@ def main():
             continue
 
         steps = paragraphs[:args.max_chain_len]
+        # Continue mode: sequential paragraph prediction
         chains.append({"chain": steps, "mode": 0})
-        # Reverse for query mode
-        chains.append({"chain": steps[::-1], "mode": 1})
+        # Identity: 3-step reconstruction for each paragraph
+        for para in steps:
+            chains.append({"chain": [para, para, para], "mode": 2})
 
     print(f"\nProcessed: {n_processed}")
     print(f"Chains: {len(chains)}")
