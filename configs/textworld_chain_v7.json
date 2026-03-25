@@ -9,7 +9,7 @@
     "max_triples": 8,
     "dynamics_layers": 2,
     "compressor_layers": 3,
-    "expander_layers": 3,
+    "expander_layers": 2,
     "max_text_tokens": 128,
     "max_chain_len": 6,
     "amp": true,
