@@ -304,11 +304,11 @@ def main():
             log_file.write(msg + "\n")
             log_file.flush()
 
-            # BLEU: generate from bottleneck and compare to target (subset)
+            # chrF: generate from bottleneck and compare to target (subset)
             bleu_samples = cfg.get("bleu_samples", 0)
             if bleu_samples > 0:
-                from sacrebleu.metrics import BLEU
-                bleu_metric = BLEU()
+                from sacrebleu.metrics import CHRF
+                chrf_metric = CHRF()
                 refs = []
                 hyps = []
                 bleu_n = 0
@@ -352,12 +352,9 @@ def main():
                                 hyps.append(hyp)
                                 bleu_n += 1
 
-                bleu_score = bleu_metric.corpus_score(hyps, [refs]).score
-                bleu_str = f" | bleu: {bleu_score:.1f}"
-                msg = msg + bleu_str
-                # Reprint with BLEU
-                print(f"  bleu: {bleu_score:.1f} ({bleu_n} samples)")
-                log_file.write(f"  bleu: {bleu_score:.1f}\n")
+                chrf_score = chrf_metric.corpus_score(hyps, [refs]).score
+                print(f"  chrF: {chrf_score:.1f} ({bleu_n} samples)")
+                log_file.write(f"  chrF: {chrf_score:.1f}\n")
                 log_file.flush()
 
             # PCA snapshot
