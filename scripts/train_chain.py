@@ -27,6 +27,21 @@ from twm.text_dynamics_model import TextDynamicsModel
 from twm.chain_dataset import ChainDataset
 
 
+def weak_sigreg_loss(embeddings: torch.Tensor) -> torch.Tensor:
+    """Covariance regularization to prevent dimensional collapse.
+
+    Encourages uniform variance across dimensions and zero correlation
+    between dimensions. Applied to compressor output only.
+    """
+    z = embeddings - embeddings.mean(0)
+    cov = (z.T @ z) / (z.shape[0] - 1)
+    variances = cov.diag()
+    var_loss = (variances - variances.mean()).pow(2).mean()
+    off_diag = cov - torch.diag(cov.diag())
+    corr_loss = off_diag.pow(2).mean()
+    return var_loss + corr_loss
+
+
 def compute_chain_loss(model, batch, device, cfg=None):
     """Compute loss over an unrolled chain.
 
@@ -52,6 +67,12 @@ def compute_chain_loss(model, batch, device, cfg=None):
     bottleneck = model.compress(input_ids, input_pad)  # (B, N*3, d)
     if isinstance(bottleneck, tuple):
         bottleneck = bottleneck[0]  # drop VAE info if present
+
+    # Weak-SIGReg on compressor output to prevent dimensional collapse
+    lambda_w = cfg.get("sigreg_weight", 0.0) if isinstance(cfg, dict) else 0.0
+    sigreg_total = torch.tensor(0.0, device=device)
+    if lambda_w > 0:
+        sigreg_total = sigreg_total + weak_sigreg_loss(bottleneck.reshape(-1, bottleneck.shape[-1]))
 
     total_loss = torch.tensor(0.0, device=device)
     total_mse = 0.0
@@ -129,12 +150,18 @@ def compute_chain_loss(model, batch, device, cfg=None):
     if n_steps > 0:
         total_loss = total_loss / n_steps
 
+    # Add sigreg regularization
+    if lambda_w > 0:
+        total_loss = total_loss + lambda_w * sigreg_total
+
     metrics = {
         "loss": total_loss.item(),
         "mse": total_mse / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
         "steps": n_steps,
     }
+    if lambda_w > 0:
+        metrics["sigreg"] = sigreg_total.item()
 
     for m, name in mode_names.items():
         if mode_tok_n[m] > 0:
