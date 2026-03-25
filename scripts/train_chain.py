@@ -113,13 +113,20 @@ def compute_chain_loss(model, batch, device, cfg=None):
         step_mse = F.mse_loss(pred_emb[non_pad], target_clean[non_pad])
         total_loss = total_loss + step_mse
 
-        # CE loss via decode projection (cheap at small vocab, e.g. 259 bytes)
-        if model.text_expander.use_decode_proj:
-            logits = model.text_expander.decode_proj_logits(pred_emb)
-            ce = F.cross_entropy(
-                logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0
-            )
-            total_loss = total_loss + 0.1 * ce
+        # CE loss at final step only (50K vocab logits are expensive)
+        is_final_for_any = (chain_len[active] == step + 1).any()
+        if model.text_expander.use_decode_proj and is_final_for_any:
+            final_mask = chain_len[active] == step + 1
+            if final_mask.any():
+                f_pred = pred_emb[final_mask]
+                f_tgt = target_ids[final_mask]
+                f_non_pad = ~target_pad[final_mask]
+                if f_non_pad.any():
+                    logits = model.text_expander.decode_proj_logits(f_pred)
+                    ce = F.cross_entropy(
+                        logits[f_non_pad] / 0.1, f_tgt[f_non_pad], ignore_index=0
+                    )
+                    total_loss = total_loss + 0.1 * ce
 
         len_pred = model.forward_length(active_bn)
         target_len = chain_lengths[active, step].float()
