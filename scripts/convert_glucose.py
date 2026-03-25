@@ -140,7 +140,7 @@ def generate_augmented(processed: dict) -> list[dict]:
     # Identity: reconstruct one step (rotate through to balance)
     steps = [pre, event, post]
     pick = hash(pre) % 3  # deterministic but varied
-    examples.append({"chain": [steps[pick], steps[pick]], "mode": 2})
+    examples.append({"chain": [steps[pick], steps[pick], steps[pick]], "mode": 2})
     return examples
 
 

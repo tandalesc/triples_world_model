@@ -10,7 +10,7 @@
     "dynamics_layers": 2,
     "compressor_layers": 3,
     "expander_layers": 2,
-    "max_text_tokens": 256,
+    "max_text_tokens": 160,
     "max_chain_len": 6,
     "bleu_samples": 200,
     "pca_snapshots": true,
