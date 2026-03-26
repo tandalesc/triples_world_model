@@ -49,6 +49,7 @@ class TextExpander(nn.Module):
         timestep_bias_power: float = 1.0,
         use_decode_proj: bool = True,
         bottleneck_dim: int | None = None,
+        single_step: bool = False,
     ):
         super().__init__()
         self.d_model = d_model
@@ -57,6 +58,7 @@ class TextExpander(nn.Module):
         self.max_triples = max_triples
         self.alpha_min = alpha_min
         self.timestep_bias_power = timestep_bias_power
+        self.single_step = single_step
 
         # Shared frozen embedding table
         self.token_emb = token_emb
@@ -205,7 +207,10 @@ class TextExpander(nn.Module):
 
         # Sample timestep
         if timestep is None:
-            timestep = importance_sample_timesteps(B, device, self.timestep_bias_power)
+            if self.single_step:
+                timestep = torch.ones(B, device=device)
+            else:
+                timestep = importance_sample_timesteps(B, device, self.timestep_bias_power)
 
         # Noise schedule
         alpha_t = cosine_noise_schedule(timestep, alpha_min=self.alpha_min)
@@ -297,16 +302,10 @@ class TextExpander(nn.Module):
         x = self._make_noise(torch.zeros(B, T, self.d_model, device=device))
         pos_emb = self.pos_emb(torch.arange(T, device=device))
 
-        schedule = torch.linspace(1.0, 0.0, n_steps + 1, device=device)
-
-        for i in range(n_steps):
-            t_now = schedule[i]
-            t_next = schedule[i + 1]
-            alpha_next = cosine_noise_schedule(t_next.unsqueeze(0), alpha_min=self.alpha_min)
-
-            t_batch = t_now.expand(B)
+        if self.single_step:
+            # Single-step: one pass at t=1.0 from pure noise
+            t_batch = torch.ones(B, device=device)
             t_emb = self.time_embed(t_batch)
-
             ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
             ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
             ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
@@ -314,27 +313,46 @@ class TextExpander(nn.Module):
             x_input = x + pos_emb.unsqueeze(0)
             for layer in self.layers:
                 x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-            pred_emb = self.ln_f(x_input)
+            decoded = self.ln_f(x_input)
+        else:
+            schedule = torch.linspace(1.0, 0.0, n_steps + 1, device=device)
 
-            # Re-noise to next level
-            if i < n_steps - 1:
-                noise = self._make_noise(pred_emb)
-                alpha_n = alpha_next.view(1, 1, 1)
-                x = torch.sqrt(alpha_n) * pred_emb + torch.sqrt(1 - alpha_n) * noise
-            else:
-                x = pred_emb
+            for i in range(n_steps):
+                t_now = schedule[i]
+                t_next = schedule[i + 1]
+                alpha_next = cosine_noise_schedule(t_next.unsqueeze(0), alpha_min=self.alpha_min)
 
-        # Final clean prediction
-        t_batch = torch.zeros(B, device=device)
-        t_emb = self.time_embed(t_batch)
-        ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-        ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-        ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+                t_batch = t_now.expand(B)
+                t_emb = self.time_embed(t_batch)
 
-        x_input = x + pos_emb.unsqueeze(0)
-        for layer in self.layers:
-            x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-        decoded = self.ln_f(x_input)
+                ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
+                ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
+                ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+
+                x_input = x + pos_emb.unsqueeze(0)
+                for layer in self.layers:
+                    x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
+                pred_emb = self.ln_f(x_input)
+
+                # Re-noise to next level
+                if i < n_steps - 1:
+                    noise = self._make_noise(pred_emb)
+                    alpha_n = alpha_next.view(1, 1, 1)
+                    x = torch.sqrt(alpha_n) * pred_emb + torch.sqrt(1 - alpha_n) * noise
+                else:
+                    x = pred_emb
+
+            # Final clean prediction
+            t_batch = torch.zeros(B, device=device)
+            t_emb = self.time_embed(t_batch)
+            ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
+            ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
+            ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+
+            x_input = x + pos_emb.unsqueeze(0)
+            for layer in self.layers:
+                x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
+            decoded = self.ln_f(x_input)
 
         return self._nn_decode(decoded)
 

@@ -57,6 +57,7 @@ class TextDynamicsModel(nn.Module):
         compressor_random_k: bool = False,
         compressor_k_min: int = 1,
         bottleneck_dim: int | None = None,
+        single_step_diffusion: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -132,6 +133,7 @@ class TextDynamicsModel(nn.Module):
             alpha_min=alpha_min,
             use_decode_proj=True,
             bottleneck_dim=bn_d,
+            single_step=single_step_diffusion,
         )
 
     def init_embeddings(self):
@@ -234,6 +236,7 @@ class TextDynamicsModel(nn.Module):
             "max_text_tokens": self.max_text_tokens,
             "vae": self._vae,
             "bottleneck_dim": self._bottleneck_dim,
+            "single_step_diffusion": self.text_expander.single_step,
             "tokenizer_path": tokenizer_path or str(getattr(self, '_tokenizer_path', '')),
         }
         with open(run_dir / "model_meta.json", "w") as f:
@@ -259,6 +262,7 @@ class TextDynamicsModel(nn.Module):
             max_text_tokens=meta["max_text_tokens"],
             vae=meta.get("vae", False),
             bottleneck_dim=meta.get("bottleneck_dim"),
+            single_step_diffusion=meta.get("single_step_diffusion", False),
         )
         state = torch.load(run_dir / "weights.pt", map_location=device, weights_only=True)
         model.load_state_dict(state)
