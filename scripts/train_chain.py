@@ -248,6 +248,7 @@ def main():
         cond_dropout=cfg.get("cond_dropout", 0.0),
         guidance_scale=cfg.get("guidance_scale", 0.0),
         t_min_train=cfg.get("t_min_train", 0.0),
+        no_path_a=cfg.get("no_path_a", False),
     )
     model.init_embeddings()
     model.to(device)

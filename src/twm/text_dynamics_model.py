@@ -61,6 +61,7 @@ class TextDynamicsModel(nn.Module):
         cond_dropout: float = 0.0,
         guidance_scale: float = 0.0,
         t_min_train: float = 0.0,
+        no_path_a: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -140,6 +141,7 @@ class TextDynamicsModel(nn.Module):
             cond_dropout=cond_dropout,
         )
         self.text_expander.t_min_train = t_min_train
+        self.text_expander.no_path_a = no_path_a
         self._guidance_scale = guidance_scale
 
     def init_embeddings(self):

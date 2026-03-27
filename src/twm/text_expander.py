@@ -62,6 +62,7 @@ class TextExpander(nn.Module):
         self.single_step = single_step
         self.cond_dropout = cond_dropout
         self.t_min_train = 0.0  # minimum timestep sampled during training
+        self.no_path_a = False  # zero out corrupted input, force conditioning use
 
         # Shared frozen embedding table
         self.token_emb = token_emb
@@ -234,11 +235,16 @@ class TextExpander(nn.Module):
         # Get clean embeddings and corrupt
         original_emb = self.token_emb(target_text_ids)
         noise = self._make_noise(original_emb)
-        corrupted = torch.sqrt(alpha_t) * original_emb + torch.sqrt(1 - alpha_t) * noise
+        if self.no_path_a:
+            # No corrupted input — denoiser must rely entirely on conditioning
+            x = noise
+        else:
+            corrupted = torch.sqrt(alpha_t) * original_emb + torch.sqrt(1 - alpha_t) * noise
+            x = corrupted
 
         # Add position embeddings
         pos_ids = torch.arange(T, device=device).unsqueeze(0)
-        x = corrupted + self.pos_emb(pos_ids)
+        x = x + self.pos_emb(pos_ids)
 
         # Build independent context signals for adaLN
         t_emb = self.time_embed(timestep)  # (B, d_model)
