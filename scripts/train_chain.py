@@ -247,6 +247,7 @@ def main():
         single_step_diffusion=cfg.get("single_step_diffusion", False),
         cond_dropout=cfg.get("cond_dropout", 0.0),
         guidance_scale=cfg.get("guidance_scale", 0.0),
+        t_min_train=cfg.get("t_min_train", 0.0),
     )
     model.init_embeddings()
     model.to(device)

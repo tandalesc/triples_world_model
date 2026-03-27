@@ -61,6 +61,7 @@ class TextExpander(nn.Module):
         self.timestep_bias_power = timestep_bias_power
         self.single_step = single_step
         self.cond_dropout = cond_dropout
+        self.t_min_train = 0.0  # minimum timestep sampled during training
 
         # Shared frozen embedding table
         self.token_emb = token_emb
@@ -223,6 +224,8 @@ class TextExpander(nn.Module):
                 timestep = torch.ones(B, device=device)
             else:
                 timestep = importance_sample_timesteps(B, device, self.timestep_bias_power)
+                if self.training and self.t_min_train > 0:
+                    timestep = timestep * (1.0 - self.t_min_train) + self.t_min_train
 
         # Noise schedule
         alpha_t = cosine_noise_schedule(timestep, alpha_min=self.alpha_min)
