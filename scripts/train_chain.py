@@ -245,6 +245,8 @@ def main():
         vae=False,
         bottleneck_dim=cfg.get("bottleneck_dim"),
         single_step_diffusion=cfg.get("single_step_diffusion", False),
+        cond_dropout=cfg.get("cond_dropout", 0.0),
+        guidance_scale=cfg.get("guidance_scale", 0.0),
     )
     model.init_embeddings()
     model.to(device)

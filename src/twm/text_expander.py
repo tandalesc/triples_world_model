@@ -50,6 +50,7 @@ class TextExpander(nn.Module):
         use_decode_proj: bool = True,
         bottleneck_dim: int | None = None,
         single_step: bool = False,
+        cond_dropout: float = 0.0,
     ):
         super().__init__()
         self.d_model = d_model
@@ -59,6 +60,7 @@ class TextExpander(nn.Module):
         self.alpha_min = alpha_min
         self.timestep_bias_power = timestep_bias_power
         self.single_step = single_step
+        self.cond_dropout = cond_dropout
 
         # Shared frozen embedding table
         self.token_emb = token_emb
@@ -205,6 +207,16 @@ class TextExpander(nn.Module):
         # Cross-attention memory: project bottleneck vectors
         memory = self.memory_proj(self._project_bottleneck(bottleneck))  # (B, N*3, d_model)
 
+        # Conditioning dropout: zero out conditioning for a fraction of examples
+        # so the denoiser must learn to use path B (bottleneck) when available
+        if self.training and self.cond_dropout > 0:
+            drop_mask = torch.rand(B, device=device) < self.cond_dropout
+            if drop_mask.any():
+                cond = cond.clone()
+                cond[drop_mask] = 0.0
+                memory = memory.clone()
+                memory[drop_mask] = 0.0
+
         # Sample timestep
         if timestep is None:
             if self.single_step:
@@ -266,6 +278,18 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)
         return self.length_head(self._length_input(bottleneck, cond)).squeeze(-1)
 
+    def _denoise_step(self, x, cond, memory, t_batch, pos_emb, B, T):
+        """Run one denoising step. Returns predicted clean embeddings."""
+        t_emb = self.time_embed(t_batch)
+        ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
+        ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
+        ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+
+        x_input = x + pos_emb.unsqueeze(0)
+        for layer in self.layers:
+            x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
+        return self.ln_f(x_input)
+
     @torch.no_grad()
     def generate(
         self,
@@ -273,14 +297,16 @@ class TextExpander(nn.Module):
         triple_pad_mask: torch.Tensor | None = None,
         n_steps: int = 10,
         max_tokens: int | None = None,
+        guidance_scale: float = 0.0,
     ) -> torch.Tensor:
-        """Generate text token IDs via iterative denoising.
+        """Generate text token IDs via iterative denoising with optional CFG.
 
         Args:
             bottleneck: (B, N*3, d_model) conditioning
             triple_pad_mask: (B, N) True where triple is pad
             n_steps: denoising steps
             max_tokens: override text length (else uses length head)
+            guidance_scale: CFG scale (0 = no guidance, 1.5 = recommended)
 
         Returns:
             (B, T) generated token IDs
@@ -298,61 +324,49 @@ class TextExpander(nn.Module):
             T = max_tokens
         memory = self.memory_proj(self._project_bottleneck(bottleneck))
 
+        # Unconditional versions for CFG
+        use_cfg = guidance_scale > 0
+        if use_cfg:
+            uncond = torch.zeros_like(cond)
+            uncond_memory = torch.zeros_like(memory)
+
         # Start from noise
         x = self._make_noise(torch.zeros(B, T, self.d_model, device=device))
         pos_emb = self.pos_emb(torch.arange(T, device=device))
 
-        if self.single_step:
-            # Single-step: one pass at t=1.0 from pure noise
-            t_batch = torch.ones(B, device=device)
-            t_emb = self.time_embed(t_batch)
-            ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-            ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-            ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+        schedule = torch.linspace(1.0, 0.0, n_steps + 1, device=device)
 
-            x_input = x + pos_emb.unsqueeze(0)
-            for layer in self.layers:
-                x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-            decoded = self.ln_f(x_input)
-        else:
-            schedule = torch.linspace(1.0, 0.0, n_steps + 1, device=device)
+        for i in range(n_steps):
+            t_now = schedule[i]
+            t_next = schedule[i + 1]
+            t_batch = t_now.expand(B)
 
-            for i in range(n_steps):
-                t_now = schedule[i]
-                t_next = schedule[i + 1]
+            pred_cond = self._denoise_step(x, cond, memory, t_batch, pos_emb, B, T)
+
+            if use_cfg:
+                pred_uncond = self._denoise_step(x, uncond, uncond_memory, t_batch, pos_emb, B, T)
+                pred_emb = pred_uncond + (1 + guidance_scale) * (pred_cond - pred_uncond)
+            else:
+                pred_emb = pred_cond
+
+            # Re-noise to next level
+            if i < n_steps - 1:
                 alpha_next = cosine_noise_schedule(t_next.unsqueeze(0), alpha_min=self.alpha_min)
+                noise = self._make_noise(pred_emb)
+                alpha_n = alpha_next.view(1, 1, 1)
+                x = torch.sqrt(alpha_n) * pred_emb + torch.sqrt(1 - alpha_n) * noise
+            else:
+                x = pred_emb
 
-                t_batch = t_now.expand(B)
-                t_emb = self.time_embed(t_batch)
+        # Final clean prediction
+        t_batch = torch.zeros(B, device=device)
+        decoded_cond = self._denoise_step(x, cond, memory, t_batch, pos_emb, B, T)
 
-                ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-                ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-                ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
-
-                x_input = x + pos_emb.unsqueeze(0)
-                for layer in self.layers:
-                    x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-                pred_emb = self.ln_f(x_input)
-
-                # Re-noise to next level
-                if i < n_steps - 1:
-                    noise = self._make_noise(pred_emb)
-                    alpha_n = alpha_next.view(1, 1, 1)
-                    x = torch.sqrt(alpha_n) * pred_emb + torch.sqrt(1 - alpha_n) * noise
-                else:
-                    x = pred_emb
-
-            # Final clean prediction
-            t_batch = torch.zeros(B, device=device)
-            t_emb = self.time_embed(t_batch)
-            ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-            ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-            ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
-
-            x_input = x + pos_emb.unsqueeze(0)
-            for layer in self.layers:
-                x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-            decoded = self.ln_f(x_input)
+        if use_cfg:
+            decoded_uncond = self._denoise_step(x, uncond, uncond_memory, t_batch, pos_emb, B, T)
+            decoded = decoded_uncond + (1 + guidance_scale) * (decoded_cond - decoded_uncond)
+        else:
+            decoded = decoded_cond
 
         return self._nn_decode(decoded)
 

@@ -58,6 +58,8 @@ class TextDynamicsModel(nn.Module):
         compressor_k_min: int = 1,
         bottleneck_dim: int | None = None,
         single_step_diffusion: bool = False,
+        cond_dropout: float = 0.0,
+        guidance_scale: float = 0.0,
     ):
         super().__init__()
         self.config = config
@@ -134,7 +136,9 @@ class TextDynamicsModel(nn.Module):
             use_decode_proj=True,
             bottleneck_dim=bn_d,
             single_step=single_step_diffusion,
+            cond_dropout=cond_dropout,
         )
+        self._guidance_scale = guidance_scale
 
     def init_embeddings(self):
         with torch.no_grad():
@@ -213,8 +217,9 @@ class TextDynamicsModel(nn.Module):
         return self.text_expander.forward_length(bottleneck)
 
     @torch.no_grad()
-    def generate(self, bottleneck, n_steps=10):
-        return self.text_expander.generate(bottleneck, n_steps=n_steps)
+    def generate(self, bottleneck, n_steps=10, guidance_scale=None):
+        g = guidance_scale if guidance_scale is not None else self._guidance_scale
+        return self.text_expander.generate(bottleneck, n_steps=n_steps, guidance_scale=g)
 
     def trainable_param_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -237,6 +242,8 @@ class TextDynamicsModel(nn.Module):
             "vae": self._vae,
             "bottleneck_dim": self._bottleneck_dim,
             "single_step_diffusion": self.text_expander.single_step,
+            "cond_dropout": self.text_expander.cond_dropout,
+            "guidance_scale": self._guidance_scale,
             "tokenizer_path": tokenizer_path or str(getattr(self, '_tokenizer_path', '')),
         }
         with open(run_dir / "model_meta.json", "w") as f:
@@ -263,6 +270,8 @@ class TextDynamicsModel(nn.Module):
             vae=meta.get("vae", False),
             bottleneck_dim=meta.get("bottleneck_dim"),
             single_step_diffusion=meta.get("single_step_diffusion", False),
+            cond_dropout=meta.get("cond_dropout", 0.0),
+            guidance_scale=meta.get("guidance_scale", 0.0),
         )
         state = torch.load(run_dir / "weights.pt", map_location=device, weights_only=True)
         model.load_state_dict(state)
