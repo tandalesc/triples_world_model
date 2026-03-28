@@ -87,7 +87,12 @@ class TextExpander(nn.Module):
         self.cond_proj = nn.Linear(d_model, d_model)
 
         # Cross-attention memory projection: bottleneck → memory tokens
-        self.memory_proj = nn.Linear(d_model, d_model)
+        # LayerNorm after projection so keys/values are unit-scale,
+        # making cross-attention attend by direction (content) not magnitude.
+        self.memory_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.LayerNorm(d_model),
+        )
 
         # adaLN-Zero denoiser layers with independent context signals:
         #   - pooled conditioning (d_model): what to denoise toward
@@ -104,6 +109,20 @@ class TextExpander(nn.Module):
             )
             for _ in range(n_layers)
         ])
+
+        # Initialize conditioning gate bias to 1.0 so the pathway starts open.
+        # The gate (alpha) is at indices [2,5,8] * d_model in the proj output.
+        # Proj index 0 = conditioning signal.
+        for layer in self.layers:
+            proj = layer.adaln_projs[0]  # conditioning projection
+            linear = proj[-1]  # Linear layer after SiLU
+            n_params = 9 if layer.use_cross_attention else 6
+            with torch.no_grad():
+                bias = linear.bias.view(n_params, d_model)
+                # alpha (gate) slots: indices 2, 5, 8 (for self-attn, cross-attn, ffn)
+                for gate_idx in [2, 5, 8] if layer.use_cross_attention else [2, 5]:
+                    bias[gate_idx] = 1.0
+                linear.bias.data = bias.view(-1)
 
         self.ln_f = nn.LayerNorm(d_model)
 
