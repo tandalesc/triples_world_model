@@ -88,6 +88,10 @@ The dynamics core sees **identical input** regardless of pipeline — it always 
 on (B, max_triples × 3, 256) latent tensors. The compressor/expander pair is
 transparent to it.
 
+### Architecture Diagram
+
+![TextDynamicsModel Architecture](architecture_diagram.png)
+
 ### Full Open-Vocab Data Flow
 
 ```
