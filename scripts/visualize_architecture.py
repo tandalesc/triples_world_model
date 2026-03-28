@@ -141,6 +141,10 @@ def build_graph(model):
     g.edge("bottleneck", "dyn_strip", style="dashed", label="residual",
            color="#888888")
 
+    # Chain unrolling: post-dynamics bottleneck feeds back into dynamics
+    g.edge("bn_post", "dyn_cat", label="chain unroll\n(N-1 steps)",
+           style="dotted", color="#2196F3", constraint="false")
+
     # Expander flow
     g.edge("bn_post", "exp_pool", label="pool")
     g.edge("bn_post", "exp_memory", label="project")
