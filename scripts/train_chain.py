@@ -87,6 +87,9 @@ def compute_chain_loss(model, batch, device, cfg=None):
     max_chain = chain_len.max().item()
 
     for step in range(1, max_chain):
+        # Save pre-dynamics bottleneck for multi-level conditioning
+        pre_dynamics = bottleneck
+
         # Advance dynamics
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
 
@@ -99,10 +102,11 @@ def compute_chain_loss(model, batch, device, cfg=None):
         target_pad = chain_pad[active, step]    # (B', T)
         active_modes = mode_ids[active]         # (B',)
         active_bn = bottleneck[active]          # (B', N*3, d)
+        active_pre = pre_dynamics[active]       # (B', N*3, d)
 
-        # Expander: predict clean embeddings from bottleneck
+        # Expander: predict clean embeddings from bottleneck + pre-dynamics
         pred_emb, _ = model.forward_expander(
-            active_bn, target_ids, target_pad
+            active_bn, target_ids, target_pad, pre_dynamics=active_pre
         )  # (B', T, d)
 
         non_pad = ~target_pad
@@ -366,9 +370,11 @@ def main():
                         if isinstance(bn, tuple):
                             bn = bn[0]
 
-                        # Unroll to final step, generate
+                        # Unroll to final step, track pre-dynamics
                         max_c = chain_len_b.max().item()
+                        pre_bn = bn
                         for s in range(1, max_c):
+                            pre_bn = bn
                             bn = model.forward_dynamics(bn, mode_ids_b)
 
                         # Generate in small batches to avoid memory spikes
@@ -377,7 +383,7 @@ def main():
                             if bleu_n >= bleu_samples:
                                 break
                             ge = min(gi + gen_bs, len(input_ids))
-                            gen_ids = model.generate(bn[gi:ge], n_steps=10)
+                            gen_ids = model.generate(bn[gi:ge], n_steps=10, pre_dynamics=pre_bn[gi:ge])
                             for j in range(gen_ids.shape[0]):
                                 if bleu_n >= bleu_samples:
                                     break

@@ -214,16 +214,16 @@ class TextDynamicsModel(nn.Module):
         # Input residual: core learns the delta, not the full output
         return bottleneck + delta
 
-    def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None):
-        return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep)
+    def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None, pre_dynamics=None):
+        return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep, pre_dynamics=pre_dynamics)
 
     def forward_length(self, bottleneck):
         return self.text_expander.forward_length(bottleneck)
 
     @torch.no_grad()
-    def generate(self, bottleneck, n_steps=10, guidance_scale=None):
+    def generate(self, bottleneck, n_steps=10, guidance_scale=None, pre_dynamics=None):
         g = guidance_scale if guidance_scale is not None else self._guidance_scale
-        return self.text_expander.generate(bottleneck, n_steps=n_steps, guidance_scale=g)
+        return self.text_expander.generate(bottleneck, n_steps=n_steps, guidance_scale=g, pre_dynamics=pre_dynamics)
 
     def trainable_param_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

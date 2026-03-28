@@ -198,6 +198,17 @@ class TextExpander(nn.Module):
         emb_norm = F.normalize(self.token_emb.weight.detach(), dim=-1)
         return torch.matmul(pred_norm, emb_norm.T)
 
+    def _build_memory(self, bottleneck, pre_dynamics=None, triple_pad_mask=None):
+        """Build cross-attention memory from bottleneck, optionally with pre-dynamics."""
+        projected = self._project_bottleneck(bottleneck)
+        if pre_dynamics is not None:
+            pre_projected = self._project_bottleneck(pre_dynamics)
+            combined = torch.cat([pre_projected, projected], dim=1)  # (B, 6N, d)
+            memory = self.memory_proj(combined)
+        else:
+            memory = self.memory_proj(projected)
+        return memory
+
     def forward(
         self,
         bottleneck: torch.Tensor,
@@ -205,6 +216,7 @@ class TextExpander(nn.Module):
         target_text_pad_mask: torch.Tensor,
         triple_pad_mask: torch.Tensor | None = None,
         timestep: torch.Tensor | None = None,
+        pre_dynamics: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass: corrupt target text, predict clean embeddings.
 
@@ -226,7 +238,8 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)  # (B, d_model)
 
         # Cross-attention memory: project bottleneck vectors
-        memory = self.memory_proj(self._project_bottleneck(bottleneck))  # (B, N*3, d_model)
+        # If pre_dynamics provided, concatenate for multi-level conditioning
+        memory = self._build_memory(bottleneck, pre_dynamics)  # (B, N*3 or 6N, d_model)
 
         # Conditioning dropout: zero out conditioning for a fraction of examples
         # so the denoiser must learn to use path B (bottleneck) when available
@@ -326,6 +339,7 @@ class TextExpander(nn.Module):
         n_steps: int = 10,
         max_tokens: int | None = None,
         guidance_scale: float = 0.0,
+        pre_dynamics: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Generate text token IDs via iterative denoising with optional CFG.
 
@@ -335,6 +349,7 @@ class TextExpander(nn.Module):
             n_steps: denoising steps
             max_tokens: override text length (else uses length head)
             guidance_scale: CFG scale (0 = no guidance, 1.5 = recommended)
+            pre_dynamics: (B, N*3, d_model) compressor output for multi-level conditioning
 
         Returns:
             (B, T) generated token IDs
@@ -350,7 +365,7 @@ class TextExpander(nn.Module):
             T = self.length_head(len_input).squeeze(-1).round().long().clamp(1, self.max_text_tokens).max().item()
         else:
             T = max_tokens
-        memory = self.memory_proj(self._project_bottleneck(bottleneck))
+        memory = self._build_memory(bottleneck, pre_dynamics)
 
         # Unconditional versions for CFG
         use_cfg = guidance_scale > 0
