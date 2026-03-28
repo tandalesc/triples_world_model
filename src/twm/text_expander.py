@@ -48,13 +48,21 @@ class TextExpander(nn.Module):
         alpha_min: float = 0.01,
         timestep_bias_power: float = 1.0,
         use_decode_proj: bool = True,
+        bottleneck_dim: int | None = None,
+        single_step: bool = False,
+        cond_dropout: float = 0.0,
     ):
         super().__init__()
         self.d_model = d_model
+        self.bottleneck_dim = bottleneck_dim or d_model
         self.max_text_tokens = max_text_tokens
         self.max_triples = max_triples
         self.alpha_min = alpha_min
         self.timestep_bias_power = timestep_bias_power
+        self.single_step = single_step
+        self.cond_dropout = cond_dropout
+        self.t_min_train = 0.0  # minimum timestep sampled during training
+        self.no_path_a = False  # zero out corrupted input, force conditioning use
 
         # Shared frozen embedding table
         self.token_emb = token_emb
@@ -69,6 +77,9 @@ class TextExpander(nn.Module):
         # Conditioning: learned attention pool over bottleneck vectors.
         # Single learned query cross-attends to all N*3 positions, preserving
         # per-position gradient flow (no mean-pool division by 36).
+        # If bottleneck_dim != d_model, project bottleneck up to d_model first.
+        bn_d = self.bottleneck_dim
+        self.bn_input_proj = nn.Linear(bn_d, d_model) if bn_d != d_model else nn.Identity()
         self.cond_query = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
         self.cond_attn = nn.MultiheadAttention(
             d_model, n_heads, batch_first=True, dropout=dropout,
@@ -76,7 +87,12 @@ class TextExpander(nn.Module):
         self.cond_proj = nn.Linear(d_model, d_model)
 
         # Cross-attention memory projection: bottleneck → memory tokens
-        self.memory_proj = nn.Linear(d_model, d_model)
+        # LayerNorm after projection so keys/values are unit-scale,
+        # making cross-attention attend by direction (content) not magnitude.
+        self.memory_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.LayerNorm(d_model),
+        )
 
         # adaLN-Zero denoiser layers with independent context signals:
         #   - pooled conditioning (d_model): what to denoise toward
@@ -94,6 +110,20 @@ class TextExpander(nn.Module):
             for _ in range(n_layers)
         ])
 
+        # Initialize conditioning gate bias to 1.0 so the pathway starts open.
+        # The gate (alpha) is at indices [2,5,8] * d_model in the proj output.
+        # Proj index 0 = conditioning signal.
+        for layer in self.layers:
+            proj = layer.adaln_projs[0]  # conditioning projection
+            linear = proj[-1]  # Linear layer after SiLU
+            n_params = 9 if layer.use_cross_attention else 6
+            with torch.no_grad():
+                bias = linear.bias.view(n_params, d_model)
+                # alpha (gate) slots: indices 2, 5, 8 (for self-attn, cross-attn, ffn)
+                for gate_idx in [2, 5, 8] if layer.use_cross_attention else [2, 5]:
+                    bias[gate_idx] = 1.0
+                linear.bias.data = bias.view(-1)
+
         self.ln_f = nn.LayerNorm(d_model)
 
         # Length head: predict text token count from pooled conditioning + bottleneck norm hint.
@@ -110,6 +140,10 @@ class TextExpander(nn.Module):
         if use_decode_proj:
             self.decode_proj = nn.Linear(d_model, d_model)
 
+    def _project_bottleneck(self, bottleneck: torch.Tensor) -> torch.Tensor:
+        """Project bottleneck from bottleneck_dim to d_model if needed."""
+        return self.bn_input_proj(bottleneck)
+
     def _pool_conditioning(
         self,
         bottleneck: torch.Tensor,
@@ -122,12 +156,13 @@ class TextExpander(nn.Module):
         and lets the model decide what's globally relevant.
 
         Args:
-            bottleneck: (B, N*3, d_model) triple-level vectors
+            bottleneck: (B, N*3, bottleneck_dim) triple-level vectors
             triple_pad_mask: (B, N) True where triple is pad
 
         Returns:
             (B, d_model) pooled conditioning
         """
+        bottleneck = self._project_bottleneck(bottleneck)
         B = bottleneck.shape[0]
 
         # Build key padding mask for attention (over N*3 positions)
@@ -163,6 +198,17 @@ class TextExpander(nn.Module):
         emb_norm = F.normalize(self.token_emb.weight.detach(), dim=-1)
         return torch.matmul(pred_norm, emb_norm.T)
 
+    def _build_memory(self, bottleneck, pre_dynamics=None, triple_pad_mask=None):
+        """Build cross-attention memory from bottleneck, optionally with pre-dynamics."""
+        projected = self._project_bottleneck(bottleneck)
+        if pre_dynamics is not None:
+            pre_projected = self._project_bottleneck(pre_dynamics)
+            combined = torch.cat([pre_projected, projected], dim=1)  # (B, 6N, d)
+            memory = self.memory_proj(combined)
+        else:
+            memory = self.memory_proj(projected)
+        return memory
+
     def forward(
         self,
         bottleneck: torch.Tensor,
@@ -170,6 +216,7 @@ class TextExpander(nn.Module):
         target_text_pad_mask: torch.Tensor,
         triple_pad_mask: torch.Tensor | None = None,
         timestep: torch.Tensor | None = None,
+        pre_dynamics: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Forward pass: corrupt target text, predict clean embeddings.
 
@@ -191,11 +238,27 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)  # (B, d_model)
 
         # Cross-attention memory: project bottleneck vectors
-        memory = self.memory_proj(bottleneck)  # (B, N*3, d_model)
+        # If pre_dynamics provided, concatenate for multi-level conditioning
+        memory = self._build_memory(bottleneck, pre_dynamics)  # (B, N*3 or 6N, d_model)
+
+        # Conditioning dropout: zero out conditioning for a fraction of examples
+        # so the denoiser must learn to use path B (bottleneck) when available
+        if self.training and self.cond_dropout > 0:
+            drop_mask = torch.rand(B, device=device) < self.cond_dropout
+            if drop_mask.any():
+                cond = cond.clone()
+                cond[drop_mask] = 0.0
+                memory = memory.clone()
+                memory[drop_mask] = 0.0
 
         # Sample timestep
         if timestep is None:
-            timestep = importance_sample_timesteps(B, device, self.timestep_bias_power)
+            if self.single_step:
+                timestep = torch.ones(B, device=device)
+            else:
+                timestep = importance_sample_timesteps(B, device, self.timestep_bias_power)
+                if self.training and self.t_min_train > 0:
+                    timestep = timestep * (1.0 - self.t_min_train) + self.t_min_train
 
         # Noise schedule
         alpha_t = cosine_noise_schedule(timestep, alpha_min=self.alpha_min)
@@ -204,11 +267,16 @@ class TextExpander(nn.Module):
         # Get clean embeddings and corrupt
         original_emb = self.token_emb(target_text_ids)
         noise = self._make_noise(original_emb)
-        corrupted = torch.sqrt(alpha_t) * original_emb + torch.sqrt(1 - alpha_t) * noise
+        if self.no_path_a:
+            # No corrupted input — denoiser must rely entirely on conditioning
+            x = noise
+        else:
+            corrupted = torch.sqrt(alpha_t) * original_emb + torch.sqrt(1 - alpha_t) * noise
+            x = corrupted
 
         # Add position embeddings
         pos_ids = torch.arange(T, device=device).unsqueeze(0)
-        x = corrupted + self.pos_emb(pos_ids)
+        x = x + self.pos_emb(pos_ids)
 
         # Build independent context signals for adaLN
         t_emb = self.time_embed(timestep)  # (B, d_model)
@@ -251,6 +319,18 @@ class TextExpander(nn.Module):
         cond = self._pool_conditioning(bottleneck, triple_pad_mask)
         return self.length_head(self._length_input(bottleneck, cond)).squeeze(-1)
 
+    def _denoise_step(self, x, cond, memory, t_batch, pos_emb, B, T):
+        """Run one denoising step. Returns predicted clean embeddings."""
+        t_emb = self.time_embed(t_batch)
+        ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
+        ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
+        ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+
+        x_input = x + pos_emb.unsqueeze(0)
+        for layer in self.layers:
+            x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
+        return self.ln_f(x_input)
+
     @torch.no_grad()
     def generate(
         self,
@@ -258,14 +338,18 @@ class TextExpander(nn.Module):
         triple_pad_mask: torch.Tensor | None = None,
         n_steps: int = 10,
         max_tokens: int | None = None,
+        guidance_scale: float = 0.0,
+        pre_dynamics: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Generate text token IDs via iterative denoising.
+        """Generate text token IDs via iterative denoising with optional CFG.
 
         Args:
             bottleneck: (B, N*3, d_model) conditioning
             triple_pad_mask: (B, N) True where triple is pad
             n_steps: denoising steps
             max_tokens: override text length (else uses length head)
+            guidance_scale: CFG scale (0 = no guidance, 1.5 = recommended)
+            pre_dynamics: (B, N*3, d_model) compressor output for multi-level conditioning
 
         Returns:
             (B, T) generated token IDs
@@ -281,7 +365,13 @@ class TextExpander(nn.Module):
             T = self.length_head(len_input).squeeze(-1).round().long().clamp(1, self.max_text_tokens).max().item()
         else:
             T = max_tokens
-        memory = self.memory_proj(bottleneck)
+        memory = self._build_memory(bottleneck, pre_dynamics)
+
+        # Unconditional versions for CFG
+        use_cfg = guidance_scale > 0
+        if use_cfg:
+            uncond = torch.zeros_like(cond)
+            uncond_memory = torch.zeros_like(memory)
 
         # Start from noise
         x = self._make_noise(torch.zeros(B, T, self.d_model, device=device))
@@ -292,22 +382,19 @@ class TextExpander(nn.Module):
         for i in range(n_steps):
             t_now = schedule[i]
             t_next = schedule[i + 1]
-            alpha_next = cosine_noise_schedule(t_next.unsqueeze(0), alpha_min=self.alpha_min)
-
             t_batch = t_now.expand(B)
-            t_emb = self.time_embed(t_batch)
 
-            ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-            ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-            ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+            pred_cond = self._denoise_step(x, cond, memory, t_batch, pos_emb, B, T)
 
-            x_input = x + pos_emb.unsqueeze(0)
-            for layer in self.layers:
-                x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-            pred_emb = self.ln_f(x_input)
+            if use_cfg:
+                pred_uncond = self._denoise_step(x, uncond, uncond_memory, t_batch, pos_emb, B, T)
+                pred_emb = pred_uncond + (1 + guidance_scale) * (pred_cond - pred_uncond)
+            else:
+                pred_emb = pred_cond
 
             # Re-noise to next level
             if i < n_steps - 1:
+                alpha_next = cosine_noise_schedule(t_next.unsqueeze(0), alpha_min=self.alpha_min)
                 noise = self._make_noise(pred_emb)
                 alpha_n = alpha_next.view(1, 1, 1)
                 x = torch.sqrt(alpha_n) * pred_emb + torch.sqrt(1 - alpha_n) * noise
@@ -316,15 +403,13 @@ class TextExpander(nn.Module):
 
         # Final clean prediction
         t_batch = torch.zeros(B, device=device)
-        t_emb = self.time_embed(t_batch)
-        ctx_cond = cond.unsqueeze(1).expand(B, T, -1)
-        ctx_time = t_emb.unsqueeze(1).expand(B, T, -1)
-        ctx_pos = pos_emb.unsqueeze(0).expand(B, -1, -1)
+        decoded_cond = self._denoise_step(x, cond, memory, t_batch, pos_emb, B, T)
 
-        x_input = x + pos_emb.unsqueeze(0)
-        for layer in self.layers:
-            x_input = layer(x_input, [ctx_cond, ctx_time, ctx_pos], memory)
-        decoded = self.ln_f(x_input)
+        if use_cfg:
+            decoded_uncond = self._denoise_step(x, uncond, uncond_memory, t_batch, pos_emb, B, T)
+            decoded = decoded_uncond + (1 + guidance_scale) * (decoded_cond - decoded_uncond)
+        else:
+            decoded = decoded_cond
 
         return self._nn_decode(decoded)
 

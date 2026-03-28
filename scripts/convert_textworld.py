@@ -114,11 +114,11 @@ def augment_chains(chains: list[dict]) -> list[dict]:
         # Reverse chain (query mode)
         augmented.append({"chain": c["chain"][::-1], "mode": 1})
 
-    # Identity: sample one step per chain
+    # Identity: 3-step (2 dynamics calls) to enforce fixed-point behavior
     for c in chains:
         pick = hash(c["chain"][0]) % len(c["chain"])
         step = c["chain"][pick]
-        augmented.append({"chain": [step, step], "mode": 2})
+        augmented.append({"chain": [step, step, step], "mode": 2})
 
     return augmented
 

@@ -83,9 +83,11 @@ def main():
             continue
 
         steps = paragraphs[:args.max_chain_len]
-        chains.append({"chain": steps, "mode": 0})
-        # Reverse for query mode
-        chains.append({"chain": steps[::-1], "mode": 1})
+        # Continue mode: all prefix sub-chains of length 2+
+        for end in range(2, len(steps) + 1):
+            chains.append({"chain": steps[:end], "mode": 0})
+        # Identity: 1 per article (first paragraph, 3-step)
+        chains.append({"chain": [steps[0], steps[0], steps[0]], "mode": 2})
 
     print(f"\nProcessed: {n_processed}")
     print(f"Chains: {len(chains)}")

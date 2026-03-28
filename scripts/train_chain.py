@@ -27,7 +27,22 @@ from twm.text_dynamics_model import TextDynamicsModel
 from twm.chain_dataset import ChainDataset
 
 
-def compute_chain_loss(model, batch, device):
+def weak_sigreg_loss(embeddings: torch.Tensor) -> torch.Tensor:
+    """Covariance regularization to prevent dimensional collapse.
+
+    Encourages uniform variance across dimensions and zero correlation
+    between dimensions. Applied to compressor output only.
+    """
+    z = embeddings - embeddings.mean(0)
+    cov = (z.T @ z) / (z.shape[0] - 1)
+    variances = cov.diag()
+    var_loss = (variances - variances.mean()).pow(2).mean()
+    off_diag = cov - torch.diag(cov.diag())
+    corr_loss = off_diag.pow(2).mean()
+    return var_loss + corr_loss
+
+
+def compute_chain_loss(model, batch, device, cfg=None):
     """Compute loss over an unrolled chain.
 
     For each step 1..chain_len-1:
@@ -53,6 +68,12 @@ def compute_chain_loss(model, batch, device):
     if isinstance(bottleneck, tuple):
         bottleneck = bottleneck[0]  # drop VAE info if present
 
+    # Weak-SIGReg on compressor output to prevent dimensional collapse
+    lambda_w = cfg.get("sigreg_weight", 0.0) if isinstance(cfg, dict) else 0.0
+    sigreg_total = torch.tensor(0.0, device=device)
+    if lambda_w > 0:
+        sigreg_total = sigreg_total + weak_sigreg_loss(bottleneck.reshape(-1, bottleneck.shape[-1]))
+
     total_loss = torch.tensor(0.0, device=device)
     total_mse = 0.0
     total_tok_acc = 0.0
@@ -66,6 +87,9 @@ def compute_chain_loss(model, batch, device):
     max_chain = chain_len.max().item()
 
     for step in range(1, max_chain):
+        # Save pre-dynamics bottleneck for multi-level conditioning
+        pre_dynamics = bottleneck
+
         # Advance dynamics
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
 
@@ -76,15 +100,15 @@ def compute_chain_loss(model, batch, device):
 
         target_ids = chain_ids[active, step]    # (B', T)
         target_pad = chain_pad[active, step]    # (B', T)
-        active_bn = bottleneck[active]          # (B', N*3, d)
         active_modes = mode_ids[active]         # (B',)
+        active_bn = bottleneck[active]          # (B', N*3, d)
+        active_pre = pre_dynamics[active]       # (B', N*3, d)
 
-        # Expander: predict clean embeddings from bottleneck
+        # Expander: predict clean embeddings from bottleneck + pre-dynamics
         pred_emb, _ = model.forward_expander(
-            active_bn, target_ids, target_pad
+            active_bn, target_ids, target_pad, pre_dynamics=active_pre
         )  # (B', T, d)
 
-        # MSE loss in embedding space
         non_pad = ~target_pad
         if not non_pad.any():
             continue
@@ -93,16 +117,22 @@ def compute_chain_loss(model, batch, device):
         step_mse = F.mse_loss(pred_emb[non_pad], target_clean[non_pad])
         total_loss = total_loss + step_mse
 
-        # Aux CE loss via decode projection
-        if model.text_expander.use_decode_proj:
-            logits = model.text_expander.decode_proj_logits(pred_emb)
-            ce = F.cross_entropy(
-                logits[non_pad] / 0.1, target_ids[non_pad], ignore_index=0
-            )
-            total_loss = total_loss + 0.1 * ce
+        # CE loss at final step only (50K vocab logits are expensive)
+        is_final_for_any = (chain_len[active] == step + 1).any()
+        if model.text_expander.use_decode_proj and is_final_for_any:
+            final_mask = chain_len[active] == step + 1
+            if final_mask.any():
+                f_pred = pred_emb[final_mask]
+                f_tgt = target_ids[final_mask]
+                f_non_pad = ~target_pad[final_mask]
+                if f_non_pad.any():
+                    logits = model.text_expander.decode_proj_logits(f_pred)
+                    ce = F.cross_entropy(
+                        logits[f_non_pad] / 0.1, f_tgt[f_non_pad], ignore_index=0
+                    )
+                    total_loss = total_loss + 0.1 * ce
 
-        # Length loss
-        len_pred = model.forward_length(active_bn)  # (B',)
+        len_pred = model.forward_length(active_bn)
         target_len = chain_lengths[active, step].float()
         total_loss = total_loss + 0.1 * F.mse_loss(len_pred, target_len)
 
@@ -116,7 +146,6 @@ def compute_chain_loss(model, batch, device):
             total_mse += step_mse.item()
             n_steps += 1
 
-            # Per-mode tok_acc
             for m in mode_names:
                 mask = active_modes == m
                 if mask.any():
@@ -132,12 +161,18 @@ def compute_chain_loss(model, batch, device):
     if n_steps > 0:
         total_loss = total_loss / n_steps
 
+    # Add sigreg regularization
+    if lambda_w > 0:
+        total_loss = total_loss + lambda_w * sigreg_total
+
     metrics = {
         "loss": total_loss.item(),
         "mse": total_mse / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
         "steps": n_steps,
     }
+    if lambda_w > 0:
+        metrics["sigreg"] = sigreg_total.item()
 
     for m, name in mode_names.items():
         if mode_tok_n[m] > 0:
@@ -164,7 +199,10 @@ def main():
 
     # Tokenizer
     max_text_tokens = cfg.get("max_text_tokens", 64)
-    if cfg.get("tokenizer_pretrained"):
+    if cfg.get("tokenizer") == "bytes":
+        from twm.byte_tokenizer import ByteTokenizer
+        tokenizer = ByteTokenizer(max_length=max_text_tokens)
+    elif cfg.get("tokenizer_pretrained"):
         tokenizer = DomainBPETokenizer.from_pretrained(
             cfg["tokenizer_pretrained"], max_length=max_text_tokens,
             save_path=out_dir / "tokenizer.json",
@@ -209,6 +247,12 @@ def main():
         dropout=cfg.get("dropout", 0.1),
         alpha_min=cfg.get("alpha_min", 0.01),
         vae=False,
+        bottleneck_dim=cfg.get("bottleneck_dim"),
+        single_step_diffusion=cfg.get("single_step_diffusion", False),
+        cond_dropout=cfg.get("cond_dropout", 0.0),
+        guidance_scale=cfg.get("guidance_scale", 0.0),
+        t_min_train=cfg.get("t_min_train", 0.0),
+        no_path_a=cfg.get("no_path_a", False),
     )
     model.init_embeddings()
     model.to(device)
@@ -220,6 +264,10 @@ def main():
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.get("lr", 3e-4), weight_decay=0.01
     )
+
+    # Mixed precision
+    use_amp = cfg.get("amp", False) and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     epochs = cfg.get("epochs", 200)
     log_every = cfg.get("log_every", 10)
@@ -237,12 +285,15 @@ def main():
         t0 = time.time()
 
         for batch in train_loader:
-            loss, metrics = compute_chain_loss(model, batch, device)
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                loss, metrics = compute_chain_loss(model, batch, device, cfg)
             if loss.requires_grad:
                 optimizer.zero_grad()
-                loss.backward()
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
 
             epoch_loss += metrics["loss"]
             epoch_tok += metrics["tok_acc"]
@@ -276,7 +327,7 @@ def main():
             n_eval = 0
             with torch.no_grad():
                 for batch in test_loader:
-                    _, metrics = compute_chain_loss(model, batch, device)
+                    _, metrics = compute_chain_loss(model, batch, device, cfg)
                     eval_loss += metrics["loss"]
                     eval_tok += metrics["tok_acc"]
                     for k in ("tok_adv", "tok_qry", "tok_id"):
@@ -295,6 +346,104 @@ def main():
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
+
+            # chrF: generate from bottleneck and compare to target (subset)
+            bleu_samples = cfg.get("bleu_samples", 0)
+            if bleu_samples > 0:
+                from sacrebleu.metrics import CHRF
+                chrf_metric = CHRF()
+                refs = []
+                hyps = []
+                bleu_n = 0
+                with torch.no_grad():
+                    for batch in test_loader:
+                        if bleu_n >= bleu_samples:
+                            break
+                        input_ids = batch["input_ids"].to(device)
+                        input_pad = batch["input_pad"].to(device)
+                        chain_ids = batch["chain_ids"].to(device)
+                        chain_pad = batch["chain_pad"].to(device)
+                        chain_len_b = batch["chain_len"].to(device)
+                        mode_ids_b = batch["mode_id"].to(device)
+
+                        bn = model.compress(input_ids, input_pad)
+                        if isinstance(bn, tuple):
+                            bn = bn[0]
+
+                        # Unroll to final step, track pre-dynamics
+                        max_c = chain_len_b.max().item()
+                        pre_bn = bn
+                        for s in range(1, max_c):
+                            pre_bn = bn
+                            bn = model.forward_dynamics(bn, mode_ids_b)
+
+                        # Generate in small batches to avoid memory spikes
+                        gen_bs = 8
+                        for gi in range(0, len(input_ids), gen_bs):
+                            if bleu_n >= bleu_samples:
+                                break
+                            ge = min(gi + gen_bs, len(input_ids))
+                            gen_ids = model.generate(bn[gi:ge], n_steps=10, pre_dynamics=pre_bn[gi:ge])
+                            for j in range(gen_ids.shape[0]):
+                                if bleu_n >= bleu_samples:
+                                    break
+                                idx = gi + j
+                                last = chain_len_b[idx].item() - 1
+                                tgt_ids = chain_ids[idx, last]
+                                tgt_pad = chain_pad[idx, last]
+                                ref = tokenizer.decode(tgt_ids[~tgt_pad].tolist())
+                                hyp = tokenizer.decode(gen_ids[j].tolist())
+                                refs.append(ref)
+                                hyps.append(hyp)
+                                bleu_n += 1
+
+                chrf_score = chrf_metric.corpus_score(hyps, [refs]).score
+                print(f"  chrF: {chrf_score:.1f} ({bleu_n} samples)")
+                log_file.write(f"  chrF: {chrf_score:.1f}\n")
+                log_file.flush()
+
+            # PCA snapshot
+            if cfg.get("pca_snapshots", False):
+                import numpy as np
+                from sklearn.decomposition import PCA
+                import matplotlib
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+
+                snap_pts = []
+                snap_modes = []
+                snap_n = 0
+                with torch.no_grad():
+                    for batch in test_loader:
+                        if snap_n >= 200:
+                            break
+                        ids_b = batch["input_ids"].to(device)
+                        pad_b = batch["input_pad"].to(device)
+                        mode_b = batch["mode_id"].to(device)
+                        bn = model.compress(ids_b, pad_b)
+                        if isinstance(bn, tuple):
+                            bn = bn[0]
+                        snap_pts.append(bn.mean(dim=1).cpu().numpy())
+                        snap_modes.append(mode_b.cpu().numpy())
+                        snap_n += len(ids_b)
+
+                pts = np.concatenate(snap_pts)[:200]
+                mds = np.concatenate(snap_modes)[:200]
+                pca = PCA(n_components=2).fit(pts)
+                pts_2d = pca.transform(pts)
+
+                fig, ax = plt.subplots(figsize=(6, 5))
+                colors = {0: "#e74c3c", 1: "#3498db", 2: "#2ecc71"}
+                for m, name in [(0, "adv"), (1, "qry"), (2, "id")]:
+                    mask = mds == m
+                    if mask.any():
+                        ax.scatter(pts_2d[mask, 0], pts_2d[mask, 1], c=colors[m], s=8, alpha=0.5, label=name)
+                ax.legend()
+                ax.set_title(f"ep {epoch} | tok {eval_tok:.3f}")
+                frames_dir = out_dir / "frames"
+                frames_dir.mkdir(exist_ok=True)
+                fig.savefig(frames_dir / f"pca_{epoch:04d}.png", dpi=100, bbox_inches="tight")
+                plt.close(fig)
 
             if eval_tok > best_tok_acc:
                 best_tok_acc = eval_tok

@@ -56,6 +56,12 @@ class TextDynamicsModel(nn.Module):
         compressor_denoise_layers: int | None = None,
         compressor_random_k: bool = False,
         compressor_k_min: int = 1,
+        bottleneck_dim: int | None = None,
+        single_step_diffusion: bool = False,
+        cond_dropout: float = 0.0,
+        guidance_scale: float = 0.0,
+        t_min_train: float = 0.0,
+        no_path_a: bool = False,
     ):
         super().__init__()
         self.config = config
@@ -67,10 +73,12 @@ class TextDynamicsModel(nn.Module):
         self._compressor_type = compressor_type
         self._compressor_denoise_steps = compressor_denoise_steps
         d = config.d_model
+        bn_d = bottleneck_dim or d
+        self._bottleneck_dim = bn_d
         dyn_layers = dynamics_layers if dynamics_layers is not None else config.n_layers
         self._dynamics_layers = dyn_layers
 
-        # Shared frozen embedding table
+        # Shared frozen embedding table (at IO dimension)
         self.shared_token_emb = nn.Embedding(domain_tokenizer.vocab_size, d)
         self.shared_token_emb.weight.requires_grad = False
 
@@ -99,31 +107,24 @@ class TextDynamicsModel(nn.Module):
                 max_text_tokens=max_text_tokens,
                 dropout=dropout,
                 vae=vae,
+                bottleneck_dim=bn_d,
             )
 
-        # Dynamics core — zero_init so delta starts at 0 with input residual
+        # Dynamics core at bottleneck dimension
+        dyn_heads = max(1, bn_d // 16)  # scale heads with dimension
         self.dynamics = TransformerDynamics(
-            d_model=d,
-            n_heads=config.n_heads,
+            d_model=bn_d,
+            n_heads=dyn_heads,
             n_layers=dyn_layers,
-            d_ff=config.d_ff,
+            d_ff=bn_d * 4,
             dropout=dropout,
             zero_init=True,
         )
 
-        # Mode triples: learned vectors in W-space, one triple per mode.
-        # Each triple is 3 vectors (E/A/V slots). The content is whatever
-        # the model learns — we label them for our benefit, the dynamics
-        # core just sees triples.
-        self.mode_emb = nn.Embedding(num_modes * 3, d)
-
-        # Role encoding for mode triples — same E/A/V structure as data
-        self.mode_role_emb = nn.Embedding(3, d)
-
-        # Role centroids for bottleneck structure prior.
-        # Entity/attribute/value slots are pulled toward learned centroids,
-        # imposing role-conditioned geometry on the bottleneck space.
-        self.role_centroids = nn.Embedding(3, d)
+        # Mode triples at bottleneck dimension
+        self.mode_emb = nn.Embedding(num_modes * 3, bn_d)
+        self.mode_role_emb = nn.Embedding(3, bn_d)
+        self.role_centroids = nn.Embedding(3, bn_d)
 
         self.text_expander = TextExpander(
             token_emb=self.shared_token_emb,
@@ -135,7 +136,13 @@ class TextDynamicsModel(nn.Module):
             dropout=dropout,
             alpha_min=alpha_min,
             use_decode_proj=True,
+            bottleneck_dim=bn_d,
+            single_step=single_step_diffusion,
+            cond_dropout=cond_dropout,
         )
+        self.text_expander.t_min_train = t_min_train
+        self.text_expander.no_path_a = no_path_a
+        self._guidance_scale = guidance_scale
 
     def init_embeddings(self):
         with torch.no_grad():
@@ -207,15 +214,16 @@ class TextDynamicsModel(nn.Module):
         # Input residual: core learns the delta, not the full output
         return bottleneck + delta
 
-    def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None):
-        return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep)
+    def forward_expander(self, bottleneck, target_text_ids, target_text_pad_mask, timestep=None, pre_dynamics=None):
+        return self.text_expander(bottleneck, target_text_ids, target_text_pad_mask, timestep=timestep, pre_dynamics=pre_dynamics)
 
     def forward_length(self, bottleneck):
         return self.text_expander.forward_length(bottleneck)
 
     @torch.no_grad()
-    def generate(self, bottleneck, n_steps=10):
-        return self.text_expander.generate(bottleneck, n_steps=n_steps)
+    def generate(self, bottleneck, n_steps=10, guidance_scale=None, pre_dynamics=None):
+        g = guidance_scale if guidance_scale is not None else self._guidance_scale
+        return self.text_expander.generate(bottleneck, n_steps=n_steps, guidance_scale=g, pre_dynamics=pre_dynamics)
 
     def trainable_param_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -236,6 +244,10 @@ class TextDynamicsModel(nn.Module):
             "dynamics_layers": self._dynamics_layers,
             "max_text_tokens": self.max_text_tokens,
             "vae": self._vae,
+            "bottleneck_dim": self._bottleneck_dim,
+            "single_step_diffusion": self.text_expander.single_step,
+            "cond_dropout": self.text_expander.cond_dropout,
+            "guidance_scale": self._guidance_scale,
             "tokenizer_path": tokenizer_path or str(getattr(self, '_tokenizer_path', '')),
         }
         with open(run_dir / "model_meta.json", "w") as f:
@@ -260,6 +272,10 @@ class TextDynamicsModel(nn.Module):
             dynamics_layers=meta["dynamics_layers"],
             max_text_tokens=meta["max_text_tokens"],
             vae=meta.get("vae", False),
+            bottleneck_dim=meta.get("bottleneck_dim"),
+            single_step_diffusion=meta.get("single_step_diffusion", False),
+            cond_dropout=meta.get("cond_dropout", 0.0),
+            guidance_scale=meta.get("guidance_scale", 0.0),
         )
         state = torch.load(run_dir / "weights.pt", map_location=device, weights_only=True)
         model.load_state_dict(state)
