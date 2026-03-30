@@ -22,7 +22,7 @@
     "dropout": 0.1,
     "alpha_min": 0.01,
     "batch_size": 64,
-    "lr": 3e-4,
+    "lr": 1e-4,
     "epochs": 40,
     "log_every": 2,
     "eval_every": 2,
