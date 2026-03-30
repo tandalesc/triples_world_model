@@ -246,11 +246,12 @@ def main():
 
     device = torch.device(cfg.get("device", "cuda"))
 
-    if "tokenizer_pretrained" in cfg:
+    if cfg.get("tokenizer") == "bytes":
+        from twm.byte_tokenizer import ByteTokenizer
+        tokenizer = ByteTokenizer(max_length=cfg.get("max_text_tokens", 128))
+    elif "tokenizer_pretrained" in cfg:
         tokenizer = DomainBPETokenizer.from_pretrained(
             cfg["tokenizer_pretrained"], max_length=cfg.get("max_text_tokens", 128))
-    elif cfg.get("tokenizer") == "bytes":
-        tokenizer = DomainBPETokenizer.bytes_tokenizer(max_length=cfg.get("max_text_tokens", 128))
     else:
         tokenizer = DomainBPETokenizer.load(cfg["tokenizer"], max_length=cfg.get("max_text_tokens", 128))
 
