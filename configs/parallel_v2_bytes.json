@@ -6,7 +6,7 @@
     "d_model": 128,
     "n_heads": 8,
     "d_ff": 512,
-    "max_triples": 16,
+    "max_triples": 32,
     "dynamics_layers": 2,
     "compressor_layers": 3,
     "decoder_layers": 3,
