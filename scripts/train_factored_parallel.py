@@ -148,6 +148,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     consist_total = 0.0
     decode_total = 0.0
     total_tok_acc = 0.0
+    total_adj_acc = 0.0
     n_steps = 0
 
     mode_names = {0: "adv", 1: "qry", 2: "id"}
@@ -199,9 +200,19 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         # Metrics
         with torch.no_grad():
             if non_pad.any():
-                preds = logits[non_pad].argmax(-1)
+                all_preds = logits.argmax(-1)  # (B', T)
+                preds = all_preds[non_pad]
                 tok_acc = (preds == target_ids[non_pad]).float().mean().item()
                 total_tok_acc += tok_acc
+
+                # Adjacent-byte accuracy: for correct position i, is i+1 also correct?
+                correct = (all_preds == target_ids) & ~target_pad  # (B', T)
+                adj_pairs = correct[:, :-1] & correct[:, 1:] & ~target_pad[:, :-1] & ~target_pad[:, 1:]
+                eligible = correct[:, :-1] & ~target_pad[:, 1:]
+                if eligible.any():
+                    total_adj_acc += adj_pairs.sum().float().item() / eligible.sum().float().item()
+                else:
+                    total_adj_acc += 0.0
 
                 for m in mode_names:
                     mask = active_modes == m
@@ -223,6 +234,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         "consist": consist_total / max(n_steps, 1),
         "decode": decode_total / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
+        "adj_acc": total_adj_acc / max(n_steps, 1),
     }
     for m, name in mode_names.items():
         if mode_tok_n[m] > 0:
@@ -303,7 +315,7 @@ def main():
 
     for epoch in range(1, epochs + 1):
         model.train()
-        epoch_loss = epoch_tok = epoch_consist = epoch_decode = 0.0
+        epoch_loss = epoch_tok = epoch_consist = epoch_decode = epoch_adj = 0.0
         epoch_mode = {}
         n_batches = 0
 
@@ -323,6 +335,7 @@ def main():
             epoch_tok += metrics["tok_acc"]
             epoch_consist += metrics.get("consist", 0)
             epoch_decode += metrics.get("decode", 0)
+            epoch_adj += metrics.get("adj_acc", 0)
             for k in ("tok_adv", "tok_qry", "tok_id"):
                 if k in metrics:
                     epoch_mode[k] = epoch_mode.get(k, 0) + metrics[k]
@@ -333,6 +346,7 @@ def main():
         epoch_tok /= n_batches
         epoch_consist /= n_batches
         epoch_decode /= n_batches
+        epoch_adj /= n_batches
 
         if epoch % log_every == 0 or epoch == 1:
             mode_str = ""
@@ -341,14 +355,14 @@ def main():
                 if n > 0:
                     mode_str += f" | {k.split('_')[1]}: {epoch_mode[k]/n:.3f}"
             msg = (f"ep {epoch:4d} | loss {epoch_loss:.4f} | consist {epoch_consist:.4f} "
-                   f"| decode {epoch_decode:.4f} | tok {epoch_tok:.3f}{mode_str}")
+                   f"| decode {epoch_decode:.4f} | tok {epoch_tok:.3f} | adj {epoch_adj:.3f}{mode_str}")
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
 
         if epoch % eval_every == 0:
             model.eval()
-            eval_loss = eval_tok = eval_consist = 0.0
+            eval_loss = eval_tok = eval_consist = eval_adj = 0.0
             eval_mode = {}
             n_eval = 0
             with torch.no_grad():
@@ -357,6 +371,7 @@ def main():
                     eval_loss += metrics["loss"]
                     eval_tok += metrics["tok_acc"]
                     eval_consist += metrics.get("consist", 0)
+                    eval_adj += metrics.get("adj_acc", 0)
                     for k in ("tok_adv", "tok_qry", "tok_id"):
                         if k in metrics:
                             eval_mode[k] = eval_mode.get(k, 0) + metrics[k]
@@ -366,12 +381,13 @@ def main():
             eval_loss /= n_eval
             eval_tok /= n_eval
             eval_consist /= n_eval
+            eval_adj /= n_eval
             eval_mode_str = ""
             for k in ("tok_adv", "tok_qry", "tok_id"):
                 n = eval_mode.get(k + "_n", 0)
                 if n > 0:
                     eval_mode_str += f" | {k.split('_')[1]}: {eval_mode[k]/n:.3f}"
-            msg = f"  eval | loss {eval_loss:.4f} | consist {eval_consist:.4f} | tok {eval_tok:.3f}{eval_mode_str}"
+            msg = f"  eval | loss {eval_loss:.4f} | consist {eval_consist:.4f} | tok {eval_tok:.3f} | adj {eval_adj:.3f}{eval_mode_str}"
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
