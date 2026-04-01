@@ -1,0 +1,22 @@
+{
+    "train_data": "data/tw_identity_train.jsonl",
+    "test_data": "data/tw_identity_test.jsonl",
+    "tokenizer_pretrained": "gpt2",
+    "out_dir": "results/ar_autoenc_tw",
+    "d_model": 128,
+    "n_heads": 4,
+    "d_ff": 512,
+    "max_triples": 16,
+    "compressor_layers": 3,
+    "decoder_layers": 2,
+    "max_text_tokens": 128,
+    "warmup_steps": 500,
+    "gen_samples": 200,
+    "dropout": 0.1,
+    "batch_size": 64,
+    "lr": 3e-4,
+    "epochs": 40,
+    "log_every": 2,
+    "eval_every": 5,
+    "device": "cuda"
+}
