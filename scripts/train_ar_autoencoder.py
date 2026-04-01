@@ -175,8 +175,13 @@ def main():
             optimizer.zero_grad()
             with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
                 logits = model(input_ids, input_pad, target_ids, target_pad)
-                non_pad = ~target_pad
-                loss = F.cross_entropy(logits[non_pad], target_ids[non_pad], ignore_index=0)
+                # Include first pad position as EOS target so model learns to stop
+                eos_mask = ~target_pad.clone()
+                for b in range(target_pad.shape[0]):
+                    pad_positions = target_pad[b].nonzero(as_tuple=True)[0]
+                    if len(pad_positions) > 0:
+                        eos_mask[b, pad_positions[0]] = True
+                loss = F.cross_entropy(logits[eos_mask], target_ids[eos_mask])
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -186,6 +191,7 @@ def main():
             scheduler.step()
 
             with torch.no_grad():
+                non_pad = ~target_pad
                 preds = logits[non_pad].argmax(-1)
                 tok_acc = (preds == target_ids[non_pad]).float().mean().item()
 

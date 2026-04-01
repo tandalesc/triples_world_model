@@ -191,9 +191,17 @@ class ARDecoder(nn.Module):
 
             generated.append(next_id.squeeze(-1))  # (B,)
 
-            # Stop if all sequences have hit pad
+            # Stop if all sequences have hit pad/EOS
             if (next_id.squeeze(-1) == self.pad_id).all():
                 break
+
+            # Stop on repetition: if last 4 tokens repeat a 2-token pattern, stop
+            if len(generated) >= 6:
+                last = torch.stack(generated[-6:], dim=1)  # (B, 6)
+                pair = last[:, -2:]  # last 2 tokens
+                repeats = (last[:, 0:2] == pair).all(-1) & (last[:, 2:4] == pair).all(-1)
+                if repeats.all():
+                    break
 
             # Append token embedding for next step
             next_emb = self.token_emb(next_id)  # (B, 1, d)
