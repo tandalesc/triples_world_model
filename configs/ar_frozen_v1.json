@@ -1,0 +1,18 @@
+{
+    "frozen_model_dir": "results/factored_v5",
+    "train_data": "data/mixed_v16_train.jsonl",
+    "test_data": "data/mixed_v16_test.jsonl",
+    "out_dir": "results/ar_frozen_v1",
+    "decoder_layers": 2,
+    "n_heads": 4,
+    "d_ff": 512,
+    "warmup_steps": 1000,
+    "gen_samples": 200,
+    "dropout": 0.1,
+    "batch_size": 64,
+    "lr": 3e-4,
+    "epochs": 40,
+    "log_every": 2,
+    "eval_every": 5,
+    "device": "cuda"
+}
