@@ -151,12 +151,13 @@ def compute_loss(model, target_compressor, batch, device, cfg, epoch):
     eh = model.entity_head
     lambda_consist = cfg.get("consistency_weight", 1.0)
 
-    # Anneal entity weight: start high, decay linearly
-    total_epochs = cfg.get("epochs", 40)
-    ew_start = cfg.get("entity_weight_start", 5.0)
-    ew_end = cfg.get("entity_weight_end", 0.5)
-    progress = min(epoch / total_epochs, 1.0)
-    lambda_entity = ew_start + (ew_end - ew_start) * progress
+    # Step schedule for entity weight: high early to force latent reorganization
+    if epoch <= 15:
+        lambda_entity = 5.0
+    elif epoch <= 30:
+        lambda_entity = 2.0
+    else:
+        lambda_entity = 1.0
 
     bottleneck = model.compress(input_ids, input_pad)
     if isinstance(bottleneck, tuple):
@@ -262,7 +263,7 @@ def compute_loss(model, target_compressor, batch, device, cfg, epoch):
         "action_acc": entity_metrics["action_acc"] / en,
         "object_acc": entity_metrics["object_acc"] / en,
         "place_acc": entity_metrics["place_acc"] / en,
-        "entity_weight": lambda_entity,
+        "ew": lambda_entity,
     }
     for m, name in mode_names.items():
         if mode_tok_n[m] > 0:
@@ -408,7 +409,7 @@ def main():
     ema_decay = cfg.get("ema_decay", 0.999)
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model: {sum(p.numel() for p in model.parameters()):,} params ({trainable:,} trainable)")
-    print(f"Entity weight: {cfg.get('entity_weight_start', 5.0)} → {cfg.get('entity_weight_end', 0.5)}")
+    print(f"Entity weight schedule: 5.0 (ep1-15) → 2.0 (ep16-30) → 1.0 (ep31-40)")
 
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -435,7 +436,7 @@ def main():
     for epoch in range(1, epochs + 1):
         model.train()
         ep = {"loss": 0, "tok_acc": 0, "consist": 0, "entity": 0,
-              "action_acc": 0, "object_acc": 0, "place_acc": 0, "entity_weight": 0}
+              "action_acc": 0, "object_acc": 0, "place_acc": 0, "ew": 0}
         ep_mode = {}
         n_batches = 0
 
@@ -471,7 +472,7 @@ def main():
                     mode_str += f" | {k.split('_')[1]}: {ep_mode[k]/n:.3f}"
             msg = (f"ep {epoch:4d} | loss {ep['loss']:.4f} | consist {ep['consist']:.4f} "
                    f"| tok {ep['tok_acc']:.3f} | act {ep['action_acc']:.3f} obj {ep['object_acc']:.3f} "
-                   f"plc {ep['place_acc']:.3f} | ew {ep['entity_weight']:.2f}{mode_str} | lr {lr_now:.2e}")
+                   f"plc {ep['place_acc']:.3f} | ew {ep['ew']:.1f}{mode_str} | lr {lr_now:.2e}")
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
