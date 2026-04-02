@@ -54,7 +54,8 @@ class ARDecoder(nn.Module):
 
         # Positional encoding for OUTPUT token positions only.
         # NOT applied to latent memory — intentional for set invariance.
-        self.pos_emb = nn.Embedding(max_text_tokens + 1, d_model)  # +1 for BOS
+        # +1 for BOS, +16 headroom for entity prefix tokens
+        self.pos_emb = nn.Embedding(max_text_tokens + 17, d_model)
 
         # Project latent to memory for cross-attention.
         # No positional encoding added — cross-attention retrieves by content only.
