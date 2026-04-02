@@ -99,6 +99,7 @@ class ARDecoder(nn.Module):
         target_ids: torch.Tensor,
         target_pad_mask: torch.Tensor,
         pre_dynamics: torch.Tensor | None = None,
+        entity_prefix: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Teacher-forced forward pass.
 
@@ -107,9 +108,11 @@ class ARDecoder(nn.Module):
             target_ids: (B, T) target token IDs
             target_pad_mask: (B, T) True where padding
             pre_dynamics: (B, N*3, d) optional pre-dynamics for multi-level
+            entity_prefix: (B, K) discrete entity token IDs for prefix conditioning
 
         Returns:
-            logits: (B, T, vocab_size)
+            logits: (B, T, vocab_size) — logits for target positions only
+                    (entity prefix positions are not predicted)
         """
         B, T = target_ids.shape
         device = target_ids.device
@@ -117,27 +120,44 @@ class ARDecoder(nn.Module):
         # Memory from latent — no positional encoding (set invariance)
         memory = self._build_memory(bottleneck, pre_dynamics)
 
-        # Decoder input: BOS + target[:-1] (shifted right)
+        # Build decoder input: [entity_prefix] + BOS + target[:-1]
         bos = self.bos_emb.unsqueeze(0).unsqueeze(0).expand(B, 1, -1)  # (B, 1, d)
         tok_emb = self.token_emb(target_ids[:, :-1])  # (B, T-1, d)
-        decoder_input = torch.cat([bos, tok_emb], dim=1)  # (B, T, d)
 
-        # Add positional encoding to decoder tokens ONLY
-        pos = self.pos_emb(torch.arange(T, device=device))
+        if entity_prefix is not None:
+            K = entity_prefix.shape[1]
+            prefix_emb = self.token_emb(entity_prefix)  # (B, K, d)
+            decoder_input = torch.cat([prefix_emb, bos, tok_emb], dim=1)  # (B, K+T, d)
+            total_len = K + T
+        else:
+            K = 0
+            decoder_input = torch.cat([bos, tok_emb], dim=1)  # (B, T, d)
+            total_len = T
+
+        # Add positional encoding to ALL decoder positions
+        pos = self.pos_emb(torch.arange(total_len, device=device))
         decoder_input = decoder_input + pos
 
-        # Causal mask for autoregressive decoding
-        causal_mask = self._causal_mask(T, device)
+        # Causal mask
+        causal_mask = self._causal_mask(total_len, device)
 
-        # Decode with cross-attention to latent memory
+        # Pad mask: entity prefix is never padded
+        if entity_prefix is not None:
+            prefix_pad = torch.zeros(B, K, dtype=torch.bool, device=device)
+            full_pad = torch.cat([prefix_pad, target_pad_mask], dim=1)
+        else:
+            full_pad = target_pad_mask
+
+        # Decode
         out = self.decoder(
             tgt=decoder_input,
             memory=memory,
             tgt_mask=causal_mask,
-            tgt_key_padding_mask=target_pad_mask,
+            tgt_key_padding_mask=full_pad,
         )
 
-        return self.output_proj(self.ln_f(out))
+        # Return logits only for the target positions (skip prefix)
+        return self.output_proj(self.ln_f(out[:, K:]))
 
     @torch.no_grad()
     def generate(
@@ -146,17 +166,19 @@ class ARDecoder(nn.Module):
         max_tokens: int | None = None,
         pre_dynamics: torch.Tensor | None = None,
         temperature: float = 0.0,
+        entity_prefix: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Autoregressive greedy generation.
+        """Autoregressive greedy generation with optional entity prefix.
 
         Args:
             bottleneck: (B, N*3, d) frozen latent
             max_tokens: max output length
             pre_dynamics: (B, N*3, d) optional
             temperature: 0 = greedy (default)
+            entity_prefix: (B, K) discrete entity token IDs for conditioning
 
         Returns:
-            (B, T) generated token IDs
+            (B, T) generated token IDs (excluding prefix)
         """
         B = bottleneck.shape[0]
         device = bottleneck.device
@@ -164,8 +186,13 @@ class ARDecoder(nn.Module):
 
         memory = self._build_memory(bottleneck, pre_dynamics)
 
-        # Start with BOS
-        current_emb = self.bos_emb.unsqueeze(0).unsqueeze(0).expand(B, 1, -1)
+        # Start with [entity_prefix] + BOS
+        bos = self.bos_emb.unsqueeze(0).unsqueeze(0).expand(B, 1, -1)
+        if entity_prefix is not None:
+            prefix_emb = self.token_emb(entity_prefix)  # (B, K, d)
+            current_emb = torch.cat([prefix_emb, bos], dim=1)  # (B, K+1, d)
+        else:
+            current_emb = bos
         generated = []
 
         for t in range(T):
