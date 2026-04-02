@@ -151,13 +151,16 @@ def compute_loss(model, target_compressor, batch, device, cfg, epoch):
     eh = model.entity_head
     lambda_consist = cfg.get("consistency_weight", 1.0)
 
-    # Step schedule for entity weight: high early to force latent reorganization
-    if epoch <= 15:
-        lambda_entity = 5.0
+    # Entity weight schedule (configurable, 0 disables entity loss)
+    ew_start = cfg.get("entity_weight_start", 5.0)
+    if ew_start == 0:
+        lambda_entity = 0.0
+    elif epoch <= 15:
+        lambda_entity = ew_start
     elif epoch <= 30:
-        lambda_entity = 2.0
+        lambda_entity = max(ew_start * 0.4, cfg.get("entity_weight_end", 1.0))
     else:
-        lambda_entity = 1.0
+        lambda_entity = cfg.get("entity_weight_end", 1.0)
 
     bottleneck = model.compress(input_ids, input_pad)
     if isinstance(bottleneck, tuple):
