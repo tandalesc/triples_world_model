@@ -364,10 +364,15 @@ def main():
         json.dump(cfg, f, indent=2)
 
     device = torch.device(cfg.get("device", "cuda"))
-    tokenizer = DomainBPETokenizer.from_pretrained(
-        cfg.get("tokenizer_pretrained", "gpt2"),
-        max_length=cfg.get("max_text_tokens", 128),
-    )
+    if cfg.get("tokenizer") == "bytes":
+        from twm.byte_tokenizer import ByteTokenizer
+        tokenizer = ByteTokenizer(max_length=cfg.get("max_text_tokens", 512))
+    elif "tokenizer_pretrained" in cfg:
+        tokenizer = DomainBPETokenizer.from_pretrained(
+            cfg["tokenizer_pretrained"], max_length=cfg.get("max_text_tokens", 128))
+    else:
+        tokenizer = DomainBPETokenizer.load(
+            cfg["tokenizer"], max_length=cfg.get("max_text_tokens", 128))
 
     max_text_tokens = cfg.get("max_text_tokens", 128)
     train_ds = ChainDataset(cfg["train_data"], tokenizer, max_text_tokens=max_text_tokens)
