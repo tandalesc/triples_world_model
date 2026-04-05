@@ -223,12 +223,21 @@ class ARDecoder(nn.Module):
             if (next_id.squeeze(-1) == self.pad_id).all():
                 break
 
-            # Stop on repetition: if last 4 tokens repeat a 2-token pattern, stop
-            if len(generated) >= 6:
-                last = torch.stack(generated[-6:], dim=1)  # (B, 6)
-                pair = last[:, -2:]  # last 2 tokens
-                repeats = (last[:, 0:2] == pair).all(-1) & (last[:, 2:4] == pair).all(-1)
-                if repeats.all():
+            # Stop on repetition: check for repeating patterns of various lengths
+            if len(generated) >= 10:
+                last = torch.stack(generated, dim=1)  # (B, t+1)
+                stopped = True
+                for plen in [2, 3, 5, 8]:
+                    if last.shape[1] >= plen * 3:
+                        tail = last[:, -plen * 3:]
+                        p1 = tail[:, :plen]
+                        p2 = tail[:, plen:plen*2]
+                        p3 = tail[:, plen*2:]
+                        if (p1 == p2).all(-1).all() and (p2 == p3).all(-1).all():
+                            break
+                else:
+                    stopped = False
+                if stopped:
                     break
 
             # Append token embedding for next step
