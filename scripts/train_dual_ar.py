@@ -76,6 +76,16 @@ class DualARModel(nn.Module):
             dense_dropout=dense_dropout,
         )
 
+        # Dense projection: dynamics bottleneck → compressor-space
+        # Re-expands the sparse prediction into entity-grounded representation
+        # Trained to match compressor(target_text) via MSE
+        self.dense_proj = nn.Sequential(
+            nn.Linear(bn_d, bn_d),
+            nn.GELU(),
+            nn.Linear(bn_d, bn_d),
+            nn.LayerNorm(bn_d),
+        )
+
     def init_embeddings(self):
         with torch.no_grad():
             nn.init.normal_(self.shared_token_emb.weight, std=0.02)
@@ -108,16 +118,17 @@ def compute_loss(model, target_compressor, batch, device, cfg):
 
     B, C, T = chain_ids.shape
     lambda_consist = cfg.get("consistency_weight", 1.0)
+    lambda_dense = cfg.get("dense_proj_weight", 0.5)
 
-    # Compress input — this is the DENSE channel source
+    # Compress input
     compressor_out = model.compress(input_ids, input_pad)
     if isinstance(compressor_out, tuple):
         compressor_out = compressor_out[0]
 
-    bottleneck = compressor_out  # start of dynamics chain
+    bottleneck = compressor_out
 
     total_loss = torch.tensor(0.0, device=device)
-    consist_total = 0.0
+    consist_total = dense_proj_total = 0.0
     total_tok_acc = 0.0
     n_steps = 0
 
@@ -128,11 +139,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     max_chain = chain_len.max().item()
 
     for step in range(1, max_chain):
-        # Dense channel: compressor output of PREVIOUS step's input
-        # (for step 1, this is the original input compressor output)
-        dense_source = bottleneck  # pre-dynamics = compressor of current state
-
-        # Sparse channel: dynamics output
+        # Dynamics: sparse channel
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
 
         active = chain_len > step
@@ -142,10 +149,13 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         target_ids = chain_ids[active, step]
         target_pad = chain_pad[active, step]
         active_modes = mode_ids[active]
-        active_dynamics = bottleneck[active]   # sparse
-        active_dense = dense_source[active]     # dense
+        active_dynamics = bottleneck[active]
 
-        # Consistency loss
+        # Dense channel: project dynamics output → compressor-space
+        # This is the PREDICTED next-state in dense representation
+        active_dense = model.dense_proj(active_dynamics)
+
+        # Consistency loss (sparse)
         with torch.no_grad():
             target_bn = target_compressor(target_ids, target_pad, model.config.max_triples)
             if isinstance(target_bn, tuple):
@@ -156,6 +166,11 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         consist_loss = (1 - F.cosine_similarity(pred_flat, tgt_flat, dim=-1)).mean()
         total_loss = total_loss + lambda_consist * consist_loss
         consist_total += consist_loss.item()
+
+        # Dense projection loss: predicted dense should match target's compressor output
+        dense_proj_loss = F.mse_loss(active_dense, target_bn.detach())
+        total_loss = total_loss + lambda_dense * dense_proj_loss
+        dense_proj_total += dense_proj_loss.item()
 
         # Dual-memory AR decode
         logits = model.decoder(
@@ -200,6 +215,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     metrics = {
         "loss": total_loss.item(),
         "consist": consist_total / max(n_steps, 1),
+        "dense_mse": dense_proj_total / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
     }
     for m, name in mode_names.items():
@@ -233,11 +249,12 @@ def generation_eval(model, test_loader, device, tok, n_samples=200):
                 compressor_out = compressor_out[0]
 
             bn = compressor_out
-            dense = compressor_out
             max_c = chain_len_b.max().item()
             for s in range(1, max_c):
-                dense = bn
                 bn = model.forward_dynamics(bn, mode_ids_b)
+
+            # Dense channel: project dynamics output → compressor-space
+            dense_pred = model.dense_proj(bn)
 
             for i in range(len(input_ids)):
                 if n >= n_samples:
@@ -249,7 +266,7 @@ def generation_eval(model, test_loader, device, tok, n_samples=200):
 
                 gen_ids = model.decoder.generate(
                     dynamics_out=bn[i:i+1],
-                    compressor_out=dense[i:i+1],
+                    compressor_out=dense_pred[i:i+1],
                     max_tokens=model.max_text_tokens,
                 )
 
@@ -366,7 +383,7 @@ def main():
 
     for epoch in range(1, epochs + 1):
         model.train()
-        ep = {"loss": 0, "consist": 0, "tok_acc": 0}
+        ep = {"loss": 0, "consist": 0, "dense_mse": 0, "tok_acc": 0}
         ep_mode = {}
         n_batches = 0
 
@@ -401,7 +418,7 @@ def main():
                 if n > 0:
                     mode_str += f" | {k.split('_')[1]}: {ep_mode[k]/n:.3f}"
             msg = (f"ep {epoch:4d} | loss {ep['loss']:.4f} | consist {ep['consist']:.4f} "
-                   f"| tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
+                   f"| dense {ep['dense_mse']:.4f} | tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
