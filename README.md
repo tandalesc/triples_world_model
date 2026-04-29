@@ -27,15 +27,15 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 
-# Single-turn training (config-driven)
-uv run python scripts/train.py configs/example_recipe.json
+# Small config-driven smoke run
+uv run python scripts/train.py configs/test_snapshot.json
 
-# Multi-turn chain training (GLUCOSE causal chains)
+# Multi-turn chain training (GLUCOSE causal chains; historical Sprint 6 config)
 uv run python scripts/convert_glucose.py --annotation general --augment
-uv run python scripts/train_chain.py configs/glucose_chain_v2.json
+uv run python scripts/train_chain.py configs/archive/glucose_chain_v2.json
 ```
 
-See [`configs/README.md`](configs/README.md) for training recipes and curriculum design.
+See [`configs/README.md`](configs/README.md) for training recipes and curriculum design. Larger TextWorld and open-vocab configs expect the remote GPU checkout described in [`AGENTS.md`](AGENTS.md).
 
 ## Results
 

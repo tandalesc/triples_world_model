@@ -4,7 +4,7 @@
 
 A minimal world model that learns state dynamics over structured (entity, attribute, value) triples using a vanilla transformer. The core claim: a small transformer over decomposed triple tokens can learn compositional state transformations that generalize to novel entity-state combinations never seen in training — and it needs cross-position attention to do it.
 
-Compositional generalization is confirmed. The current focus is extending to open-vocabulary values via a compressor/expander architecture.
+Compositional generalization is confirmed. Current work centers on open-vocabulary chain dynamics: compressor/dynamics/decoder variants, multi-turn unrolling, and decoder experiments such as AR, dual-memory AR, flow matching, and VQ.
 
 ## Architecture
 
@@ -34,16 +34,18 @@ The dynamics core sees the same shaped input either way: `(B, max_triples × 3, 
 |------|-----------|------|
 | **Dynamics** | Transformer core. The world model. | `TransformerDynamics` |
 | **Encoder/Decoder** | Thin wrappers for fixed-vocab I/O | `TripleEncoder`, `TripleDecoder` |
-| **Compressor** | BPE tokens → 256d latent per slot | `TripleCompressor` |
-| **Expander** | 256d latent → BPE tokens via denoising | `DiffusionDecoder` |
-| **Denoiser** | Transformer layers inside the expander | (internal to `DiffusionDecoder`) |
+| **Compressor** | BPE/text tokens → latent triple slots | `TextCompressor`, `TripleCompressor` |
+| **Expander** | Latent triple slots → text tokens via denoising | `TextExpander`, `DiffusionDecoder` |
+| **AR decoders** | Autoregressive alternatives to diffusion expansion | `ARDecoder`, `DualARDecoder` |
+| **Flow decoder** | Flow-matching text decoder experiment | `FlowDecoder` |
+| **VQ layer** | Discrete bottleneck/codebook experiment | `VectorQuantizer` |
 
 ### Mode Conditioning
 
-A mode triple `(#mode, type, advance)` is prepended as a regular triple — no architecture changes. The transformer learns to condition on it. Modes are just training data:
-- `advance`: predict state after transformation
-- `identity`: predict same state (validates reconstruction)
-- Future: `query`, `instruct`, etc.
+A mode triple is prepended as a regular triple — no architecture changes. The transformer learns to condition on it. Modes are just training data. Chain datasets use:
+- `advance`: predict the next state in a forward chain
+- `query`: infer a prior/related state
+- `identity`: reconstruct the same state
 
 ## Key Design Decisions
 
@@ -70,13 +72,19 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 │   ├── config.py            # ModelConfig with profiles
 │   ├── modules.py           # TripleEncoder, TransformerDynamics, TripleDecoder
 │   ├── model.py             # TripleWorldModel (closed-vocab wrapper)
-│   ├── compressor.py        # TripleCompressor (open-vocab input)
-│   ├── diffusion_decoder.py # DiffusionDecoder / expander (open-vocab output)
-│   ├── diffusion_model.py   # DiffusionWorldModel (open-vocab wrapper)
-│   ├── dataset.py           # Triple dataset + collation
-│   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
-│   ├── train.py             # Training loop
-│   ├── eval.py              # Evaluation + attention visualization
+│   ├── text_model.py        # TextWorldModel wrapper
+│   ├── text_dynamics_model.py # TextCompressor + dynamics + TextExpander
+│   ├── text_compressor.py   # BPE/text tokens to latent triple slots
+│   ├── text_expander.py     # Latent triple slots to BPE/text tokens
+│   ├── ar_decoder.py        # Single-memory autoregressive decoder
+│   ├── dual_ar_decoder.py   # Dense + sparse memory autoregressive decoder
+│   ├── flow_decoder.py      # Flow-matching decoder experiment
+│   ├── vq_layer.py          # Vector quantization bottleneck
+│   ├── chain_dataset.py     # Multi-turn text chain dataset
+│   ├── text_dataset.py      # Identity / QA text dataset
+│   ├── training_config.py   # JSON training config dataclasses
+│   ├── trainer.py           # Config-driven training loop
+│   ├── training_eval.py     # Text evaluation helpers
 │   ├── analysis.py          # Dynamics geometry tools (Jacobian, flow field)
 │   ├── serve.py             # Inference server
 │   └── vocab.py             # Vocabulary builder
@@ -88,7 +96,8 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
     ├── architecture.md      # Full architecture with diagrams
     ├── references.md        # Papers and systems referenced
     ├── theoretical_foundations.md  # Geometric framework
-    └── sprint3_diffusion_decoder.md  # Experiment log
+    ├── sprint5_vae_bottleneck.md   # Open-vocab IO experiments
+    └── sprint6_chain_dynamics.md   # Multi-turn chain dynamics
 ```
 
 ## Key Results
@@ -175,7 +184,7 @@ The subscription auto-stops when the job completes.
 Config-driven via JSON: `uv run python scripts/<train>.py configs/<name>.json`. Each train script reads its own config schema — they're not interchangeable.
 
 Active configs (live experiments):
-- `dual_ar_v1.json`, `dual_ar_v2_contrastive.json` — dual-memory AR decoder
+- `dual_ar_v1.json`, `dual_ar_v2_contrastive.json`, `dual_ar_v3_vq.json` — dual-memory AR decoder
 - `flow_v1.json` — flow matching decoder
 - `ar_*.json` — single-memory AR variants (frozen, dynamics, entity, phaseC, recovery)
 - `arc_v1.json` — ARC trace experiments

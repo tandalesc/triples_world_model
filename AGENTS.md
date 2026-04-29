@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 Universal agent guide for the Triple World Model repo. For full project context (architecture, results, gotchas, design decisions), read `CLAUDE.md` — the content there is tool-agnostic and the source of truth.
 
