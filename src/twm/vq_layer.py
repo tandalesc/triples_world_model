@@ -24,8 +24,11 @@ class VectorQuantizer(nn.Module):
         self.d = d
         self.beta = beta
 
+        # Init to match LayerNorm-style encoder outputs (unit per-element variance).
+        # The original VQ-VAE init uniform_(-1/N, 1/N) assumes encoder magnitudes
+        # of ~1/N, which collapses immediately when fed O(1) bottleneck values.
         self.codebook = nn.Embedding(num_codes, d)
-        self.codebook.weight.data.uniform_(-1.0 / num_codes, 1.0 / num_codes)
+        nn.init.normal_(self.codebook.weight, mean=0.0, std=1.0)
 
     def forward(self, z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, dict]:
         """Quantize z.
@@ -39,34 +42,38 @@ class VectorQuantizer(nn.Module):
             stats: dict {vq_loss, perplexity, unique_codes}
         """
         orig_shape = z.shape
-        z_flat = z.reshape(-1, self.d)
+        # Run distance / loss math in fp32 to avoid bf16 overflow on the
+        # ||z||² + ||e||² - 2 z·e expansion (each term can be O(d) before sum).
+        with torch.amp.autocast(device_type=z.device.type, enabled=False):
+            z_flat = z.reshape(-1, self.d).float()
+            codebook = self.codebook.weight.float()
 
-        # ||z - e||² = ||z||² + ||e||² - 2 z·e
-        d2 = (
-            z_flat.pow(2).sum(-1, keepdim=True)
-            + self.codebook.weight.pow(2).sum(-1)
-            - 2 * z_flat @ self.codebook.weight.T
-        )
+            # ||z - e||² = ||z||² + ||e||² - 2 z·e
+            d2 = (
+                z_flat.pow(2).sum(-1, keepdim=True)
+                + codebook.pow(2).sum(-1)
+                - 2 * z_flat @ codebook.T
+            )
 
-        idx = d2.argmin(-1)
-        z_q_flat = self.codebook(idx)
+            idx = d2.argmin(-1)
+            z_q_flat = F.embedding(idx, codebook)
 
-        codebook_loss = F.mse_loss(z_q_flat, z_flat.detach())
-        commit_loss = F.mse_loss(z_flat, z_q_flat.detach())
-        vq_loss = codebook_loss + self.beta * commit_loss
+            codebook_loss = F.mse_loss(z_q_flat, z_flat.detach())
+            commit_loss = F.mse_loss(z_flat, z_q_flat.detach())
+            vq_loss = codebook_loss + self.beta * commit_loss
 
-        # Straight-through: forward = z_q, gradient = z
-        z_q_flat = z_flat + (z_q_flat - z_flat).detach()
-        z_q = z_q_flat.reshape(orig_shape)
+            # Straight-through: forward = z_q, gradient = z
+            z_q_flat = z_flat + (z_q_flat - z_flat).detach()
+            z_q = z_q_flat.reshape(orig_shape).to(z.dtype)
 
-        with torch.no_grad():
-            counts = torch.bincount(idx, minlength=self.num_codes).float()
-            probs = counts / counts.sum()
-            entropy = -(probs * (probs + 1e-10).log()).sum()
-            stats = {
-                "vq_loss": vq_loss.item(),
-                "perplexity": entropy.exp().item(),
-                "unique_codes": (counts > 0).sum().item(),
-            }
+            with torch.no_grad():
+                counts = torch.bincount(idx, minlength=self.num_codes).float()
+                probs = counts / counts.sum()
+                entropy = -(probs * (probs + 1e-10).log()).sum()
+                stats = {
+                    "vq_loss": vq_loss.item(),
+                    "perplexity": entropy.exp().item(),
+                    "unique_codes": (counts > 0).sum().item(),
+                }
 
         return z_q, vq_loss, stats
