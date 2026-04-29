@@ -29,6 +29,7 @@ from twm.text_compressor import TextCompressor
 from twm.modules import TransformerDynamics
 from twm.dual_ar_decoder import DualARDecoder
 from twm.chain_dataset import ChainDataset
+from twm.vq_layer import VectorQuantizer
 
 NUM_MODES = 3
 
@@ -42,7 +43,8 @@ def update_ema(online, target, decay):
 class DualARModel(nn.Module):
     def __init__(self, config, tokenizer, compressor_layers=3, dynamics_layers=2,
                  decoder_layers=3, d_ff=512, max_text_tokens=128, dropout=0.1,
-                 bottleneck_dim=None, dense_dropout=0.3):
+                 bottleneck_dim=None, dense_dropout=0.3,
+                 vq_enabled=False, vq_num_codes=1024, vq_beta=0.25):
         super().__init__()
         self.config = config
         self.tokenizer = tokenizer
@@ -86,6 +88,10 @@ class DualARModel(nn.Module):
             nn.LayerNorm(bn_d),
         )
 
+        # Optional VQ on dynamics output. Forces discrete entity IDs in the
+        # bottleneck to break the "red potato vs red hot pepper" collapse.
+        self.vq = VectorQuantizer(vq_num_codes, bn_d, beta=vq_beta) if vq_enabled else None
+
     def init_embeddings(self):
         with torch.no_grad():
             nn.init.normal_(self.shared_token_emb.weight, std=0.02)
@@ -107,6 +113,12 @@ class DualARModel(nn.Module):
         x = self.dynamics(x)
         return bottleneck + x[:, 3:]
 
+    def quantize(self, x):
+        """Apply VQ if enabled. Returns (x, vq_loss, stats)."""
+        if self.vq is None:
+            return x, x.new_zeros(()), {}
+        return self.vq(x)
+
 
 def compute_loss(model, target_compressor, batch, device, cfg):
     input_ids = batch["input_ids"].to(device)
@@ -121,6 +133,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     lambda_dense = cfg.get("dense_proj_weight", 0.5)
     lambda_contrastive = cfg.get("contrastive_weight", 0.0)
     contrastive_temp = cfg.get("contrastive_temp", 0.1)
+    lambda_vq = cfg.get("vq_loss_weight", 1.0)
 
     # Compress input
     compressor_out = model.compress(input_ids, input_pad)
@@ -130,7 +143,8 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     bottleneck = compressor_out
 
     total_loss = torch.tensor(0.0, device=device)
-    consist_total = dense_proj_total = contrastive_total = 0.0
+    consist_total = dense_proj_total = contrastive_total = vq_total = 0.0
+    vq_perplexity_sum = vq_unique_sum = 0.0
     total_tok_acc = 0.0
     n_steps = 0
 
@@ -143,6 +157,14 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     for step in range(1, max_chain):
         # Dynamics: sparse channel
         bottleneck = model.forward_dynamics(bottleneck, mode_ids)
+
+        # VQ: quantize dynamics output (if enabled). Propagates to next step.
+        bottleneck, vq_loss, vq_stats = model.quantize(bottleneck)
+        if model.vq is not None:
+            total_loss = total_loss + lambda_vq * vq_loss
+            vq_total += vq_loss.item()
+            vq_perplexity_sum += vq_stats.get("perplexity", 0)
+            vq_unique_sum += vq_stats.get("unique_codes", 0)
 
         active = chain_len > step
         if not active.any():
@@ -234,6 +256,9 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         "consist": consist_total / max(n_steps, 1),
         "dense_mse": dense_proj_total / max(n_steps, 1),
         "contrastive": contrastive_total / max(n_steps, 1),
+        "vq_loss": vq_total / max(n_steps, 1),
+        "vq_perplexity": vq_perplexity_sum / max(n_steps, 1),
+        "vq_unique": vq_unique_sum / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
     }
     for m, name in mode_names.items():
@@ -270,6 +295,7 @@ def generation_eval(model, test_loader, device, tok, n_samples=200):
             max_c = chain_len_b.max().item()
             for s in range(1, max_c):
                 bn = model.forward_dynamics(bn, mode_ids_b)
+                bn, _, _ = model.quantize(bn)  # no-op if VQ disabled
 
             # Dense channel: project dynamics output → compressor-space
             dense_pred = model.dense_proj(bn)
@@ -364,6 +390,9 @@ def main():
         max_text_tokens=max_text_tokens, dropout=cfg.get("dropout", 0.1),
         bottleneck_dim=cfg.get("bottleneck_dim"),
         dense_dropout=cfg.get("dense_dropout", 0.3),
+        vq_enabled=cfg.get("vq_enabled", False),
+        vq_num_codes=cfg.get("vq_num_codes", 1024),
+        vq_beta=cfg.get("vq_beta", 0.25),
     )
     model.init_embeddings()
     model.to(device)
@@ -401,7 +430,8 @@ def main():
 
     for epoch in range(1, epochs + 1):
         model.train()
-        ep = {"loss": 0, "consist": 0, "dense_mse": 0, "contrastive": 0, "tok_acc": 0}
+        ep = {"loss": 0, "consist": 0, "dense_mse": 0, "contrastive": 0,
+              "vq_loss": 0, "vq_perplexity": 0, "vq_unique": 0, "tok_acc": 0}
         ep_mode = {}
         n_batches = 0
 
@@ -435,9 +465,12 @@ def main():
                 n = ep_mode.get(k + "_n", 0)
                 if n > 0:
                     mode_str += f" | {k.split('_')[1]}: {ep_mode[k]/n:.3f}"
+            vq_str = ""
+            if ep['vq_loss'] > 0:
+                vq_str = f" | vq {ep['vq_loss']:.4f} | ppl {ep['vq_perplexity']:.1f} | uniq {ep['vq_unique']:.0f}"
             msg = (f"ep {epoch:4d} | loss {ep['loss']:.4f} | consist {ep['consist']:.4f} "
-                   f"| dense {ep['dense_mse']:.4f} | contra {ep['contrastive']:.4f} "
-                   f"| tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
+                   f"| dense {ep['dense_mse']:.4f} | contra {ep['contrastive']:.4f}"
+                   f"{vq_str} | tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
