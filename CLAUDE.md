@@ -118,6 +118,12 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Staged IO→QA causes geometry collapse.** IO-first builds a 1D+noise manifold. When QA arrives, dynamics collapses the geometry for cheap mode separation instead of learning transforms (PC1 0.28→0.57). Freezing compressor preserves geometry but limits QA to ~8%.
 - **Balanced joint training (1:1) is the solution.** Mixed identity+QA from epoch 1 with equal ratio forces compressor to build a space supporting both tasks (v38). 5:1 QA:identity ratio starves reconstruction (v37). Identity leads the breakout, QA follows. Use `qa_balanced_train.jsonl`.
 
+## VQ Gotchas
+
+- **Codebook init must match encoder magnitudes.** The original VQ-VAE init `uniform_(-1/N, 1/N)` (~±0.001 for N=1024) assumes encoder outputs of magnitude ~1/N. With LayerNorm-style compressor outputs (per-element values ~1), all batch×slot vectors snap to the same code on step 1 → instant collapse (uniq=1, ppl=1.1). Use `normal(0, 1)` to match expected encoder statistics.
+- **Run VQ math in fp32 under autocast.** The distance expansion `||z||² + ||e||² - 2 z·e` produces intermediate values O(d) before summation. Under bf16 autocast, this can overflow into garbage values that feed back through the codebook gradient and explode the loss to 1e11+ within two epochs. Wrap the VQ forward in `with torch.amp.autocast(enabled=False)` and cast inputs to fp32, restore dtype on the way out.
+- **Start with low VQ loss weight.** λ_vq=1.0 lets the codebook dominate the gradient before encoder statistics stabilize. λ_vq=0.25 leaves room for consistency / dense / decoder losses to shape the bottleneck while VQ tracks. Bump up later if utilization stays low.
+
 ## Training
 
 Training runs on the homelab GPU server via wartable MCP, **not locally**. The server has a mirror of the repo at `~/triples_world_model_Glucose` and large training data files (`data/tw_all_*.jsonl`, etc.) that don't exist in the local checkout. Local CPU is fine for tiny closed-vocab experiments only.
