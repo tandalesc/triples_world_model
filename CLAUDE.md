@@ -120,10 +120,68 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 
 ## Training
 
-Config-driven via JSON: `uv run python scripts/train.py configs/<name>.json`
-Training configs define stages (io, joint_io, dynamics) with phases (graduated noise curriculum).
-Key configs: `v38_balanced_joint.json` (best combined model — 38.5% tok, id=77.8%, qa=29.9%), `v35_d64_t16.json` (best IO-only — 99.3% tok).
-Submit to GPU server via wartable MCP: `mcp__wartable__submit_job`.
+Training runs on the homelab GPU server via wartable MCP, **not locally**. The server has a mirror of the repo at `~/triples_world_model_Glucose` and large training data files (`data/tw_all_*.jsonl`, etc.) that don't exist in the local checkout. Local CPU is fine for tiny closed-vocab experiments only.
+
+### Standard workflow
+
+1. Edit code/config locally on `feature/glucose-converter` (the active branch — *not* main)
+2. Commit + push to `origin feature/glucose-converter`
+3. Submit a wartable job that resets the server checkout to the new commit and runs training
+4. Subscribe to filtered log updates so only useful lines come back as channel events
+
+### Submit pattern
+
+```
+mcp__wartable__submit_job(
+    name="<experiment-name>",
+    command=(
+        "cd ~/triples_world_model_Glucose && "
+        "git fetch origin feature/glucose-converter && "
+        "git reset --hard origin/feature/glucose-converter && "
+        "rm -rf <out_dir> && "
+        "uv run python scripts/<train_script>.py configs/<config>.json"
+    ),
+    gpu_count=1,
+    gpu_vram_min_gb=22,   # routes to the training GPU (not the spare)
+    tags=["<family>", "<variant>"],
+)
+```
+
+`gpu_vram_min_gb=22` is required to land on the right card — see memory `reference_gpu_server.md`.
+
+### Subscribing to logs
+
+After submission, subscribe with a regex filter so only meaningful lines arrive as channel events. Default cadence 600s; tighten if early validation matters:
+
+```
+mcp__wartable_channel__subscribe_job_logs(
+    job_id=<id>,
+    interval_seconds=600,
+    pattern="Epoch|loss|tok_acc|chrF|contrastive|Error|Traceback|consist",
+    tail_lines=30,
+)
+```
+
+The subscription auto-stops when the job completes.
+
+### Configs
+
+Config-driven via JSON: `uv run python scripts/<train>.py configs/<name>.json`. Each train script reads its own config schema — they're not interchangeable.
+
+Active configs (live experiments):
+- `dual_ar_v1.json`, `dual_ar_v2_contrastive.json` — dual-memory AR decoder
+- `flow_v1.json` — flow matching decoder
+- `ar_*.json` — single-memory AR variants (frozen, dynamics, entity, phaseC, recovery)
+- `arc_v1.json` — ARC trace experiments
+
+Archived (`configs/archive/`):
+- `v38_balanced_joint.json` — best combined model (38.5% tok, id=77.8%, qa=29.9%)
+- `v35_d64_t16.json` — best IO-only (99.3% tok)
+- 80+ historical configs across `factored_*`, `mixed_chain_*`, `textworld_chain_*`, `v18`–`v53`
+
+### Data file gotcha
+
+Training data referenced in configs (e.g. `data/tw_all_train.jsonl`, the WebNLG augmented files) lives on the GPU server only. Local checkout has smaller datasets (GLUCOSE chains, propara, openpi). Don't try to run a TextWorld config locally — it'll fail at the dataset loader.
 
 ## Data Format
 
