@@ -1,18 +1,8 @@
-# AGENTS.md
+# AGENT.md
 
 Universal agent guide for the Triple World Model repo. For full project context (architecture, results, gotchas, design decisions), read `CLAUDE.md` — the content there is tool-agnostic and the source of truth.
 
 This file documents only what's most likely to bite an agent that doesn't know the project: **the training workflow is remote, not local**.
-
-## Where to Start Next Session
-
-If you're picking up cold, the live thread is the TextWorld chrF=49 wall investigation. Read in this order:
-
-1. `CLAUDE.md` — "Where We Are" section at the top. Current state and proposed next steps.
-2. `memory/project_v18_generation_wall.md` (Claude memory) — full experiment log, what's been tried, what's been ruled out.
-3. `research/sprint6_chain_dynamics.md` — architecture context for the multi-turn chain dynamics that produced the latest results.
-
-The active branch is `feature/glucose-converter`. The latest experiment (v4 entity-VQ) finished tied with baseline; the next experiments are cheap diagnostics, not new architecture work — see CLAUDE.md for the proposed sequence.
 
 ## TL;DR
 

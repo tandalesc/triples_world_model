@@ -1,19 +1,5 @@
 # Triple World Model (TWM)
 
-## Where We Are (2026-04-29)
-
-**Active investigation**: TextWorld advance-generation chrF=49 wall. Three attempts to break it via bottleneck reshaping have now failed (v2 contrastive, v3b VQ all-slots, v4 VQ entity-slot). Latest run: v4 finished at chrF 48.0 (tied baseline), gen_adv averaged 0.20 across all evals — same as v2's wall. Identity reconstruction improved (gen_id 0.53 → 0.76) but advance generation didn't move.
-
-**Current hypothesis**: wall is downstream of the bottleneck, likely **exposure bias** in the AR decoder (TF adv 0.90 vs gen adv 0.20 = 70-point gap).
-
-**Where to start next session**:
-- Read `memory/project_v18_generation_wall.md` first — full record of what's been tried and why each approach was discarded.
-- Then `research/sprint6_chain_dynamics.md` for current architecture context.
-- Proposed next experiments (in order of cost/value): GLUCOSE diagnostic with v4 config → scheduled sampling → beam search.
-- **Don't try**: more bottleneck shaping (contrastive variants, codebook tweaks). Three negatives is enough signal.
-
-Active branch: `feature/glucose-converter`. Active configs: `dual_ar_v4_vq_entity.json` (entity-VQ, baseline-tied), `dual_ar_v1.json` (no VQ, equivalent baseline). Archived: see `configs/archive/`.
-
 ## What This Is
 
 A minimal world model that learns state dynamics over structured (entity, attribute, value) triples using a vanilla transformer. The core claim: a small transformer over decomposed triple tokens can learn compositional state transformations that generalize to novel entity-state combinations never seen in training — and it needs cross-position attention to do it.
