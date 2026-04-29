@@ -401,7 +401,7 @@ def main():
 
     for epoch in range(1, epochs + 1):
         model.train()
-        ep = {"loss": 0, "consist": 0, "dense_mse": 0, "tok_acc": 0}
+        ep = {"loss": 0, "consist": 0, "dense_mse": 0, "contrastive": 0, "tok_acc": 0}
         ep_mode = {}
         n_batches = 0
 
@@ -436,7 +436,8 @@ def main():
                 if n > 0:
                     mode_str += f" | {k.split('_')[1]}: {ep_mode[k]/n:.3f}"
             msg = (f"ep {epoch:4d} | loss {ep['loss']:.4f} | consist {ep['consist']:.4f} "
-                   f"| dense {ep['dense_mse']:.4f} | tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
+                   f"| dense {ep['dense_mse']:.4f} | contra {ep['contrastive']:.4f} "
+                   f"| tok {ep['tok_acc']:.3f}{mode_str} | lr {lr_now:.2e}")
             print(msg)
             log_file.write(msg + "\n")
             log_file.flush()
