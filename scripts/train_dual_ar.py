@@ -44,7 +44,8 @@ class DualARModel(nn.Module):
     def __init__(self, config, tokenizer, compressor_layers=3, dynamics_layers=2,
                  decoder_layers=3, d_ff=512, max_text_tokens=128, dropout=0.1,
                  bottleneck_dim=None, dense_dropout=0.3,
-                 vq_enabled=False, vq_num_codes=1024, vq_beta=0.25):
+                 vq_enabled=False, vq_num_codes=1024, vq_beta=0.25,
+                 vq_entity_only=False):
         super().__init__()
         self.config = config
         self.tokenizer = tokenizer
@@ -90,7 +91,11 @@ class DualARModel(nn.Module):
 
         # Optional VQ on dynamics output. Forces discrete entity IDs in the
         # bottleneck to break the "red potato vs red hot pepper" collapse.
+        # vq_entity_only: quantize only slot 0 of each triple (the entity
+        # position), keep slots 1 and 2 (relation, value) continuous. Avoids
+        # over-quantizing open-vocab values.
         self.vq = VectorQuantizer(vq_num_codes, bn_d, beta=vq_beta) if vq_enabled else None
+        self.vq_entity_only = vq_entity_only
 
     def init_embeddings(self):
         with torch.no_grad():
@@ -114,10 +119,30 @@ class DualARModel(nn.Module):
         return bottleneck + x[:, 3:]
 
     def quantize(self, x):
-        """Apply VQ if enabled. Returns (x, vq_loss, stats)."""
+        """Apply VQ if enabled. Returns (x, vq_loss, stats).
+
+        x shape: (B, max_triples * 3, d) — interleaved (entity, relation, value).
+        With vq_entity_only=True, only positions 0, 3, 6, ... (entity slots)
+        are quantized; relation/value slots pass through continuous.
+        """
         if self.vq is None:
             return x, x.new_zeros(()), {}
-        return self.vq(x)
+
+        if not self.vq_entity_only:
+            return self.vq(x)
+
+        B, N, d = x.shape
+        triples = N // 3
+        x_grouped = x.reshape(B, triples, 3, d)
+        entity_slots = x_grouped[:, :, 0, :]  # (B, triples, d)
+
+        entity_q, vq_loss, stats = self.vq(entity_slots)
+
+        # Splice quantized entities back in. Use cat instead of in-place
+        # assignment to keep autograd happy under autocast.
+        rel_val = x_grouped[:, :, 1:, :]      # (B, triples, 2, d)
+        x_q = torch.cat([entity_q.unsqueeze(2), rel_val], dim=2)
+        return x_q.reshape(B, N, d), vq_loss, stats
 
 
 def compute_loss(model, target_compressor, batch, device, cfg):
@@ -393,6 +418,7 @@ def main():
         vq_enabled=cfg.get("vq_enabled", False),
         vq_num_codes=cfg.get("vq_num_codes", 1024),
         vq_beta=cfg.get("vq_beta", 0.25),
+        vq_entity_only=cfg.get("vq_entity_only", False),
     )
     model.init_embeddings()
     model.to(device)
