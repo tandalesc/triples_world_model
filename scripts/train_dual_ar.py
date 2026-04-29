@@ -119,6 +119,8 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     B, C, T = chain_ids.shape
     lambda_consist = cfg.get("consistency_weight", 1.0)
     lambda_dense = cfg.get("dense_proj_weight", 0.5)
+    lambda_contrastive = cfg.get("contrastive_weight", 0.0)
+    contrastive_temp = cfg.get("contrastive_temp", 0.1)
 
     # Compress input
     compressor_out = model.compress(input_ids, input_pad)
@@ -128,7 +130,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
     bottleneck = compressor_out
 
     total_loss = torch.tensor(0.0, device=device)
-    consist_total = dense_proj_total = 0.0
+    consist_total = dense_proj_total = contrastive_total = 0.0
     total_tok_acc = 0.0
     n_steps = 0
 
@@ -166,6 +168,21 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         consist_loss = (1 - F.cosine_similarity(pred_flat, tgt_flat, dim=-1)).mean()
         total_loss = total_loss + lambda_consist * consist_loss
         consist_total += consist_loss.item()
+
+        # InfoNCE contrastive: predicted dynamics output vs target compressor output,
+        # batch-wise. Forces dynamics to land near the right entity cluster, not just
+        # any cluster — pushes "red potato" away from "red hot pepper" using batch
+        # negatives. Symmetric (pred->tgt and tgt->pred) like CLIP.
+        if lambda_contrastive > 0 and pred_flat.shape[0] > 1:
+            pred_norm = F.normalize(pred_flat, dim=-1)
+            tgt_norm = F.normalize(tgt_flat.detach(), dim=-1)
+            sim = pred_norm @ tgt_norm.T / contrastive_temp
+            labels = torch.arange(pred_norm.shape[0], device=device)
+            contrastive_loss = 0.5 * (
+                F.cross_entropy(sim, labels) + F.cross_entropy(sim.T, labels)
+            )
+            total_loss = total_loss + lambda_contrastive * contrastive_loss
+            contrastive_total += contrastive_loss.item()
 
         # Dense projection loss: predicted dense should match target's compressor output
         dense_proj_loss = F.mse_loss(active_dense, target_bn.detach())
@@ -216,6 +233,7 @@ def compute_loss(model, target_compressor, batch, device, cfg):
         "loss": total_loss.item(),
         "consist": consist_total / max(n_steps, 1),
         "dense_mse": dense_proj_total / max(n_steps, 1),
+        "contrastive": contrastive_total / max(n_steps, 1),
         "tok_acc": total_tok_acc / max(n_steps, 1),
     }
     for m, name in mode_names.items():
