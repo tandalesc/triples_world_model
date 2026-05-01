@@ -319,6 +319,19 @@ def main():
 
     base_model = build_autoencoder(base_cfg, tokenizer, device)
     base_state = torch.load(base_dir / "weights.pt", map_location=device)
+    # Older autoencoder checkpoints used max_text_tokens+1 for pos_emb; current
+    # code uses +17 (entity-prefix headroom we don't use here). Pad the saved
+    # tensor to fit; extra positions stay at random init.
+    pe_key = "decoder.pos_emb.weight"
+    if pe_key in base_state:
+        saved = base_state[pe_key]
+        current = base_model.decoder.pos_emb.weight
+        if saved.shape != current.shape and saved.shape[1] == current.shape[1]:
+            new = current.data.clone()
+            n = min(saved.shape[0], new.shape[0])
+            new[:n] = saved[:n]
+            base_state[pe_key] = new
+            print(f"  resized {pe_key}: {tuple(saved.shape)} -> {tuple(new.shape)}")
     base_model.load_state_dict(base_state)
     for p in base_model.parameters():
         p.requires_grad_(False)
