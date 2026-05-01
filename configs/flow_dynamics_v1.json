@@ -1,0 +1,21 @@
+{
+    "base_run_dir": "results/dual_ar_v4_vq_entity",
+    "train_data": "data/tw_all_train.jsonl",
+    "test_data": "data/tw_all_test.jsonl",
+    "out_dir": "results/flow_dynamics_v1",
+
+    "flow_n_heads": 8,
+    "flow_n_layers": 4,
+    "flow_d_ff": 512,
+    "flow_dropout": 0.1,
+
+    "ode_steps": 10,
+
+    "lr": 3e-4,
+    "weight_decay": 0.0,
+    "batch_size": 64,
+    "epochs": 30,
+    "eval_every": 3,
+    "gen_samples": 200,
+    "device": "cuda"
+}
