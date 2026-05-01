@@ -313,6 +313,94 @@ class DualARDecoder(nn.Module):
             return torch.stack(generated, dim=1)
         return torch.zeros(B, 1, dtype=torch.long, device=device)
 
+    @torch.no_grad()
+    def generate_beam(
+        self,
+        dynamics_out: torch.Tensor,
+        compressor_out: torch.Tensor,
+        num_beams: int = 4,
+        max_tokens: int | None = None,
+        length_penalty: float = 1.0,
+    ) -> torch.Tensor:
+        """Beam search. Returns (B, T) top-1 sequences (excluding BOS).
+
+        length_penalty: GNMT-style. 1.0 = no normalization (favors short),
+        0.6 = mild length reward, 1.5 = strong length reward.
+        """
+        B = dynamics_out.shape[0]
+        device = dynamics_out.device
+        T = max_tokens or self.max_text_tokens
+        K = num_beams
+
+        sparse_memory = self.sparse_proj(dynamics_out).repeat_interleave(K, dim=0)
+        dense_memory = self.dense_proj(compressor_out).repeat_interleave(K, dim=0)
+
+        # All beams start identical (BOS). Bias all but beam 0 to -inf so the
+        # first topk pulls K *distinct* tokens from beam 0 instead of K copies.
+        current_emb = self.bos_emb.unsqueeze(0).unsqueeze(0).expand(B * K, 1, -1).contiguous()
+        beam_scores = torch.full((B, K), float("-inf"), device=device)
+        beam_scores[:, 0] = 0.0
+        beam_scores = beam_scores.view(-1)
+
+        generated = torch.zeros(B * K, 0, dtype=torch.long, device=device)
+        finished = torch.zeros(B * K, dtype=torch.bool, device=device)
+        seq_lens = torch.zeros(B * K, dtype=torch.long, device=device)
+
+        batch_offset = (torch.arange(B, device=device) * K).unsqueeze(-1)  # (B, 1)
+
+        for t in range(T):
+            seq_len = current_emb.shape[1]
+            pos = self.pos_emb(torch.arange(seq_len, device=device))
+            x = current_emb + pos
+            causal_mask = self._causal_mask(seq_len, device)
+
+            for layer in self.layers:
+                x = layer(x, sparse_memory, dense_memory,
+                          causal_mask=causal_mask, dense_available=True)
+            logits = self.output_proj(self.ln_f(x[:, -1]))  # (B*K, V)
+            log_probs = F.log_softmax(logits.float(), dim=-1)
+            V = log_probs.shape[-1]
+
+            # Finished beams hold their score, force pad token (no growth in score).
+            if finished.any():
+                log_probs = log_probs.masked_fill(finished.unsqueeze(-1), float("-inf"))
+                log_probs[finished, self.pad_id] = 0.0
+
+            next_scores = beam_scores.unsqueeze(-1) + log_probs  # (B*K, V)
+            next_scores = next_scores.view(B, K * V)
+
+            top_scores, top_idx = next_scores.topk(K, dim=-1)  # (B, K)
+            beam_idx = top_idx // V       # (B, K), in [0, K)
+            token_idx = top_idx % V       # (B, K)
+
+            flat_beam_idx = (beam_idx + batch_offset).view(-1)  # (B*K,)
+            current_emb = current_emb[flat_beam_idx]
+            generated = generated[flat_beam_idx]
+            finished = finished[flat_beam_idx]
+            seq_lens = seq_lens[flat_beam_idx]
+
+            new_tokens = token_idx.view(-1)
+            generated = torch.cat([generated, new_tokens.unsqueeze(-1)], dim=1)
+            beam_scores = top_scores.view(-1)
+            seq_lens = seq_lens + (~finished).long()
+            finished = finished | (new_tokens == self.pad_id)
+
+            if finished.all():
+                break
+
+            next_emb = self.token_emb(new_tokens).unsqueeze(1)
+            current_emb = torch.cat([current_emb, next_emb], dim=1)
+
+        # GNMT length normalization: ((5 + L) / 6) ** lp
+        norm_lens = seq_lens.clamp(min=1).float()
+        lp = ((5.0 + norm_lens) / 6.0) ** length_penalty
+        normalized = beam_scores / lp
+
+        final_scores = normalized.view(B, K)
+        best_beam = final_scores.argmax(-1)  # (B,)
+        final_idx = best_beam + torch.arange(B, device=device) * K
+        return generated[final_idx]
+
     def trainable_param_count(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
