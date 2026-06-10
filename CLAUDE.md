@@ -4,7 +4,7 @@
 
 A minimal world model that learns state dynamics over structured (entity, attribute, value) triples using a vanilla transformer. The core claim: a small transformer over decomposed triple tokens can learn compositional state transformations that generalize to novel entity-state combinations never seen in training — and it needs cross-position attention to do it.
 
-Compositional generalization is confirmed. The current focus is extending to open-vocabulary values via a compressor/expander architecture.
+Compositional generalization is confirmed. Current work centers on open-vocabulary chain dynamics: compressor/dynamics/decoder variants, multi-turn unrolling, and decoder experiments such as AR, dual-memory AR, flow matching, and VQ.
 
 ## Architecture
 
@@ -34,16 +34,18 @@ The dynamics core sees the same shaped input either way: `(B, max_triples × 3, 
 |------|-----------|------|
 | **Dynamics** | Transformer core. The world model. | `TransformerDynamics` |
 | **Encoder/Decoder** | Thin wrappers for fixed-vocab I/O | `TripleEncoder`, `TripleDecoder` |
-| **Compressor** | BPE tokens → 256d latent per slot | `TripleCompressor` |
-| **Expander** | 256d latent → BPE tokens via denoising | `DiffusionDecoder` |
-| **Denoiser** | Transformer layers inside the expander | (internal to `DiffusionDecoder`) |
+| **Compressor** | BPE/text tokens → latent triple slots | `TextCompressor`, `TripleCompressor` |
+| **Expander** | Latent triple slots → text tokens via denoising | `TextExpander`, `DiffusionDecoder` |
+| **AR decoders** | Autoregressive alternatives to diffusion expansion | `ARDecoder`, `DualARDecoder` |
+| **Flow decoder** | Flow-matching text decoder experiment | `FlowDecoder` |
+| **VQ layer** | Discrete bottleneck/codebook experiment | `VectorQuantizer` |
 
 ### Mode Conditioning
 
-A mode triple `(#mode, type, advance)` is prepended as a regular triple — no architecture changes. The transformer learns to condition on it. Modes are just training data:
-- `advance`: predict state after transformation
-- `identity`: predict same state (validates reconstruction)
-- Future: `query`, `instruct`, etc.
+A mode triple is prepended as a regular triple — no architecture changes. The transformer learns to condition on it. Modes are just training data. Chain datasets use:
+- `advance`: predict the next state in a forward chain
+- `query`: infer a prior/related state
+- `identity`: reconstruct the same state
 
 ## Key Design Decisions
 
@@ -70,13 +72,19 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 │   ├── config.py            # ModelConfig with profiles
 │   ├── modules.py           # TripleEncoder, TransformerDynamics, TripleDecoder
 │   ├── model.py             # TripleWorldModel (closed-vocab wrapper)
-│   ├── compressor.py        # TripleCompressor (open-vocab input)
-│   ├── diffusion_decoder.py # DiffusionDecoder / expander (open-vocab output)
-│   ├── diffusion_model.py   # DiffusionWorldModel (open-vocab wrapper)
-│   ├── dataset.py           # Triple dataset + collation
-│   ├── sentence_dataset.py  # Sentence-level dataset for open-vocab
-│   ├── train.py             # Training loop
-│   ├── eval.py              # Evaluation + attention visualization
+│   ├── text_model.py        # TextWorldModel wrapper
+│   ├── text_dynamics_model.py # TextCompressor + dynamics + TextExpander
+│   ├── text_compressor.py   # BPE/text tokens to latent triple slots
+│   ├── text_expander.py     # Latent triple slots to BPE/text tokens
+│   ├── ar_decoder.py        # Single-memory autoregressive decoder
+│   ├── dual_ar_decoder.py   # Dense + sparse memory autoregressive decoder
+│   ├── flow_decoder.py      # Flow-matching decoder experiment
+│   ├── vq_layer.py          # Vector quantization bottleneck
+│   ├── chain_dataset.py     # Multi-turn text chain dataset
+│   ├── text_dataset.py      # Identity / QA text dataset
+│   ├── training_config.py   # JSON training config dataclasses
+│   ├── trainer.py           # Config-driven training loop
+│   ├── training_eval.py     # Text evaluation helpers
 │   ├── analysis.py          # Dynamics geometry tools (Jacobian, flow field)
 │   ├── serve.py             # Inference server
 │   └── vocab.py             # Vocabulary builder
@@ -88,7 +96,8 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
     ├── architecture.md      # Full architecture with diagrams
     ├── references.md        # Papers and systems referenced
     ├── theoretical_foundations.md  # Geometric framework
-    └── sprint3_diffusion_decoder.md  # Experiment log
+    ├── sprint5_vae_bottleneck.md   # Open-vocab IO experiments
+    └── sprint6_chain_dynamics.md   # Multi-turn chain dynamics
 ```
 
 ## Key Results
@@ -118,12 +127,86 @@ A mode triple `(#mode, type, advance)` is prepended as a regular triple — no a
 - **Staged IO→QA causes geometry collapse.** IO-first builds a 1D+noise manifold. When QA arrives, dynamics collapses the geometry for cheap mode separation instead of learning transforms (PC1 0.28→0.57). Freezing compressor preserves geometry but limits QA to ~8%.
 - **Balanced joint training (1:1) is the solution.** Mixed identity+QA from epoch 1 with equal ratio forces compressor to build a space supporting both tasks (v38). 5:1 QA:identity ratio starves reconstruction (v37). Identity leads the breakout, QA follows. Use `qa_balanced_train.jsonl`.
 
+## VQ Gotchas
+
+- **Codebook init must match encoder magnitudes.** The original VQ-VAE init `uniform_(-1/N, 1/N)` (~±0.001 for N=1024) assumes encoder outputs of magnitude ~1/N. With LayerNorm-style compressor outputs (per-element values ~1), all batch×slot vectors snap to the same code on step 1 → instant collapse (uniq=1, ppl=1.1). Use `normal(0, 1)` to match expected encoder statistics.
+- **Run VQ math in fp32 under autocast.** The distance expansion `||z||² + ||e||² - 2 z·e` produces intermediate values O(d) before summation. Under bf16 autocast, this can overflow into garbage values that feed back through the codebook gradient and explode the loss to 1e11+ within two epochs. Wrap the VQ forward in `with torch.amp.autocast(enabled=False)` and cast inputs to fp32, restore dtype on the way out.
+- **Start with low VQ loss weight.** λ_vq=1.0 lets the codebook dominate the gradient before encoder statistics stabilize. λ_vq=0.25 leaves room for consistency / dense / decoder losses to shape the bottleneck while VQ tracks. Bump up later if utilization stays low.
+
 ## Training
 
-Config-driven via JSON: `uv run python scripts/train.py configs/<name>.json`
-Training configs define stages (io, joint_io, dynamics) with phases (graduated noise curriculum).
-Key configs: `v38_balanced_joint.json` (best combined model — 38.5% tok, id=77.8%, qa=29.9%), `v35_d64_t16.json` (best IO-only — 99.3% tok).
-Submit to GPU server via wartable MCP: `mcp__wartable__submit_job`.
+Training runs on the homelab GPU server via wartable MCP, **not locally**. The server has a mirror of the repo at `~/triples_world_model_Glucose` and large training data files (`data/tw_all_*.jsonl`, etc.) that don't exist in the local checkout. Local CPU is fine for tiny closed-vocab experiments only.
+
+### Standard workflow
+
+1. Edit code/config locally on `feature/glucose-converter` (the active branch — *not* main)
+2. Commit + push to `origin feature/glucose-converter`
+3. Submit a wartable job that resets the server checkout to the new commit and runs training
+4. Subscribe to filtered log updates so only useful lines come back as channel events
+
+### Submit pattern
+
+```
+mcp__wartable__submit_job(
+    name="<experiment-name>",
+    command=(
+        "cd ~/triples_world_model_Glucose && "
+        "git fetch origin feature/glucose-converter && "
+        "git reset --hard origin/feature/glucose-converter && "
+        "rm -rf <out_dir> && "
+        "uv run python scripts/<train_script>.py configs/<config>.json"
+    ),
+    gpu_count=1,
+    gpu_vram_min_gb=22,   # routes to the training GPU (not the spare)
+    tags=["<family>", "<variant>"],
+)
+```
+
+`gpu_vram_min_gb=22` is required to land on the right card — see memory `reference_gpu_server.md`.
+
+### Subscribing to logs
+
+After submission, subscribe with a regex filter so only meaningful lines arrive as channel events. Default cadence 600s; tighten if early validation matters:
+
+```
+mcp__wartable_channel__subscribe_job_logs(
+    job_id=<id>,
+    interval_seconds=600,
+    pattern="Epoch|loss|tok_acc|chrF|contrastive|Error|Traceback|consist",
+    tail_lines=30,
+)
+```
+
+The subscription auto-stops when the job completes.
+
+### Configs
+
+Config-driven via JSON: `uv run python scripts/<train>.py configs/<name>.json`. Each train script reads its own config schema — they're not interchangeable.
+
+Active configs (live experiments):
+- `dual_ar_v1.json`, `dual_ar_v2_contrastive.json`, `dual_ar_v3_vq.json` — dual-memory AR decoder
+- `flow_v1.json` — flow matching decoder
+- `ar_*.json` — single-memory AR variants (frozen, dynamics, entity, phaseC, recovery)
+- `arc_v1.json` — ARC trace experiments
+- JEPA: `scripts/train_jepa_v2.py` is the live entry point. Its two frozen public
+  configs stay at the repo root: `configs/jepa_nano_v2.json` and
+  `configs/jepa_nano_v2_smoke.json` (the in-flight GPU run's interface — do not move).
+  Other live JEPA configs live under `configs/jepa/` (e.g. `jepa_mini_v2.json`,
+  `jepa_nano_v21.json` + `jepa_nano_v21_smoke.json` — the v2.1 polar-conditioning path,
+  `use_polar_conditioning:true`, run via the same `train_jepa_v2.py`). The dead v1 JEPA
+  configs are archived (`configs/archive/jepa_nano.json`, etc.). The v1 baseline is
+  demoted, not deleted: `src/twm/jepa/legacy/` + `scripts/legacy/train_jepa.py`.
+  v2.1 == v2.0 at init (zero-init H map); the smoke gate is epoch-1 total loss
+  6.113 ± 0.001 (MPS), unchanged from v2.0.
+
+Archived (`configs/archive/`):
+- `v38_balanced_joint.json` — best combined model (38.5% tok, id=77.8%, qa=29.9%)
+- `v35_d64_t16.json` — best IO-only (99.3% tok)
+- 80+ historical configs across `factored_*`, `mixed_chain_*`, `textworld_chain_*`, `v18`–`v53`
+
+### Data file gotcha
+
+Training data referenced in configs (e.g. `data/tw_all_train.jsonl`, the WebNLG augmented files) lives on the GPU server only. Local checkout has smaller datasets (GLUCOSE chains, propara, openpi). Don't try to run a TextWorld config locally — it'll fail at the dataset loader.
 
 ## Data Format
 

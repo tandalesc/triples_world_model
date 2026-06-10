@@ -1,0 +1,552 @@
+{
+  "config": {
+    "seed": 7,
+    "out_dir": "data/entity_world",
+    "n_train_chains": 40000,
+    "n_test_chains": 2000,
+    "chain_len_min": 4,
+    "chain_len_max": 8,
+    "entities_per_chain": [
+      1,
+      2
+    ],
+    "wait_weight": 0.15,
+    "stochastic": false,
+    "bpe_path": "data/glucose/jepa_bpe_512.json",
+    "max_text_tokens": 64
+  },
+  "attribute_pool": {
+    "hunger": [
+      "full",
+      "fed",
+      "hungry",
+      "starving"
+    ],
+    "energy": [
+      "lively",
+      "rested",
+      "tired",
+      "worn out"
+    ],
+    "mood": [
+      "cheerful",
+      "happy",
+      "calm",
+      "sad"
+    ],
+    "cleanliness": [
+      "spotless",
+      "clean",
+      "messy",
+      "dirty"
+    ],
+    "thirst": [
+      "watered",
+      "fresh",
+      "thirsty",
+      "parched"
+    ],
+    "power": [
+      "on",
+      "warming",
+      "cooling",
+      "off"
+    ],
+    "fill": [
+      "full",
+      "filling",
+      "draining",
+      "empty"
+    ],
+    "open": [
+      "wide open",
+      "open",
+      "ajar",
+      "shut"
+    ]
+  },
+  "actions": [
+    "feed",
+    "play",
+    "wash",
+    "rest",
+    "water",
+    "switch on",
+    "switch off",
+    "fill",
+    "open",
+    "close",
+    "wait"
+  ],
+  "attr_copula": {
+    "hunger": "feel(s)",
+    "energy": "feel(s)",
+    "mood": "feel(s)",
+    "thirst": "feel(s)",
+    "cleanliness": "is",
+    "power": "is",
+    "fill": "is",
+    "open": "is"
+  },
+  "splits": {
+    "train": {
+      "types": [
+        "dog",
+        "cat",
+        "horse",
+        "fern",
+        "lamp",
+        "kettle",
+        "box"
+      ],
+      "discriminates": "in-distribution dynamics"
+    },
+    "test_iid": {
+      "types": [
+        "dog",
+        "cat",
+        "horse",
+        "fern",
+        "lamp",
+        "kettle",
+        "box"
+      ],
+      "discriminates": "generalization to fresh states/actions, seen types"
+    },
+    "test_ood_near": {
+      "types": [
+        "puppy",
+        "pony",
+        "sprout"
+      ],
+      "discriminates": "identity-space interpolation (small profile perturbation)"
+    },
+    "test_ood_far": {
+      "types": [
+        "terrarium",
+        "robot pet"
+      ],
+      "discriminates": "novel schema recombination + structurally novel profile"
+    }
+  },
+  "types": {
+    "dog": {
+      "display": "the dog",
+      "schema": [
+        "hunger",
+        "energy",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "feed": {
+          "hunger": "up",
+          "mood": "up"
+        },
+        "play": {
+          "mood": "up",
+          "energy": "down"
+        },
+        "wash": {
+          "cleanliness": "up",
+          "mood": "down"
+        },
+        "rest": {
+          "energy": "up"
+        }
+      },
+      "conditional": {
+        "play": [
+          {
+            "when": {
+              "energy": [
+                "worn out"
+              ]
+            },
+            "effects": {
+              "mood": "down",
+              "energy": "down"
+            }
+          }
+        ]
+      }
+    },
+    "cat": {
+      "display": "the cat",
+      "schema": [
+        "hunger",
+        "energy",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "feed": {
+          "hunger": "up"
+        },
+        "play": {
+          "mood": "up",
+          "energy": "down"
+        },
+        "wash": {
+          "cleanliness": "up",
+          "mood": "down"
+        },
+        "rest": {
+          "energy": "up",
+          "mood": "up"
+        }
+      },
+      "conditional": {
+        "wash": [
+          {
+            "when": {
+              "mood": [
+                "sad"
+              ]
+            },
+            "effects": {
+              "cleanliness": "up",
+              "mood": "down",
+              "energy": "down"
+            }
+          }
+        ]
+      }
+    },
+    "horse": {
+      "display": "the horse",
+      "schema": [
+        "hunger",
+        "energy",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "feed": {
+          "hunger": "up"
+        },
+        "play": {
+          "mood": "up",
+          "energy": "down",
+          "cleanliness": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "rest": {
+          "energy": "up"
+        }
+      },
+      "conditional": {}
+    },
+    "fern": {
+      "display": "the fern",
+      "schema": [
+        "thirst",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "water": {
+          "thirst": "up",
+          "mood": "up"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "wait": {
+          "thirst": "down"
+        }
+      },
+      "conditional": {
+        "water": [
+          {
+            "when": {
+              "thirst": [
+                "watered"
+              ]
+            },
+            "effects": {
+              "thirst": "up",
+              "mood": "down"
+            }
+          }
+        ]
+      }
+    },
+    "lamp": {
+      "display": "the lamp",
+      "schema": [
+        "power",
+        "fill",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "switch on": {
+          "power": "up"
+        },
+        "switch off": {
+          "power": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "wait": {
+          "fill": "down"
+        }
+      },
+      "conditional": {}
+    },
+    "kettle": {
+      "display": "the kettle",
+      "schema": [
+        "fill",
+        "open",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "fill": {
+          "fill": "up"
+        },
+        "open": {
+          "open": "up"
+        },
+        "close": {
+          "open": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "wait": {
+          "fill": "down"
+        }
+      },
+      "conditional": {}
+    },
+    "box": {
+      "display": "the box",
+      "schema": [
+        "fill",
+        "open",
+        "cleanliness"
+      ],
+      "split_role": "train",
+      "profile": {
+        "fill": {
+          "fill": "up",
+          "cleanliness": "down"
+        },
+        "open": {
+          "open": "up"
+        },
+        "close": {
+          "open": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        }
+      },
+      "conditional": {}
+    },
+    "puppy": {
+      "display": "the puppy",
+      "schema": [
+        "hunger",
+        "energy",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "near_ood",
+      "profile": {
+        "feed": {
+          "hunger": "up",
+          "mood": "up"
+        },
+        "play": {
+          "mood": "up",
+          "energy": "down"
+        },
+        "wash": {
+          "cleanliness": "up",
+          "mood": "up"
+        },
+        "rest": {
+          "energy": "up"
+        }
+      },
+      "conditional": {
+        "play": [
+          {
+            "when": {
+              "energy": [
+                "worn out"
+              ]
+            },
+            "effects": {
+              "mood": "down",
+              "energy": "down"
+            }
+          }
+        ]
+      },
+      "derived_from": "dog",
+      "similarity": "near: wash mood effect flipped (down->up)"
+    },
+    "pony": {
+      "display": "the pony",
+      "schema": [
+        "hunger",
+        "energy",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "near_ood",
+      "profile": {
+        "feed": {
+          "hunger": "up"
+        },
+        "play": {
+          "mood": "up",
+          "energy": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "rest": {
+          "energy": "up",
+          "mood": "up"
+        }
+      },
+      "conditional": {},
+      "derived_from": "horse",
+      "similarity": "near: play no longer dirties; rest now lifts mood"
+    },
+    "sprout": {
+      "display": "the sprout",
+      "schema": [
+        "thirst",
+        "mood",
+        "cleanliness"
+      ],
+      "split_role": "near_ood",
+      "profile": {
+        "water": {
+          "thirst": "up",
+          "mood": "up"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "wait": {
+          "thirst": "down",
+          "mood": "down"
+        }
+      },
+      "conditional": {},
+      "derived_from": "fern",
+      "similarity": "near: overwatering penalty removed; wait also lowers mood"
+    },
+    "terrarium": {
+      "display": "the terrarium",
+      "schema": [
+        "fill",
+        "open",
+        "thirst",
+        "cleanliness"
+      ],
+      "split_role": "far_ood",
+      "profile": {
+        "water": {
+          "thirst": "up",
+          "fill": "up"
+        },
+        "fill": {
+          "fill": "up"
+        },
+        "open": {
+          "open": "up",
+          "thirst": "down"
+        },
+        "close": {
+          "open": "down"
+        },
+        "wash": {
+          "cleanliness": "up"
+        },
+        "wait": {
+          "thirst": "down",
+          "fill": "down"
+        }
+      },
+      "conditional": {
+        "open": [
+          {
+            "when": {
+              "thirst": [
+                "parched"
+              ]
+            },
+            "effects": {
+              "open": "up"
+            }
+          }
+        ]
+      },
+      "derived_from": "kettle+fern",
+      "similarity": "far: novel schema combo (container+plant); cross-attribute coupling water->fill, open->thirst"
+    },
+    "robot pet": {
+      "display": "the robot pet",
+      "schema": [
+        "power",
+        "fill",
+        "mood",
+        "energy"
+      ],
+      "split_role": "far_ood",
+      "profile": {
+        "switch on": {
+          "power": "up",
+          "energy": "up"
+        },
+        "switch off": {
+          "power": "down",
+          "energy": "down"
+        },
+        "play": {
+          "mood": "up",
+          "fill": "down"
+        },
+        "fill": {
+          "fill": "up",
+          "mood": "up"
+        },
+        "wait": {
+          "fill": "down"
+        }
+      },
+      "conditional": {
+        "play": [
+          {
+            "when": {
+              "fill": [
+                "empty"
+              ]
+            },
+            "effects": {
+              "mood": "down"
+            }
+          }
+        ]
+      },
+      "derived_from": "lamp+dog",
+      "similarity": "far: device+living combo; charge<->mood<->energy coupling unseen in training"
+    }
+  }
+}

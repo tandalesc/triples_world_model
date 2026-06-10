@@ -27,6 +27,9 @@ class DomainBPETokenizer:
         self.unk_token_id = tokenizer.token_to_id("<unk>")
         self.vocab_size = tokenizer.get_vocab_size()
 
+    def save(self, path: str | Path) -> None:
+        self._tok.save(str(path))
+
     @classmethod
     def load(cls, path: str | Path, max_length: int = 12) -> "DomainBPETokenizer":
         tokenizer = Tokenizer.from_file(str(path))

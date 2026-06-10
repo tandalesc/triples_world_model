@@ -1,0 +1,34 @@
+{
+    "model_type": "dynamics",
+    "profile": "mini",
+    "d_model": 64,
+    "max_triples": 12,
+    "text_compressor_layers": 3,
+    "text_expander_layers": 3,
+    "max_text_tokens": 64,
+    "data_dir": "data/webnlg_multi",
+    "tokenizer_path": "data/webnlg_multi/shared_bpe_tokenizer.json",
+    "out_dir": "results/v18_mini64",
+    "batch_size": 64,
+    "length_weight": 0.25,
+    "stages": [
+        {
+            "name": "io",
+            "dataset": "identity",
+            "lr": 3e-4,
+            "phases": [
+                {"t_min": 0.7, "t_max": 1.0, "epochs": 400, "patience": 0},
+                {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 100}
+            ]
+        },
+        {
+            "name": "dynamics",
+            "dataset": "qa",
+            "freeze": ["compressor", "expander"],
+            "lr": 3e-4,
+            "phases": [
+                {"t_min": 0.0, "t_max": 1.0, "bias_power": 2.0, "epochs": 800, "patience": 100}
+            ]
+        }
+    ]
+}
