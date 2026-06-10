@@ -41,10 +41,15 @@ class JEPAChainDataset:
         path: str | Path,
         tokenizer: DomainBPETokenizer,
         max_text_tokens: int = 64,
+        append_eos: bool = False,
     ) -> None:
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
+        self.append_eos = append_eos
         pad_id = tokenizer.pad_token_id  # 0 per domain_bpe.py convention
+        # <eos>=4 per the GLUCOSE BPE artifact (design v2 §7). Only used when
+        # append_eos=True so the AR token decoder learns to stop.
+        eos_id = 4
 
         # Collect adjacent (src_text, tgt_text) pairs from all chains.
         # A chain of length L yields L-1 adjacent pairs.
@@ -68,14 +73,30 @@ class JEPAChainDataset:
         self._tgt_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
         self._tgt_pad: Tensor = torch.ones((n, T), dtype=torch.bool)
 
+        def _insert_eos(ids: list[int]) -> list[int]:
+            """Insert <eos> at the first pad slot (or overwrite T-1 if full) so the
+            decoder learns to stop. <eos> stays a real (unmasked) target token;
+            positions after it remain pad. List length is unchanged (== T)."""
+            ids = list(ids)
+            if pad_id in ids:
+                ids[ids.index(pad_id)] = eos_id
+            else:
+                ids[-1] = eos_id  # sequence fills T — overwrite the last token
+            return ids
+
         for i, (src, tgt) in enumerate(zip(src_texts, tgt_texts)):
             src_ids = tokenizer.encode(src, max_length=T)
             tgt_ids = tokenizer.encode(tgt, max_length=T)
+            if append_eos:
+                src_ids = _insert_eos(src_ids)
+                tgt_ids = _insert_eos(tgt_ids)
 
             self._src_ids[i] = torch.tensor(src_ids, dtype=torch.long)
             self._tgt_ids[i] = torch.tensor(tgt_ids, dtype=torch.long)
 
-            # Padding mask: True where position holds a pad token.
+            # Padding mask: True where position holds a pad token. With append_eos
+            # the <eos> position is NOT pad (it is a real target token); only the
+            # trailing post-eos pad positions are masked.
             self._src_pad[i] = torch.tensor(src_ids, dtype=torch.long) == pad_id
             self._tgt_pad[i] = torch.tensor(tgt_ids, dtype=torch.long) == pad_id
 

@@ -24,6 +24,9 @@ from twm.jepa import (
     JEPA_PROFILES,
     SIGRegConfig,
     VerbConfig,
+    TransitionConfig,
+    PriorConfig,
+    DecoderConfig,
     LossConfig,
     DataConfig,
     ModelHParams,
@@ -45,6 +48,26 @@ def _build_loss(data: dict) -> LossConfig:
     sigreg = SIGRegConfig(**_only_known(SIGRegConfig, data.pop("sigreg", {})))
     verb = VerbConfig(**_only_known(VerbConfig, data.pop("verb", {})))
     return LossConfig(sigreg=sigreg, verb=verb, **_only_known(LossConfig, data))
+
+
+def _build_model(profile: str, model_json: dict) -> ModelHParams:
+    """Overlay profile defaults with explicit JSON, parsing the nested v2 blocks
+    (model.{transition,prior,decoder}) into their dataclasses (design §10).
+
+    The nested blocks are popped before the flat field overlay so the raw dicts
+    never reach ModelHParams(**...) as scalar fields.
+    """
+    raw = dict(JEPA_PROFILES.get(profile, {}))
+    raw.update(model_json or {})
+    transition = TransitionConfig(**_only_known(TransitionConfig, raw.pop("transition", {})))
+    prior = PriorConfig(**_only_known(PriorConfig, raw.pop("prior", {})))
+    decoder = DecoderConfig(**_only_known(DecoderConfig, raw.pop("decoder", {})))
+    return ModelHParams(
+        transition=transition,
+        prior=prior,
+        decoder=decoder,
+        **_only_known(ModelHParams, raw),
+    )
 
 
 @dataclass
@@ -80,10 +103,9 @@ class JEPAConfig:
         data = dict(data)
         profile = data.get("profile", "jepa_nano")
 
-        # model: start from profile defaults, overlay explicit JSON keys.
-        model_raw = dict(JEPA_PROFILES.get(profile, {}))
-        model_raw.update(data.get("model", {}))
-        model = ModelHParams(**_only_known(ModelHParams, model_raw))
+        # model: start from profile defaults, overlay explicit JSON keys, parse
+        # the nested v2 transition/prior/decoder blocks.
+        model = _build_model(profile, data.get("model", {}))
 
         return cls(
             profile=profile,
@@ -114,6 +136,9 @@ __all__ = [
     "JEPA_PROFILES",
     "SIGRegConfig",
     "VerbConfig",
+    "TransitionConfig",
+    "PriorConfig",
+    "DecoderConfig",
     "LossConfig",
     "DataConfig",
     "ModelHParams",

@@ -262,6 +262,17 @@ JEPA_PROFILES: dict[str, dict] = {
         "operator_group": "rotation_scale", "n_steps_T": 1,
         "vocab_size": 512, "max_text_tokens": 64,
     },
+    # v2 (latent actions + token decoder). Same encoder/operator shape as nano; the
+    # nested transition/prior/decoder blocks come from the JSON `model` block (kept
+    # OUT of the flat profile per design §10 — the profile stays minimal). Listed
+    # here so `apply_profile`/from_dict resolve a known profile name.
+    "jepa_nano_v2": {
+        "d_model": 64, "d_noun": 32, "n_slots": 8, "n_verbs": 8,
+        "block": 2, "n_text_layers": 2, "tie_text_layers": True,
+        "n_heads": 4, "n_slot_iters": 3,
+        "operator_group": "rotation_scale", "n_steps_T": 1,
+        "vocab_size": 512, "max_text_tokens": 64,
+    },
 }
 
 
@@ -284,12 +295,39 @@ class VerbConfig:
 
 @dataclass
 class LossConfig:
+    # v1 weights kept on the dataclass so v1 configs still parse; the v2 loss
+    # (losses_v2.JEPALossV2) ignores w_div/w_scale_reg (design §10).
     w_pred: float = 1.0
     w_sigreg: float = 0.05
     w_div: float = 0.1
     w_scale_reg: float = 0.0  # soft ‖log r‖₂ penalty; off by default (§1.5)
+    # v2 additions (design §5 / §10):
+    w_token: float = 1.0   # primary CE grounding loss
+    w_prior: float = 0.1   # KL(stopgrad q ‖ p) for autonomous rollout
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
+
+
+@dataclass
+class TransitionConfig:
+    """Posterior q(v | text_t, text_t+1) MLP head (design §2). model.transition."""
+    mlp_hidden: int = 128
+    use_delta: bool = True
+
+
+@dataclass
+class PriorConfig:
+    """Prior p(v | text_t) MLP head (design §3). model.prior."""
+    mlp_hidden: int = 64
+
+
+@dataclass
+class DecoderConfig:
+    """Token AR decoder over a* memory (design §4). model.decoder."""
+    d_dec: int = 64
+    n_layers: int = 1
+    n_heads: int = 4
+    d_ff: int = 128
 
 
 @dataclass
@@ -300,6 +338,7 @@ class DataConfig:
     max_text_tokens: int = 64
     pairing: str = "adjacent"
     max_chains: int | None = None  # smoke/debug cap on #chains (None = full dataset)
+    append_eos: bool = False  # v2: append <eos>=4 to tokenized states (default = v1 behavior)
 
 
 @dataclass
@@ -315,6 +354,11 @@ class ModelHParams:
     n_slot_iters: int = 3
     operator_group: str = "rotation_scale"  # "rotation_scale" | "rotation" | "son_cayley"
     n_steps_T: int = 1
+    # v2 nested heads (design §10). default_factory so v1 configs without these blocks
+    # still construct a valid ModelHParams.
+    transition: TransitionConfig = field(default_factory=TransitionConfig)
+    prior: PriorConfig = field(default_factory=PriorConfig)
+    decoder: DecoderConfig = field(default_factory=DecoderConfig)
 
 
 @dataclass
@@ -338,6 +382,9 @@ class EvalConfig:
     every_epochs: int = 5
     n_examples: int = 512
     out_dir: str = "results/jepa_nano"
+    # v2 generated-text diagnostics (design §8 / §10):
+    n_text_samples: int = 16
+    temperatures: list[float] = field(default_factory=lambda: [0.7, 1.0])
 
 
 @dataclass
@@ -391,6 +438,11 @@ if TYPE_CHECKING:  # static-analysis-only imports; never executed at runtime
     from .losses import JEPALoss
     from .data import JEPAChainDataset
     from .model import JEPAOperatorModel
+    # v2 concrete classes (sibling tasks; re-exported lazily once their modules land).
+    from .transition import TransitionEncoder, PriorHead
+    from .decoder import TokenDecoder
+    from .losses_v2 import JEPALossV2
+    from .model_v2 import JEPAOperatorModelV2
 
 
 def __getattr__(name: str):
@@ -412,6 +464,12 @@ def __getattr__(name: str):
         "JEPALoss": ".losses",
         "JEPAChainDataset": ".data",
         "JEPAOperatorModel": ".model",
+        # v2 concrete classes (sibling tasks):
+        "TransitionEncoder": ".transition",
+        "PriorHead": ".transition",
+        "TokenDecoder": ".decoder",
+        "JEPALossV2": ".losses_v2",
+        "JEPAOperatorModelV2": ".model_v2",
     }
     mod = _MODULE_OF.get(name)
     if mod is None:
@@ -443,6 +501,9 @@ __all__ = [
     "LossConfig",
     "SIGRegConfig",
     "VerbConfig",
+    "TransitionConfig",
+    "PriorConfig",
+    "DecoderConfig",
     "EMAConfig",
     "OptimConfig",
     "EvalConfig",
@@ -457,4 +518,10 @@ __all__ = [
     "JEPALoss",
     "JEPAChainDataset",
     "JEPAOperatorModel",
+    # v2 concrete classes (lazily re-exported once their modules land)
+    "TransitionEncoder",
+    "PriorHead",
+    "TokenDecoder",
+    "JEPALossV2",
+    "JEPAOperatorModelV2",
 ]
