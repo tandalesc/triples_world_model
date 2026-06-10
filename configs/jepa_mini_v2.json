@@ -1,0 +1,27 @@
+{
+  "profile": "jepa_mini",
+  "seed": 0,
+  "data": {
+    "path": "data/glucose/chain_general_train.jsonl",
+    "tokenizer": "data/glucose/jepa_bpe_512.json",
+    "vocab_size": 512,
+    "max_text_tokens": 64,
+    "pairing": "adjacent"
+  },
+  "model": {
+    "d_model": 128, "d_noun": 32, "n_slots": 12, "n_verbs": 16,
+    "block": 2, "n_text_layers": 4, "tie_text_layers": false,
+    "n_heads": 8, "n_slot_iters": 3,
+    "operator_group": "rotation_scale",
+    "n_steps_T": 1
+  },
+  "loss": {
+    "w_pred": 1.0, "w_sigreg": 0.05, "w_div": 0.133, "w_scale_reg": 0.0,
+    "sigreg": {"n_slices": 256, "n_knots": 17, "knot_max": 3.0, "standardize": true},
+    "verb": {"gumbel_tau_start": 2.0, "gumbel_tau_end": 0.6, "anneal_frac": 0.3}
+  },
+  "ema": {"tau": 0.995, "schedule": "fixed"},
+  "optim": {"lr": 3e-4, "weight_decay": 0.01, "batch_size": 64, "epochs": 100, "grad_clip": 1.0, "warmup_steps": 200},
+  "eval": {"every_epochs": 5, "n_examples": 512, "out_dir": "results/jepa_mini_v2"},
+  "operator_fit_pass2": {"enabled": true, "after_epoch": 5}
+}
