@@ -1,0 +1,158 @@
+{
+  "experiment": "engram_lookup_vs_H",
+  "ckpt": "/tmp/jepa_battery/ck/structured/model_latest.pt",
+  "config": "configs/jepa/jepa_ent_s0.json",
+  "model": {
+    "M": 8,
+    "d_noun": 32,
+    "nb": 16,
+    "n_verbs": 8,
+    "use_norm_budget": true,
+    "use_polar_conditioning": true
+  },
+  "lookup_table": {
+    "key": "(kmeans_cluster_id(per_slot_modulus_profile), verb_id)",
+    "value": "H(|k_i|) per-slot phase-offset vector (nb)",
+    "kmeans_k": 64,
+    "kmeans_clusters_used_on_fit": 64,
+    "kmeans_fit_profiles": 79392,
+    "shared_codebook_across_slots": true,
+    "n_population_steps": 20057,
+    "n_distinct_keys": 423,
+    "total_replay_mass": 160456
+  },
+  "number_1_hit_rate": {
+    "overall": {
+      "slots": 79880,
+      "hit_rate": 0.999949924887331
+    },
+    "commuting": {
+      "slots": 14272,
+      "hit_rate": 0.999929932735426
+    },
+    "interaction": {
+      "slots": 65608,
+      "hit_rate": 0.9999542738690403
+    }
+  },
+  "number_2_ce_delta": {
+    "ce_pure_H_mean": 8.734110481594584,
+    "ce_swap_in_mean": 8.735697321325883,
+    "ce_delta_swap_minus_H": 0.00158683973129925,
+    "ce_delta_hit_heavy_steps": 0.00158683973129925,
+    "n_hit_heavy_steps": 9985,
+    "note": "CE delta > 0 means swap-in is WORSE (higher NLL) than pure H."
+  },
+  "number_3_ledger_verdict": {
+    "inverse_roundtrip_exact": true,
+    "inv_err_pure_H_mean": 1.2213757495501533e-06,
+    "inv_err_swap_in_mean": 1.2352874856901452e-06,
+    "inv_err_swap_in_max": 1.5138768958422588e-06,
+    "identity_persistence_pure_H": 1.3462659737916964,
+    "identity_persistence_swap_in": 1.3462659746871093,
+    "note": "Swap-in offsets routed through the SAME operator.inverse_apply ledger path (with the SAME per-slot scale_delta). Exact iff max round-trip error < 1e-4 (fp32 eps regime)."
+  },
+  "per_key_variance_distribution": {
+    "n_keys": 423,
+    "mean_per_key_var": 0.0025288704227145135,
+    "count_weighted_var": 0.0036208996984376375,
+    "p50": 0.001564991776831448,
+    "p90": 0.006232884246855974,
+    "p99": 0.012450803071260452,
+    "max": 0.018153786659240723,
+    "frac_keys_var_lt_1e-4": 0.12056737588652482,
+    "frac_keys_var_lt_1e-3": 0.3806146572104019
+  },
+  "splitting_rule": "A chain step's action targets entity idx e. INTERACTION-SECTOR iff an adjacent action (prev or next in the same chain) targets the SAME e; COMMUTING-SECTOR iff all adjacent actions target disjoint entities; isolated steps (no adjacent action) excluded from the split, counted in overall only. Slots inherit their step's sector.",
+  "n_test_steps": 9985,
+  "ood_extension": {
+    "prediction": "table hit-rate COLLAPSES on unseen entity types while H generalizes (continuous-identity-vs-lookup, purest form)",
+    "table_built_on": "training trajectories (in-domain entity types only)",
+    "per_split": {
+      "test_iid": {
+        "split": "test_iid",
+        "n_steps": 9985,
+        "hit_rate": {
+          "overall": {
+            "slots": 79880,
+            "hit_rate": 0.999949924887331
+          },
+          "commuting": {
+            "slots": 14272,
+            "hit_rate": 0.999929932735426
+          },
+          "interaction": {
+            "slots": 65608,
+            "hit_rate": 0.9999542738690403
+          }
+        },
+        "ce_pure_H_mean": 8.734110481594584,
+        "ce_swap_in_mean": 8.735697321325883,
+        "ce_delta_swap_minus_H": 0.00158683973129925
+      },
+      "test_ood_near": {
+        "split": "test_ood_near",
+        "n_steps": 9855,
+        "hit_rate": {
+          "overall": {
+            "slots": 78840,
+            "hit_rate": 0.9998731608320649
+          },
+          "commuting": {
+            "slots": 14016,
+            "hit_rate": 1.0
+          },
+          "interaction": {
+            "slots": 64824,
+            "hit_rate": 0.999845736147106
+          }
+        },
+        "ce_pure_H_mean": 9.491995849057783,
+        "ce_swap_in_mean": 9.481779667667057,
+        "ce_delta_swap_minus_H": -0.01021618139072622,
+        "ce_delta_hit_heavy_steps": -0.01021618139072622,
+        "n_hit_heavy_steps": 9855,
+        "identity_persistence_pure_H": 1.3576722831426085,
+        "identity_persistence_swap_in": 1.3576722883803176,
+        "available": true
+      },
+      "test_ood_far": {
+        "split": "test_ood_far",
+        "n_steps": 9957,
+        "hit_rate": {
+          "overall": {
+            "slots": 79656,
+            "hit_rate": 0.9939615345987747
+          },
+          "commuting": {
+            "slots": 14304,
+            "hit_rate": 0.9868568232662193
+          },
+          "interaction": {
+            "slots": 65352,
+            "hit_rate": 0.995516587097564
+          }
+        },
+        "ce_pure_H_mean": 12.240959094496656,
+        "ce_swap_in_mean": 12.256833977089645,
+        "ce_delta_swap_minus_H": 0.01587488259298908,
+        "ce_delta_hit_heavy_steps": 0.015853433809388306,
+        "n_hit_heavy_steps": 9947,
+        "identity_persistence_pure_H": 1.3389926282136186,
+        "identity_persistence_swap_in": 1.3389926324997417,
+        "available": true
+      }
+    },
+    "hit_rate_ladder_overall": {
+      "test_iid": 0.999949924887331,
+      "test_ood_near": 0.9998731608320649,
+      "test_ood_far": 0.9939615345987747
+    },
+    "hit_rate_monotone_collapse_iid_to_far": true,
+    "ce_delta_ladder": {
+      "test_iid": 0.00158683973129925,
+      "test_ood_near": -0.01021618139072622,
+      "test_ood_far": 0.01587488259298908
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "backend": "blackbox",
+  "inverse_supported": false,
+  "n_chains": 0,
+  "K": 4,
+  "retract_j": 2
+}
