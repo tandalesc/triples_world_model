@@ -400,3 +400,46 @@ class TestContiguousLayout:
         """All stored tensors must live on CPU (trainer moves batches to device)."""
         assert tiny_dataset._src_ids.device.type == "cpu"
         assert tiny_dataset._tgt_ids.device.type == "cpu"
+
+
+# ---------------------------------------------------------------------------
+# chain_ids — same-chain hard-negative MRR wiring (v2.1, design §8.2)
+# ---------------------------------------------------------------------------
+
+class TestChainIds:
+    def test_chain_ids_length_matches_dataset(self, tiny_dataset):
+        """chain_ids is a public list with one entry per pair (len == len(dataset))."""
+        assert hasattr(tiny_dataset, "chain_ids")
+        assert isinstance(tiny_dataset.chain_ids, list)
+        assert len(tiny_dataset.chain_ids) == len(tiny_dataset)
+
+    def test_n_distinct_chains(self, tiny_dataset):
+        """5 chains in the tiny fixture -> exactly 5 distinct chain ids."""
+        assert len(set(tiny_dataset.chain_ids)) == 5
+
+    def test_adjacent_pairs_share_chain_id(self, tiny_dataset):
+        """A length-3 chain yields 2 adjacent pairs that MUST share one chain id.
+
+        Without this, the diagnostics same-chain pool degenerates to `cid = idx` and
+        easy_minus_hard_mrr passes vacuously (the integrator-flagged gap)."""
+        cids = tiny_dataset.chain_ids
+        # pairs are emitted in chain order: (chain0 p0, chain0 p1, chain1 p0, ...)
+        for chain_no in range(5):
+            assert cids[2 * chain_no] == cids[2 * chain_no + 1] == chain_no
+
+    def test_chain_ids_align_after_cap(self, tiny_jsonl, tokenizer):
+        """The max_chains cap path (train_jepa_v2.py) slices _chain_ids alongside the
+        tensors; after truncation, chain_ids stays aligned (len == len(dataset))."""
+        from src.twm.jepa.data import JEPAChainDataset
+        ds = JEPAChainDataset(tiny_jsonl, tokenizer, max_text_tokens=MAX_TEXT_TOKENS)
+        cap = 3 * 2  # keep 3 chains -> 6 pairs (mirror trainer: max_chains*2)
+        ds._src_ids = ds._src_ids[:cap].contiguous()
+        ds._src_pad = ds._src_pad[:cap].contiguous()
+        ds._tgt_ids = ds._tgt_ids[:cap].contiguous()
+        ds._tgt_pad = ds._tgt_pad[:cap].contiguous()
+        ds._src_texts = ds._src_texts[:cap]
+        ds._tgt_texts = ds._tgt_texts[:cap]
+        ds._chain_ids = ds._chain_ids[:cap]
+        assert len(ds) == cap
+        assert len(ds.chain_ids) == cap
+        assert set(ds.chain_ids) == {0, 1, 2}

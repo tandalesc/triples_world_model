@@ -1,7 +1,9 @@
-"""Train the JEPA Operator world model (spec §10).
+"""Train the v1 JEPA Operator world model (spec §10). DEMOTED to legacy/.
+
+This reproduces the v1 predictive-verb negative result; it is NOT on the live path.
 
 Usage:
-    uv run python scripts/train_jepa.py configs/jepa_nano.json
+    uv run python scripts/legacy/train_jepa.py configs/archive/jepa_nano.json
 
 Loop (spec §10): per batch — forward (Gumbel-softmax verbs) → JEPALoss → backward →
 clip_grad_norm_(online, 1.0) → optimizer.step() → model.ema_update(τ) → anneal τ_g →
@@ -23,11 +25,11 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-# Make `twm` importable when run from repo root.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+# Make `twm` importable when run from repo root (this file lives in scripts/legacy/).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from twm.jepa.config import JEPAConfig
-from twm.jepa.model import build_jepa_model
+from twm.jepa.legacy.model_v1 import build_jepa_model
 
 
 def resolve_device(device_str: str | None = None) -> torch.device:
@@ -89,7 +91,7 @@ def build_loss(cfg, operator):
     loss is constructed with a reference to the operator. Constructor kwargs are
     filtered to what JEPALoss actually accepts (sibling-module naming drift safety).
     """
-    from twm.jepa import JEPALoss
+    from twm.jepa.legacy.losses_v1 import JEPALoss
     import inspect
 
     lc = cfg.loss
@@ -139,7 +141,7 @@ def maybe_eval_diagnostics(model, dataset, device, cfg, epoch):
     """Run §5 diagnostics if the module is available (import-guarded so training
     survives diagnostics being mid-build)."""
     try:
-        from twm.jepa.diagnostics import eval_diagnostics
+        from twm.jepa.legacy.diagnostics_v1 import eval_diagnostics
     except Exception as e:  # module not written yet / broken — never block training
         print(f"  [diagnostics skipped: {e}]", flush=True)
         return

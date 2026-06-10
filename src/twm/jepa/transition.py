@@ -172,7 +172,7 @@ class PriorHead(nn.Module):
     This is what makes autonomous rollout possible: at inference the posterior is
     gone, so the action is sampled from the prior (or set directly by a user
     action). Trained to imitate the (stop-grad) posterior via L_prior (§3.1),
-    which lives in losses_v2.py — this module only emits p_logits.
+    which lives in losses.py — this module only emits p_logits.
 
     Reads the SAME pool_t the posterior already computed (passed in by the model;
     do NOT recompute the trunk pass). Deliberately minimal — no LayerNorm, since

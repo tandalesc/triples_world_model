@@ -1,23 +1,24 @@
-"""JEPA Operator World Model — frozen contracts (v1).
+"""JEPA Operator World Model — contracts + lazy re-exports.
 
-Authoritative spec: research/jepa_operator_v1_design.md (§12 work breakdown).
-
-This module is the FROZEN INTERFACE STUB. It defines the contracts that the six
-concurrently-developed tasks (T1 operator, T2 slot encoder, T3 losses, T4 data,
-T5 model/config, T6 diagnostics) code against. Signatures only — no
-implementation bodies live here.
+Specs: research/jepa_v2_latent_actions.md (live v2 path),
+research/jepa_operator_v1_design.md (demoted v1 baseline, src/twm/jepa/legacy/).
 
 Two kinds of names are exported:
 
   1. Contract base classes defined *in this file* — the ABCs / Protocols / config
-     dataclass skeletons. These are the actual frozen contracts. Concrete modules
-     (operator.py, slot_encoder.py, ...) subclass / satisfy them.
+     dataclass skeletons. Concrete modules (operator.py, slot_encoder.py, ...)
+     subclass / satisfy them.
 
-  2. Concrete classes re-exported lazily from their owning modules once those land
-     (RotationScaleOperator, SlotEncoder, JEPALoss, ...). Until a module exists the
-     re-export is skipped via a guarded import so `import twm.jepa` succeeds TODAY
-     with no concrete modules present. The contract base classes remain importable
-     as fallbacks in the meantime.
+  2. Concrete classes re-exported lazily (PEP 562 `__getattr__`) from their owning
+     modules: the live v2 path (`model.JEPAOperatorModelV2`, `losses.JEPALoss` /
+     its `JEPALossV2` alias, transition/decoder) and the legacy v1 baseline
+     (`legacy.model_v1.JEPAOperatorModel`). The lazy import keeps `import twm.jepa`
+     cheap and avoids pulling matplotlib/torch heads at package import.
+
+Naming convention (refactor R.1): module files dropped the `_v2` suffix — the v2
+path is THE path. The class export names `JEPAOperatorModelV2` / `JEPALossV2` are
+kept as the frozen public interface of the in-flight GPU run; `JEPALoss` is an
+alias of `JEPALossV2` on the live path.
 
 Shapes (spec §2): B=batch, M=slots, dn=d_noun, V=verbs, T_text=text tokens, d=d_model.
 """
@@ -295,8 +296,8 @@ class VerbConfig:
 
 @dataclass
 class LossConfig:
-    # v1 weights kept on the dataclass so v1 configs still parse; the v2 loss
-    # (losses_v2.JEPALossV2) ignores w_div/w_scale_reg (design §10).
+    # v1 weights kept on the dataclass so v1 configs still parse; the live loss
+    # (losses.JEPALoss / JEPALossV2 alias) ignores w_div/w_scale_reg (design §10).
     w_pred: float = 1.0
     w_sigreg: float = 0.05
     w_div: float = 0.1
@@ -354,6 +355,12 @@ class ModelHParams:
     n_slot_iters: int = 3
     operator_group: str = "rotation_scale"  # "rotation_scale" | "rotation" | "son_cayley"
     n_steps_T: int = 1
+    # v2.1 polar conditioning (design §10). All default-False ⟹ every existing v2.0
+    # config still parses and builds an IDENTICAL model (the §11 behavior-preservation
+    # gate depends on this).
+    use_polar_conditioning: bool = False  # master switch for the H phase-offset path
+    use_kind_head: bool = False           # §7 diagnostic kind readout; default off
+    kind_codebook_size: int = 16          # K, only read when use_kind_head=True
     # v2 nested heads (design §10). default_factory so v1 configs without these blocks
     # still construct a valid ModelHParams.
     transition: TransitionConfig = field(default_factory=TransitionConfig)
@@ -435,14 +442,14 @@ if TYPE_CHECKING:  # static-analysis-only imports; never executed at runtime
         SOnCayleyOperator,
     )
     from .slot_encoder import SlotEncoder, NounHead, VerbHead
-    from .losses import JEPALoss
+    from .losses import JEPALoss, JEPALossV2
     from .data import JEPAChainDataset
-    from .model import JEPAOperatorModel
-    # v2 concrete classes (sibling tasks; re-exported lazily once their modules land).
+    from .model import JEPAOperatorModelV2
     from .transition import TransitionEncoder, PriorHead
     from .decoder import TokenDecoder
-    from .losses_v2 import JEPALossV2
-    from .model_v2 import JEPAOperatorModelV2
+    from .conditioning import PolarConditioner, KindHead, block_modulus
+    # v1 baseline (demoted to legacy/).
+    from .legacy.model_v1 import JEPAOperatorModel
 
 
 def __getattr__(name: str):
@@ -463,13 +470,18 @@ def __getattr__(name: str):
         "VerbHead": ".slot_encoder",
         "JEPALoss": ".losses",
         "JEPAChainDataset": ".data",
-        "JEPAOperatorModel": ".model",
-        # v2 concrete classes (sibling tasks):
+        # v1 baseline lives under legacy/ (demoted, not deleted).
+        "JEPAOperatorModel": ".legacy.model_v1",
+        # v2 concrete classes (the live path):
         "TransitionEncoder": ".transition",
         "PriorHead": ".transition",
         "TokenDecoder": ".decoder",
-        "JEPALossV2": ".losses_v2",
-        "JEPAOperatorModelV2": ".model_v2",
+        "JEPALossV2": ".losses",
+        "JEPAOperatorModelV2": ".model",
+        # v2.1 polar conditioning (design §3 / §7):
+        "PolarConditioner": ".conditioning",
+        "KindHead": ".conditioning",
+        "block_modulus": ".conditioning",
     }
     mod = _MODULE_OF.get(name)
     if mod is None:
@@ -524,4 +536,8 @@ __all__ = [
     "TokenDecoder",
     "JEPALossV2",
     "JEPAOperatorModelV2",
+    # v2.1 polar conditioning
+    "PolarConditioner",
+    "KindHead",
+    "block_modulus",
 ]

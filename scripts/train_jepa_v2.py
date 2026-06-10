@@ -16,7 +16,7 @@ This bug bit v1 twice — the only checkpoint kept was the last one, so a collap
 final epochs erased every recoverable earlier state. v2 keeps every eval checkpoint.
 
 This script composes the v2 model/loss/diagnostics through the frozen contracts; the
-sibling modules (transition, decoder, losses_v2, diagnostics_v2) are import-guarded so
+sibling modules (transition, decoder, losses, diagnostics) are import-guarded so
 training survives a sibling being mid-build.
 """
 
@@ -34,7 +34,7 @@ import torch.nn as nn
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from twm.jepa.config import JEPAConfig
-from twm.jepa.model_v2 import build_jepa_model_v2
+from twm.jepa.model import build_jepa_model_v2
 
 
 def resolve_device(device_str: str | None = None) -> torch.device:
@@ -139,7 +139,7 @@ def maybe_eval_diagnostics(model, dataset, device, cfg, epoch, tokenizer):
     """Run §8 v2 diagnostics if the module is available (import-guarded so training
     survives diagnostics being mid-build)."""
     try:
-        from twm.jepa.diagnostics_v2 import eval_diagnostics_v2
+        from twm.jepa.diagnostics import eval_diagnostics_v2
     except Exception as e:
         print(f"  [diagnostics_v2 skipped: {e}]", flush=True)
         return
@@ -220,6 +220,8 @@ def train(config_path: str):
             dataset._tgt_pad = dataset._tgt_pad[:cap].contiguous()
             dataset._src_texts = dataset._src_texts[:cap]
             dataset._tgt_texts = dataset._tgt_texts[:cap]
+            # Keep chain_ids aligned with the truncated dataset (design §8.2).
+            dataset._chain_ids = dataset._chain_ids[:cap]
             n_train = len(dataset)
     print(f"Dataset: {n_train} pairs (append_eos={cfg.data.append_eos})")
 

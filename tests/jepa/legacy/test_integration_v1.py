@@ -18,11 +18,11 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from twm.jepa.config import JEPAConfig
-from twm.jepa.model import build_jepa_model
-from twm.jepa.losses import JEPALoss
+from twm.jepa.legacy.model_v1 import build_jepa_model
+from twm.jepa.legacy.losses_v1 import JEPALoss
 
 
 def _nano_cfg():

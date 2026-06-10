@@ -55,14 +55,21 @@ class JEPAChainDataset:
         # A chain of length L yields L-1 adjacent pairs.
         src_texts: list[str] = []
         tgt_texts: list[str] = []
+        # chain_ids (design §8.2): the originating chain index per pair. The two
+        # adjacent pairs of a length-3 chain SHARE an id so the hard-negative MRR
+        # (diagnostics) can build true same-chain negative pools instead of degenerating
+        # to the easy pool (the integrator's flagged gap). Without this, every pair falls
+        # into the `cid = idx` fallback and `easy_minus_hard_mrr` passes vacuously.
+        chain_ids: list[int] = []
 
         with open(path) as f:
-            for line in f:
+            for chain_no, line in enumerate(f):
                 data = json.loads(line)
                 chain: list[str] = data["chain"]
                 for i in range(len(chain) - 1):
                     src_texts.append(chain[i])
                     tgt_texts.append(chain[i + 1])
+                    chain_ids.append(chain_no)
 
         n = len(src_texts)
         T = max_text_tokens
@@ -103,10 +110,22 @@ class JEPAChainDataset:
         # Keep the raw texts for iter_text_pairs() (operator-fit pass-2 §7).
         self._src_texts: list[str] = src_texts
         self._tgt_texts: list[str] = tgt_texts
+        # Per-pair originating chain id (design §8.2). len == len(dataset).
+        self._chain_ids: list[int] = chain_ids
 
     # ------------------------------------------------------------------
     # Core dataset interface
     # ------------------------------------------------------------------
+
+    @property
+    def chain_ids(self) -> list[int]:
+        """Per-pair originating chain id (design §8.2), len == len(self).
+
+        Adjacent pairs of one chain share an id, so the diagnostics hard-negative MRR
+        builds true same-chain negative pools. Stays aligned with the `max_chains` cap
+        path (train_jepa_v2.py slices `_chain_ids` alongside the tensors).
+        """
+        return self._chain_ids
 
     def __len__(self) -> int:
         return self._src_ids.shape[0]

@@ -409,7 +409,7 @@ def main():
 
     def _rebuild_from_state(state_dict, cfg_dict):
         import torch.nn as nn
-        from twm.jepa.model import build_jepa_model
+        from twm.jepa.legacy.model_v1 import build_jepa_model
         from twm.jepa.config import JEPAConfig
 
         cfg = JEPAConfig.from_dict(cfg_dict) if cfg_dict else JEPAConfig()

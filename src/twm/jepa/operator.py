@@ -128,6 +128,37 @@ class RotationScaleOperator(Operator):
             rr = p @ r
         return a, b, rr
 
+    def _gather_theta_r(self, v: torch.Tensor):
+        """Resolve verb arg -> per-position (θ, r) of shape (..., n_blocks).
+
+        v2.1 polar-conditioning path (design §4.1): the offset `H(|k|)` must be added
+        to the *angle* BEFORE the cos/sin so the per-slot phase advance is
+        `θ_eff = θ_v + offset`. We therefore gather θ and r separately instead of
+        gathering the pre-cos/sin coefficients (the v2.0 `_gather_blocks` path).
+
+        For a HARD one-hot `v` this gathers the exact verb row (the trained path —
+        v2.0/v2.1 train with hard=True). For a genuinely SOFT `v` we take the
+        expected θ as `Σ_v p_v θ_v` (an approximation: the block-linear
+        expected-operator identity of §1.6 holds only for the pre-trig coefficients,
+        not after a nonlinear angle add). This is documented and only matters off the
+        trained path; the v2.1 model asserts hard=True.
+
+        Returns (theta_per_pos, r_per_pos), both (..., n_blocks) float.
+        """
+        theta = self.theta.float()   # (V, n_blocks)
+        log_r = self.log_r.float()   # (V, n_blocks)
+        r = torch.exp(log_r)         # (V, n_blocks)
+
+        if not torch.is_floating_point(v):
+            idx = v.long()
+            th = F.embedding(idx, theta)  # (..., n_blocks)
+            rr = F.embedding(idx, r)
+        else:
+            p = v.float()
+            th = p @ theta                # expected angle (approx; see docstring)
+            rr = p @ r
+        return th, rr
+
     def _apply_blocks(self, x: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         """Elementwise block-linear apply given per-position (a, b) = (rcosθ, rsinθ).
 
@@ -143,38 +174,77 @@ class RotationScaleOperator(Operator):
 
     # ---- Operator interface --------------------------------------------------------
 
-    def apply(self, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def apply(
+        self,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        theta_offset: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """a* = B_v k.  RoPE-style, no matrix materialized. fp32 under autocast.
 
         v hard (B,M) long OR soft (B,M,V) float (Gumbel soft-mix; expected operator).
+
+        theta_offset (v2.1 polar conditioning, design §4.1): optional (..., n_blocks)
+        per-position angle offset added to the verb angle BEFORE the cos/sin, so the
+        effective per-slot phase advance is `θ_eff = θ_v + theta_offset`. The scale
+        `r` is UNCONDITIONED (the offset only moves phase — identity, i.e. modulus, is
+        preserved under pure rotation, design §2/§3.2). When `theta_offset is None`
+        this method is bitwise-identical to the v2.0 path (the fast `_gather_blocks`
+        coefficients route); the offset branch is only taken when explicitly provided.
         """
         with _autocast_off(k.device.type):
-            a, b, _ = self._gather_blocks(v)
+            if theta_offset is None:
+                a, b, _ = self._gather_blocks(v)
+            else:
+                theta, r = self._gather_theta_r(v)               # (..., n_blocks)
+                theta_eff = theta + theta_offset.to(theta.dtype)  # phase add (design §4.1)
+                a = r * torch.cos(theta_eff)
+                b = r * torch.sin(theta_eff)
             out = self._apply_blocks(k, a, b)
         return out.to(k.dtype)
 
-    def inverse_apply(self, a: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def inverse_apply(
+        self,
+        a: torch.Tensor,
+        v: torch.Tensor,
+        theta_offset: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """k = B_v^{-1} a = diag_blocks(R(θ)ᵀ / r) a.  STRUCTURAL — exact undo.
 
         Equivalent to negating θ and negating log_r:
             R(−θ)/r has block coefficients (cosθ/r, −sinθ/r).
+
+        theta_offset (v2.1, design §3.3/§4.2): the undo of a conditioned step subtracts
+        BOTH the verb angle and the SAME offset used in the forward — `θ_eff = θ_v +
+        theta_offset` — and divides by the (unconditioned) `r`. The caller MUST pass the
+        identical `theta_offset` that was used in the forward `apply` (computed from the
+        PRE-step modulus), never recomputed from the post-step noun (the offset is an
+        explicit argument precisely so the inverse is exact). When `theta_offset is None`
+        this is bitwise-identical to the v2.0 inverse.
         """
         with _autocast_off(a.device.type):
             theta = self.theta.float()
             log_r = self.log_r.float()
-            inv_r = torch.exp(-log_r)             # 1/r
-            cos_over_r = inv_r * torch.cos(theta)  # cosθ / r
-            sin_over_r = inv_r * torch.sin(theta)  # sinθ / r
+            if theta_offset is None:
+                inv_r = torch.exp(-log_r)             # 1/r
+                cos_over_r = inv_r * torch.cos(theta)  # cosθ / r
+                sin_over_r = inv_r * torch.sin(theta)  # sinθ / r
 
-            if not torch.is_floating_point(v):
-                idx = v.long()
-                acoef = F.embedding(idx, cos_over_r)
-                # inverse rotation is R(−θ): coefficients (cosθ/r, −sinθ/r)
-                bcoef = -F.embedding(idx, sin_over_r)
+                if not torch.is_floating_point(v):
+                    idx = v.long()
+                    acoef = F.embedding(idx, cos_over_r)
+                    # inverse rotation is R(−θ): coefficients (cosθ/r, −sinθ/r)
+                    bcoef = -F.embedding(idx, sin_over_r)
+                else:
+                    p = v.float()
+                    acoef = p @ cos_over_r
+                    bcoef = -(p @ sin_over_r)
             else:
-                p = v.float()
-                acoef = p @ cos_over_r
-                bcoef = -(p @ sin_over_r)
+                th, r = self._gather_theta_r(v)                   # (..., n_blocks)
+                theta_eff = th + theta_offset.to(th.dtype)        # SAME effective angle
+                inv_r = 1.0 / r
+                acoef = inv_r * torch.cos(theta_eff)              # cos(θ_eff)/r
+                bcoef = -inv_r * torch.sin(theta_eff)             # −sin(θ_eff)/r
             out = self._apply_blocks(a, acoef, bcoef)
         return out.to(a.dtype)
 

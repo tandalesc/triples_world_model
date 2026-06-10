@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import tempfile
 from pathlib import Path
 
@@ -19,11 +20,14 @@ import pytest
 import torch
 import torch.nn as nn
 
+# Repo root on path so `from scripts...` resolves (this file lives in tests/jepa/legacy/).
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 from twm.jepa.operator import RotationScaleOperator
 from twm.jepa.slot_encoder import SlotEncoder
-from twm.jepa.model import JEPAOperatorModel
+from twm.jepa.legacy.model_v1 import JEPAOperatorModel
 
-from twm.jepa.diagnostics import eval_diagnostics
+from twm.jepa.legacy.diagnostics_v1 import eval_diagnostics
 from scripts.export_jepa_weights import export_jepa_weights
 
 

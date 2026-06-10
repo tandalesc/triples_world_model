@@ -188,6 +188,16 @@ Active configs (live experiments):
 - `flow_v1.json` — flow matching decoder
 - `ar_*.json` — single-memory AR variants (frozen, dynamics, entity, phaseC, recovery)
 - `arc_v1.json` — ARC trace experiments
+- JEPA: `scripts/train_jepa_v2.py` is the live entry point. Its two frozen public
+  configs stay at the repo root: `configs/jepa_nano_v2.json` and
+  `configs/jepa_nano_v2_smoke.json` (the in-flight GPU run's interface — do not move).
+  Other live JEPA configs live under `configs/jepa/` (e.g. `jepa_mini_v2.json`,
+  `jepa_nano_v21.json` + `jepa_nano_v21_smoke.json` — the v2.1 polar-conditioning path,
+  `use_polar_conditioning:true`, run via the same `train_jepa_v2.py`). The dead v1 JEPA
+  configs are archived (`configs/archive/jepa_nano.json`, etc.). The v1 baseline is
+  demoted, not deleted: `src/twm/jepa/legacy/` + `scripts/legacy/train_jepa.py`.
+  v2.1 == v2.0 at init (zero-init H map); the smoke gate is epoch-1 total loss
+  6.113 ± 0.001 (MPS), unchanged from v2.0.
 
 Archived (`configs/archive/`):
 - `v38_balanced_joint.json` — best combined model (38.5% tok, id=77.8%, qa=29.9%)
