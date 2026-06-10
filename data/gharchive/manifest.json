@@ -1,0 +1,53 @@
+{
+  "corpus": "gharchive",
+  "source": "https://gharchive.org (hourly GH event dumps)",
+  "license": "GH Archive is a public dataset of GitHub's public event stream; GitHub Terms of Service apply. Free for research.",
+  "world_state_reading": "entity=issue/PR; state=(status,labels,assignee,milestone,locked) rendered text; action=real GH event (opened/closed/labeled/...)",
+  "action_extraction": "coarse GH event action token; @0 single-entity slot",
+  "state_rendering": "canonical sorted attribute-set sentences (mechanical state only, no prose)",
+  "include_prs": true,
+  "seed": 7,
+  "min_events": 2,
+  "max_events": 12,
+  "report": {
+    "action_vocab_size": 4,
+    "action_vocab": {
+      "closed": 39043,
+      "commented": 17627,
+      "reopened": 748,
+      "opened": 177
+    },
+    "det_given_action_mean": 0.9283,
+    "det_keys_counted": 1261,
+    "H_action_given_state_mean_bits": 0.448,
+    "state_keys_counted": 1183,
+    "threshold": 5
+  },
+  "splits": {
+    "train": {
+      "chains": 4000,
+      "transitions": 4796
+    },
+    "test": {
+      "chains": 500,
+      "transitions": 612
+    }
+  },
+  "build_stats": {
+    "issues_grouped": 162440,
+    "chains_kept": 48031,
+    "dropped_too_short": 114409,
+    "truncated_over_max": 42,
+    "min_events": 2,
+    "max_events": 12,
+    "mean_events": 2.2,
+    "transitions": 57595
+  },
+  "files": [
+    "train.jsonl",
+    "train_labeled.jsonl",
+    "test.jsonl",
+    "test_labeled.jsonl"
+  ],
+  "ood_note": "for an OOD-entity probe, convert two non-overlapping date ranges and use the later range as test (issues/repos created after the cutoff)."
+}

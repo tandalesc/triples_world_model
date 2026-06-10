@@ -1,0 +1,23 @@
+{
+  "corpus": "gharchive",
+  "vocab_size": 8192,
+  "bpe_path": "data/gharchive/bpe_8192.json",
+  "recommended_max_text_tokens": 48,
+  "recommendation": "p99=46 -> max_text_tokens=48 covers >=99% of states; current candidate 64 drops 0.151%.",
+  "reports": [
+    {
+      "label": "gharchive",
+      "states": 9908,
+      "vocab_size": 6344,
+      "mean_tokens": 13.33,
+      "p50": 9,
+      "p90": 23,
+      "p95": 27,
+      "p99": 46,
+      "max": 80,
+      "max_text_tokens": 64,
+      "n_over_max": 15,
+      "pct_over_max": 0.151
+    }
+  ]
+}
