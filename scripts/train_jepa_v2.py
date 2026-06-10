@@ -113,6 +113,13 @@ def build_loss_v2(cfg, operator):
         w_margin=getattr(lc, "w_margin", 0.0),
         margin=getattr(lc, "margin", 0.5),
         w_mask_prior=getattr(lc, "w_mask_prior", 0.0),
+        # v4.1 §C5: pooled-space hard-negative InfoNCE. Defaults (w_pool_nce=0.0) reproduce
+        # v4.0 bitwise — the loss skips the term (and the trainer skips the extra online
+        # encoder forward) when w_pool_nce==0.
+        w_pool_nce=getattr(lc, "w_pool_nce", 0.0),
+        tau_pool=getattr(lc, "tau_pool", 0.1),
+        n_pool_negs=getattr(lc, "n_pool_negs", 16),
+        pool_nce_stop_grad_pos=getattr(lc, "pool_nce_stop_grad_pos", False),
         n_slices=lc.sigreg.n_slices,
         n_knots=lc.sigreg.n_knots,
         knot_max=lc.sigreg.knot_max,
@@ -229,6 +236,19 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
         margin_pad_neg = tgt_pad[neigh].contiguous()
         margin_logits_neg = model.decoder(out["a"], margin_neg_ids, margin_pad_neg)
 
+    # v4.1 §C5: pooled-space hard-negative InfoNCE positive = the ONLINE pooled encoding of
+    # the TRUE next state (the AUC's `online` candidate, where gradients reach the encoder).
+    # Anchor is out["zhat"] (the AUC's query). Same-chain mining needs chain_ids, so this
+    # requires w_pool_nce>0 (which also forces w_nce>0's chain_ids in pairs mode). When
+    # w_pool_nce==0 we do NOT run the extra encoder forward (v4.0-bitwise no-cost path).
+    z_pool_pos = None
+    if getattr(loss_fn, "w_pool_nce", 0.0) > 0:
+        z_pool_pos = model._online_bundle.pool_raw(tgt_ids, tgt_pad)  # (B, dn) with gradient
+        if chain_ids is None:
+            chain_ids = torch.tensor(
+                [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long, device=device
+            )
+
     loss, comps = loss_fn(
         logits=out["logits"],
         tgt_ids=tgt_ids,
@@ -245,6 +265,7 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
         margin_neg_ids=margin_neg_ids,
         g_logits=out.get("g_logits"),
         g_prior_logits=out.get("g_prior_logits"),
+        z_pool_pos=z_pool_pos,
     )
     return loss, comps
 
@@ -301,6 +322,13 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
                 out["a"], margin_neg_ids, tpad[neigh].contiguous()
             )
 
+        # v4.1 §C5: this hop's pooled positive = the ONLINE pool of THIS hop's target state
+        # (s1 for hop 1, s2 for hop 2), with gradient — the AUC's `online` candidate path.
+        # Anchor is this hop's out["zhat"]. Only run the extra encoder forward when active.
+        z_pool_pos = None
+        if getattr(loss_fn, "w_pool_nce", 0.0) > 0:
+            z_pool_pos = model._online_bundle.pool_raw(tids, tpad)  # (B, dn) with gradient
+
         loss_h, comps_h = loss_fn(
             logits=out["logits"],
             tgt_ids=tids,
@@ -318,10 +346,11 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
             margin_neg_ids=margin_neg_ids,
             g_logits=out.get("g_logits"),
             g_prior_logits=out.get("g_prior_logits"),
+            z_pool_pos=z_pool_pos,
         )
         total = wt * loss_h if total is None else total + wt * loss_h
         # Aggregate components for logging: weighted sums (matching `total`) plus per-hop CE.
-        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior"):
+        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior", "L_pool_nce"):
             agg[key] = agg.get(key, 0.0) + wt * float(comps_h.get(key, 0.0))
         agg[f"L_token_h{h + 1}"] = float(comps_h.get("L_token", 0.0))
 
@@ -550,7 +579,7 @@ def train(config_path: str):
         else:
             perm = torch.randperm(n_train)
         ep_total = ep_token = ep_prior = ep_sig = ep_pred = ep_nce = 0.0
-        ep_margin = ep_mask_prior = 0.0
+        ep_margin = ep_mask_prior = ep_pool_nce = 0.0
         ep_tok_h1 = ep_tok_h2 = 0.0
         n_batches = 0
 
@@ -586,6 +615,7 @@ def train(config_path: str):
             ep_nce += float(comps.get("L_nce", 0.0))
             ep_margin += float(comps.get("L_margin", 0.0))
             ep_mask_prior += float(comps.get("L_mask_prior", 0.0))
+            ep_pool_nce += float(comps.get("L_pool_nce", 0.0))
             ep_tok_h1 += float(comps.get("L_token_h1", 0.0))
             ep_tok_h2 += float(comps.get("L_token_h2", 0.0))
             n_batches += 1
@@ -596,6 +626,7 @@ def train(config_path: str):
             f"L_token={ep_token/nb:.4f} L_prior={ep_prior/nb:.4f} "
             f"L_sigreg={ep_sig/nb:.4f} L_pred={ep_pred/nb:.4f} L_nce={ep_nce/nb:.4f} "
             f"L_margin={ep_margin/nb:.4f} L_mask_prior={ep_mask_prior/nb:.4f} "
+            f"L_pool_nce={ep_pool_nce/nb:.4f} "
         )
         if mode == "triples":
             line += f"L_tok_h1={ep_tok_h1/nb:.4f} L_tok_h2={ep_tok_h2/nb:.4f} "

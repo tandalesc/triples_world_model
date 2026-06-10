@@ -374,6 +374,111 @@ def info_nce(
 
 
 # ---------------------------------------------------------------------------
+# pool_info_nce: pooled-space hard-negative InfoNCE (v4.1 escalation, design §C5)
+# ---------------------------------------------------------------------------
+
+def pool_info_nce(
+    zhat: torch.Tensor,                       # (B, dn) anchor = pooled PREDICTED next state
+    z_pos: torch.Tensor,                      # (B, dn) positive = ONLINE pooled TRUE next state
+    chain_ids: torch.Tensor | None = None,    # (B,) long — same-chain hard-negative mining
+    temperature: float = 0.1,
+    n_pool_negs: int = 16,
+    stop_grad_pos: bool = False,
+) -> torch.Tensor:
+    """Pooled-space hard-negative InfoNCE trained DIRECTLY on the separation-AUC geometry.
+
+    This is the v4.1 escalation (jepa_v4_design §C5 / separation-AUC diagnostic). The
+    separation-AUC measures gold-vs-distractor discriminability in the POOLED latent space
+    where the query is `zhat` (pooled predicted next state) and the candidates are the
+    pooled encodings of states, with HARD pools = same-chain siblings + nearest-neighbor
+    candidates. The decoder-CE→pooled-geometry gradient path is structurally indirect
+    (margin asleep, AUC flat ~0.52); this loss trains the pooled space DIRECTLY with an
+    InfoNCE whose positives/negatives MIRROR that diagnostic's pool construction as
+    closely as batch-local data allows.
+
+    Pools (mirror diagnostics._separation_auc hard pools):
+      - positive: `z_pos[i]` — the ONLINE pooled encoding of anchor i's TRUE next state
+        (NOT the EMA key; the online pool is the one gradients reach, and is the
+        `online` AUC variant we train on). Gradient flows into the encoder through it
+        unless `stop_grad_pos=True`.
+      - same-chain negatives: every `z_pos[j]`, j≠i, with `chain_ids[j]==chain_ids[i]`.
+        These are wrong next-states on the SAME narrative — the diagnostic's hard pool's
+        same-chain distractors, available batch-local thanks to chain-contiguous batching.
+      - NN negatives: for each anchor i, the top-`n_pool_negs` in-batch candidates by
+        cosine(z_pos[i], z_pos[j]) (j≠i), EXCLUDING the positive and excluding columns
+        already kept as same-chain negatives (no double counting). This mirrors the
+        diagnostic's 40-NN-by-target-cosine distractors with in-batch mining.
+
+    Construction: build a per-anchor logits row over [positive ; union(same-chain ∪ NN)].
+    Every anchor's row has its positive at column 0 (label 0), so this is a softmax-CE that
+    PULLS each `zhat` toward its own true-next-state pool and PUSHES it away from the hard
+    same-chain + NN distractors — exactly the contrast the AUC's logistic probe rewards.
+
+    Args:
+        zhat:        (B, dn) anchor — pooled predicted next state (receives gradient).
+        z_pos:       (B, dn) positive — ONLINE pooled true next state. Gradient flows in
+                     unless `stop_grad_pos` (the §1 stop-grad-optional flag).
+        chain_ids:   (B,) long; same-chain mining. None ⟹ NN-only negatives.
+        temperature: cosine-sim divisor τ_pool (0.1 default, SimCLR/MoCo).
+        n_pool_negs: number of in-batch NN negatives mined per anchor (default 16).
+        stop_grad_pos: if True, detach z_pos (no encoder gradient through the key — the
+                     MoCo asymmetry); default False so the online encoder is trained on
+                     BOTH sides of the contrast (the geometry the AUC measures).
+
+    Returns:
+        scalar pooled InfoNCE loss (≈ 0 when each anchor's direction matches its true
+        next-state pool and is orthogonal to every hard distractor).
+    """
+    B = zhat.shape[0]
+    device = zhat.device
+    if stop_grad_pos:
+        z_pos = z_pos.detach()
+
+    qn = F.normalize(zhat, dim=-1)               # (B, dn) anchor
+    kn = F.normalize(z_pos, dim=-1)              # (B, dn) candidate pool (= every state's pool)
+
+    # Full (B, B) anchor↔candidate cosine. Column j is candidate state j's pool; the
+    # diagonal is anchor i's own positive. We assemble a per-anchor negative mask, then
+    # do a masked-softmax CE with the diagonal as the positive (label = i).
+    sim = (qn @ kn.t()) / temperature            # (B, B)
+
+    eye = torch.eye(B, dtype=torch.bool, device=device)
+
+    # Same-chain hard negatives: off-diagonal columns sharing the anchor's chain.
+    if chain_ids is not None:
+        same = chain_ids.view(-1, 1) == chain_ids.view(1, -1)   # (B, B)
+        chain_neg = same & (~eye)
+    else:
+        chain_neg = torch.zeros(B, B, dtype=torch.bool, device=device)
+
+    # NN hard negatives mined in-batch by candidate-candidate cosine (mirrors the
+    # diagnostic's target-cosine NN pool). For anchor i rank other states by cosine to its
+    # OWN positive z_pos[i]; take the top-n_pool_negs, excluding self and same-chain (which
+    # are already negatives — avoid double counting in the denominator).
+    key_sim = kn @ kn.t()                                       # (B, B) candidate-candidate cosine
+    exclude = eye | chain_neg                                   # self + same-chain already handled
+    nn_scores = key_sim.masked_fill(exclude, float("-inf"))     # (B, B)
+    k_nn = min(n_pool_negs, max(0, B - 1))
+    nn_neg = torch.zeros(B, B, dtype=torch.bool, device=device)
+    if k_nn > 0:
+        # top-k columns per row; -inf rows (all excluded) contribute nothing.
+        topk_idx = nn_scores.topk(k_nn, dim=1).indices          # (B, k_nn)
+        nn_neg.scatter_(1, topk_idx, True)
+        # A column that was -inf (excluded) must not be (re)added as an NN negative.
+        nn_neg = nn_neg & (~exclude)
+
+    neg_mask = chain_neg | nn_neg                               # (B, B) all hard negatives
+    # The positive (diagonal) is always kept; everything that is neither positive nor a
+    # selected hard negative is masked OUT of the denominator (-inf) so the contrast is the
+    # gold-vs-hard-pool contrast the AUC measures, not gold-vs-all-batch.
+    keep = neg_mask | eye                                       # (B, B) columns scored per row
+    logits = sim.masked_fill(~keep, float("-inf"))             # (B, B)
+
+    labels = torch.arange(B, device=device)                    # diagonal is the positive
+    return F.cross_entropy(logits, labels)
+
+
+# ---------------------------------------------------------------------------
 # prior_kl: KL(stopgrad q ‖ p) — distill posterior into prior
 # ---------------------------------------------------------------------------
 
@@ -471,6 +576,13 @@ class JEPALossV2(nn.Module):
         w_margin: float = 0.0,
         margin: float = 0.5,
         w_mask_prior: float = 0.0,
+        # v4.1 escalation (design §C5): pooled-space hard-negative InfoNCE that trains
+        # DIRECTLY on the separation-AUC geometry. Defaults reproduce v4.0 bitwise
+        # (w_pool_nce=0.0 ⟹ term not computed, no extra forward passes when off).
+        w_pool_nce: float = 0.0,
+        tau_pool: float = 0.1,
+        n_pool_negs: int = 16,
+        pool_nce_stop_grad_pos: bool = False,
         nce_temperature: float = 0.1,
         n_slices: int = 256,
         n_knots: int = 17,
@@ -494,6 +606,13 @@ class JEPALossV2(nn.Module):
         # v4 §1.3: targeted-mask prior KL. w_mask_prior=0.0 ⟹ off (v3 bitwise); skipped
         # entirely when the model does not emit prior-mask logits (targeting off).
         self.w_mask_prior = w_mask_prior
+        # v4.1 §C5: pooled-space hard-negative InfoNCE. w_pool_nce=0.0 ⟹ off (v4.0 bitwise);
+        # the term is computed ONLY when w_pool_nce>0 AND the trainer supplies the online
+        # positive pool, so v4.0 configs pay zero cost (no extra encoder forward).
+        self.w_pool_nce = w_pool_nce
+        self.tau_pool = tau_pool
+        self.n_pool_negs = n_pool_negs
+        self.pool_nce_stop_grad_pos = pool_nce_stop_grad_pos
         self.nce_temperature = nce_temperature
         self.n_slices = n_slices
         self.n_knots = n_knots
@@ -521,6 +640,7 @@ class JEPALossV2(nn.Module):
         margin_neg_ids: torch.Tensor | None = None,      # (B, T) same-chain neighbor target ids (§3)
         g_logits: torch.Tensor | None = None,         # (B, M) posterior mask logits (§1.3)
         g_prior_logits: torch.Tensor | None = None,   # (B, M) prior mask logits (§1.3)
+        z_pool_pos: torch.Tensor | None = None,       # (B, dn) ONLINE pooled true next state (§C5)
     ) -> tuple[torch.Tensor, dict]:
         """Compute total loss and per-term components.
 
@@ -588,6 +708,23 @@ class JEPALossV2(nn.Module):
         else:
             l_mask_prior = None
 
+        # L_pool_nce: pooled-space hard-negative InfoNCE on the separation-AUC geometry
+        # (v4.1 §C5). Computed ONLY when active AND the trainer supplies the online positive
+        # pool `z_pool_pos` (the AUC's `online` candidate path, where gradients reach). The
+        # anchor is `zhat` (the AUC's query); negatives are same-chain + in-batch NN mined.
+        # When w_pool_nce=0.0 (or z_pool_pos absent) it is skipped ⟹ v4.0-bitwise total.
+        if self.w_pool_nce > 0 and z_pool_pos is not None:
+            l_pool_nce = pool_info_nce(
+                zhat,
+                z_pool_pos,
+                chain_ids=chain_ids,
+                temperature=self.tau_pool,
+                n_pool_negs=self.n_pool_negs,
+                stop_grad_pos=self.pool_nce_stop_grad_pos,
+            )
+        else:
+            l_pool_nce = None
+
         total = (
             self.w_token  * l_token
             + self.w_prior  * l_prior
@@ -600,6 +737,8 @@ class JEPALossV2(nn.Module):
             total = total + self.w_margin * l_margin
         if l_mask_prior is not None:
             total = total + self.w_mask_prior * l_mask_prior
+        if l_pool_nce is not None:
+            total = total + self.w_pool_nce * l_pool_nce
 
         components = {
             "loss":       total.item(),
@@ -610,6 +749,7 @@ class JEPALossV2(nn.Module):
             "L_nce":      (l_nce.item() if l_nce is not None else 0.0),
             "L_margin":   (l_margin.item() if l_margin is not None else 0.0),
             "L_mask_prior": (l_mask_prior.item() if l_mask_prior is not None else 0.0),
+            "L_pool_nce": (l_pool_nce.item() if l_pool_nce is not None else 0.0),
             "gumbel_tau": float(tau),
             # weights logged for interpretability
             "w_token":    float(self.w_token),
@@ -619,6 +759,7 @@ class JEPALossV2(nn.Module):
             "w_nce":      float(self.w_nce),
             "w_margin":   float(self.w_margin),
             "w_mask_prior": float(self.w_mask_prior),
+            "w_pool_nce": float(self.w_pool_nce),
         }
         return total, components
 

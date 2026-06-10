@@ -346,6 +346,14 @@ class LossConfig:
     w_margin: float = 0.0     # token-level hard-negative hinge (§3); 0.0 ⟹ off
     margin: float = 0.5       # hinge margin in nats (§3); read only when w_margin>0
     w_mask_prior: float = 0.0  # KL(stopgrad posterior-mask ‖ prior-mask) (§1.3); 0.0 ⟹ off
+    # v4.1 escalation (jepa_v4_design §C5): pooled-space hard-negative InfoNCE that trains
+    # DIRECTLY on the separation-AUC geometry. ALL default to the v4.0-bitwise neutral value
+    # (w_pool_nce=0.0 ⟹ term off / not computed), so every existing v4 config parses and
+    # trains IDENTICALLY. tau_pool/n_pool_negs are read only when w_pool_nce>0.
+    w_pool_nce: float = 0.0    # pooled-space hard-neg InfoNCE weight (§C5); 0.0 ⟹ off
+    tau_pool: float = 0.1      # cosine-sim temperature τ_pool for L_pool_nce
+    n_pool_negs: int = 16      # in-batch NN hard negatives mined per anchor for L_pool_nce
+    pool_nce_stop_grad_pos: bool = False  # detach the online positive pool (MoCo asymmetry)
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
     nce: NCEConfig = field(default_factory=NCEConfig)
