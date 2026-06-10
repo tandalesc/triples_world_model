@@ -1,0 +1,255 @@
+{
+  "artifact": "world_commutator_invoice",
+  "version": "v1",
+  "baseline_marker": "PRE-targeted-actions",
+  "note": "Oracle ground-truth non-commutativity of entity-world, measured BEFORE any targeted-actions architecture change.  After targeted actions, disjoint-support commutation is 0 by construction; pre/post comparisons are only valid against this frozen baseline.",
+  "generator_seed": 7,
+  "world_spec_sha256_16": "275a36020c87f2a8",
+  "labeled_split": "/Users/shishirtandale/Projects/triples_world_model/data/entity_world/test_iid_labeled.jsonl",
+  "n_world": 2000,
+  "sample_seed": 7,
+  "world_side": {
+    "overall": {
+      "n": 2000,
+      "commute_rate": 0.948,
+      "mean_dist_when_differ": 1.1153846153846154,
+      "n_differ": 104
+    },
+    "same_entity": {
+      "n": 869,
+      "commute_rate": 0.8803222094361335,
+      "mean_dist_when_differ": 1.1153846153846154,
+      "n_differ": 104
+    },
+    "disjoint_entity": {
+      "n": 1131,
+      "commute_rate": 1.0,
+      "mean_dist_when_differ": 0.0,
+      "n_differ": 0
+    },
+    "by_type_pair": {
+      "close|close": {
+        "n": 16,
+        "commute_rate": 1.0
+      },
+      "close|feed": {
+        "n": 19,
+        "commute_rate": 1.0
+      },
+      "close|fill": {
+        "n": 54,
+        "commute_rate": 1.0
+      },
+      "close|open": {
+        "n": 24,
+        "commute_rate": 0.6666666666666666
+      },
+      "close|play": {
+        "n": 26,
+        "commute_rate": 1.0
+      },
+      "close|rest": {
+        "n": 29,
+        "commute_rate": 1.0
+      },
+      "close|switch off": {
+        "n": 6,
+        "commute_rate": 1.0
+      },
+      "close|switch on": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "close|wash": {
+        "n": 90,
+        "commute_rate": 1.0
+      },
+      "close|water": {
+        "n": 16,
+        "commute_rate": 1.0
+      },
+      "feed|feed": {
+        "n": 30,
+        "commute_rate": 1.0
+      },
+      "feed|fill": {
+        "n": 28,
+        "commute_rate": 1.0
+      },
+      "feed|open": {
+        "n": 20,
+        "commute_rate": 1.0
+      },
+      "feed|play": {
+        "n": 62,
+        "commute_rate": 0.967741935483871
+      },
+      "feed|rest": {
+        "n": 56,
+        "commute_rate": 1.0
+      },
+      "feed|switch off": {
+        "n": 11,
+        "commute_rate": 1.0
+      },
+      "feed|switch on": {
+        "n": 7,
+        "commute_rate": 1.0
+      },
+      "feed|wash": {
+        "n": 124,
+        "commute_rate": 0.9274193548387096
+      },
+      "feed|water": {
+        "n": 18,
+        "commute_rate": 1.0
+      },
+      "fill|fill": {
+        "n": 25,
+        "commute_rate": 1.0
+      },
+      "fill|open": {
+        "n": 41,
+        "commute_rate": 1.0
+      },
+      "fill|play": {
+        "n": 20,
+        "commute_rate": 1.0
+      },
+      "fill|rest": {
+        "n": 26,
+        "commute_rate": 1.0
+      },
+      "fill|switch off": {
+        "n": 7,
+        "commute_rate": 1.0
+      },
+      "fill|switch on": {
+        "n": 9,
+        "commute_rate": 1.0
+      },
+      "fill|wash": {
+        "n": 95,
+        "commute_rate": 0.8947368421052632
+      },
+      "fill|water": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "open|open": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "open|play": {
+        "n": 16,
+        "commute_rate": 1.0
+      },
+      "open|rest": {
+        "n": 29,
+        "commute_rate": 1.0
+      },
+      "open|switch off": {
+        "n": 8,
+        "commute_rate": 1.0
+      },
+      "open|switch on": {
+        "n": 10,
+        "commute_rate": 1.0
+      },
+      "open|wash": {
+        "n": 78,
+        "commute_rate": 1.0
+      },
+      "open|water": {
+        "n": 19,
+        "commute_rate": 1.0
+      },
+      "play|play": {
+        "n": 26,
+        "commute_rate": 1.0
+      },
+      "play|rest": {
+        "n": 72,
+        "commute_rate": 0.6666666666666666
+      },
+      "play|switch off": {
+        "n": 11,
+        "commute_rate": 1.0
+      },
+      "play|switch on": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "play|wash": {
+        "n": 131,
+        "commute_rate": 0.7938931297709924
+      },
+      "play|water": {
+        "n": 22,
+        "commute_rate": 1.0
+      },
+      "rest|rest": {
+        "n": 30,
+        "commute_rate": 1.0
+      },
+      "rest|switch off": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "rest|switch on": {
+        "n": 15,
+        "commute_rate": 1.0
+      },
+      "rest|wash": {
+        "n": 117,
+        "commute_rate": 0.9230769230769231
+      },
+      "rest|water": {
+        "n": 18,
+        "commute_rate": 1.0
+      },
+      "switch off|switch off": {
+        "n": 7,
+        "commute_rate": 1.0
+      },
+      "switch off|switch on": {
+        "n": 31,
+        "commute_rate": 0.5161290322580645
+      },
+      "switch off|wash": {
+        "n": 41,
+        "commute_rate": 1.0
+      },
+      "switch off|water": {
+        "n": 10,
+        "commute_rate": 1.0
+      },
+      "switch on|switch on": {
+        "n": 13,
+        "commute_rate": 1.0
+      },
+      "switch on|wash": {
+        "n": 51,
+        "commute_rate": 1.0
+      },
+      "switch on|water": {
+        "n": 8,
+        "commute_rate": 1.0
+      },
+      "wash|wash": {
+        "n": 191,
+        "commute_rate": 1.0
+      },
+      "wash|water": {
+        "n": 89,
+        "commute_rate": 1.0
+      },
+      "water|water": {
+        "n": 23,
+        "commute_rate": 1.0
+      }
+    },
+    "prediction_disjoint_commutes": true,
+    "prediction_same_partial_noncommute": true
+  }
+}

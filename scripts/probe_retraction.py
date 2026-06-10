@@ -11,6 +11,51 @@ exact (round-trip == identity to fp32 eps).  For the black-box (gated_mlp), the 
 prints the asymmetry message, records ``{"backend":"blackbox","inverse_supported":false}``,
 and exits 0 — the negative result IS the data point.
 
+THREE-POINT → FOUR-POINT BRACKET (amendment)
+--------------------------------------------
+Every reconstruction is scored by cosine to the SAME reference: the fresh encoding of the
+oracle's true *j-deleted* final state (``z_oracle``).  We report a four-rung bracket whose
+rungs are EXPECTED to be monotone non-decreasing:
+
+    do_nothing  <=  algebraic_retraction  <=  model_replay  <=  reencode_ceiling
+
+  - do_nothing            : the rolled state WITH event j still present.  Worst — j was
+                            never removed.
+  - algebraic_retraction  : apply the structured INVERSE of event j to the *contaminated*
+                            rolled state (the H offsets used by the later events were
+                            computed on the WITH-j path).  The abelian operator commutes the
+                            matrices exactly, but the SELECTION (H = θ_offset, a function of
+                            the per-hop modulus) was keyed on the wrong, j-contaminated path.
+  - model_replay          : the model's HONEST counterfactual — re-roll its own latent
+                            trajectory on the j-DELETED action history (encode s_0, apply the
+                            teacher-forced posterior actions skipping j, with H offsets
+                            RECOMPUTED FRESH on the counterfactual path).  No path
+                            contamination; the only error left is the model's own
+                            dynamics/encode fidelity.
+  - reencode_ceiling      : cosine of ``z_oracle`` to itself = 1.0 — the literal upper bound
+                            (the best any reconstruction could match the reference encoding).
+
+DERIVED METRICS — opposite remedies (documented because they are easy to conflate):
+
+  - selection_drift = model_replay_cos - retract_cos   (MODEL / SELECTION side)
+      How much the algebraic inverse loses RELATIVE to the honest fresh re-roll.  It is a
+      pure SELECTION defect: both paths use the exact same operator matrices, but the
+      algebraic retraction inherits H offsets computed on the j-contaminated rolled path,
+      whereas model_replay recomputes H on the clean counterfactual path.  Large
+      selection_drift ⇒ the polar conditioner H is path-dependent (non-commuting SELECTIONS).
+      REMEDY: make the retraction recompute / store the counterfactual H offsets (a
+      selection-side fix — recompute the conditioner on the post-retraction path, or store
+      per-hop offsets keyed to the deleted history), NOT a better world model.
+
+  - dynamics_gap = ceiling_cos - model_replay_cos      (WORLD / DYNAMICS side)
+      How far the model's honest counterfactual rollout sits below the perfect encoding of
+      the true state.  Even with zero path contamination, the rolled latent differs from a
+      fresh encode by the model's own dynamics + decoder error.  Large dynamics_gap ⇒ the
+      world model's rollout is not faithful.  REMEDY: train a better dynamics/operator/encoder
+      (a world-side fix — more capacity, more data, lower rollout drift), NOT a smarter
+      inverse.  A selection-side fix does NOTHING for dynamics_gap and vice-versa — they are
+      orthogonal failure channels, which is the whole point of reporting both.
+
 Usage::
 
     uv run python scripts/probe_retraction.py \\
@@ -248,6 +293,7 @@ def probe_retraction(
     gen_mod,
     use_budget: bool,
     out_path: str | None = None,
+    _records_override: list[dict] | None = None,
 ) -> dict:
     """Run the retraction probe on ``n_chains`` chains from ``labeled_path``.
 
@@ -255,6 +301,9 @@ def probe_retraction(
 
     The probe measures whether the structured inverse of event ``retract_j`` moves the
     rolled latent state toward the oracle-without-j target.
+
+    ``_records_override`` (test hook): if given, use these labeled records directly instead
+    of reading ``labeled_path`` (lets unit tests inject an in-memory fixture).
     """
     # ---- detect backend ----
     from twm.jepa.baseline_transition import GatedMLPTransition
@@ -288,14 +337,16 @@ def probe_retraction(
     # ---- structured operator path ----
     model.eval()
 
-    # Load labeled data.
-    records = []
-    with open(labeled_path) as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                r = json.loads(line)
-                records.append(r)
+    # Load labeled data (or use an injected in-memory fixture for tests).
+    if _records_override is not None:
+        records = _records_override
+    else:
+        records = []
+        with open(labeled_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
 
     # Filter chains with enough events.
     eligible = [r for r in records if len(r.get("actions", [])) >= K
@@ -388,10 +439,16 @@ def probe_retraction(
             device,
         )
 
-        # 5. Ceiling: re-roll the chain from scratch omitting event j.
+        # 5. MODEL-REPLAY-WITHOUT-J (the model's HONEST counterfactual): re-roll the
+        #    model's OWN latent trajectory on the j-deleted action history.  Encode s0,
+        #    apply the teacher-forced posterior actions for `actions_minus_j` stepwise, with
+        #    the H phase offsets RECOMPUTED FRESH on this counterfactual path (each
+        #    `_apply_one_hop` re-runs the conditioner on its own input — so the offsets are
+        #    keyed to the clean j-deleted path, NOT the contaminated with-j roll).  This is
+        #    the model-side honest baseline: no path contamination, only dynamics/encode error.
         actions_minus_j = actions[:j0] + actions[j0 + 1:]
-        k_ceiling = _encode_fresh(model, s0_ids, s0_pad, device)
-        s_acc_c = torch.zeros(1, k_ceiling.shape[1], device=device) if use_budget else None
+        k_replay = _encode_fresh(model, s0_ids, s0_pad, device)
+        s_acc_r = torch.zeros(1, k_replay.shape[1], device=device) if use_budget else None
 
         # Build a tokenized state sequence for the minus-j chain using oracle snapshots.
         # snapshots[h] is the state after h actions from actions_minus_j.
@@ -400,19 +457,23 @@ def probe_retraction(
             src_text = gen_mod.render_state(ent_states)
             ent_states_next = list(zip(types, snapshots[h + 1]))
             tgt_text = gen_mod.render_state(ent_states_next)
-            src_ids_c, src_pad_c = encode_fn(src_text)
-            tgt_ids_c, tgt_pad_c = encode_fn(tgt_text)
+            src_ids_r, src_pad_r = encode_fn(src_text)
+            tgt_ids_r, tgt_pad_r = encode_fn(tgt_text)
 
-            v_c = _posterior_action(model, src_ids_c, src_pad_c,
-                                    tgt_ids_c, tgt_pad_c, device)
-            a_c, _, sd_c = _apply_one_hop(model, k_ceiling, v_c, device, use_budget)
-            k_ceiling = a_c
-            if use_budget and sd_c is not None:
-                s_acc_c = s_acc_c + sd_c
+            v_r = _posterior_action(model, src_ids_r, src_pad_r,
+                                    tgt_ids_r, tgt_pad_r, device)
+            a_r, _, sd_r = _apply_one_hop(model, k_replay, v_r, device, use_budget)
+            k_replay = a_r
+            if use_budget and sd_r is not None:
+                s_acc_r = s_acc_r + sd_r
 
-        z_ceiling = _readout_z(model, k_ceiling, s_acc_c, device)
+        z_replay = _readout_z(model, k_replay, s_acc_r, device)
 
         # ---- Metrics ----
+        # All reconstructions are scored by cosine to the SAME reference z_oracle (the fresh
+        # encode of the oracle's true j-deleted final state).  The reencode_ceiling is the
+        # cosine of that reference to ITSELF (= 1.0) — the literal upper bound a model-side
+        # reconstruction could attain against this reference encoding.
         def cos_sim(a: torch.Tensor, b: torch.Tensor) -> float:
             a_n = F.normalize(a.float(), dim=-1)
             b_n = F.normalize(b.float(), dim=-1)
@@ -421,44 +482,77 @@ def probe_retraction(
         def mse(a: torch.Tensor, b: torch.Tensor) -> float:
             return float(F.mse_loss(a.float(), b.float()))
 
+        retract_cos = cos_sim(z_retract, z_oracle)
+        donothing_cos = cos_sim(z_donothing, z_oracle)
+        replay_cos = cos_sim(z_replay, z_oracle)
+        ceiling_cos = cos_sim(z_oracle, z_oracle)  # ≡ 1.0 — reference-identity ceiling
+
         per_chain.append({
-            "retract_cos": cos_sim(z_retract, z_oracle),
-            "retract_mse": mse(z_retract, z_oracle),
-            "donothing_cos": cos_sim(z_donothing, z_oracle),
+            "donothing_cos": donothing_cos,
             "donothing_mse": mse(z_donothing, z_oracle),
-            "ceiling_cos": cos_sim(z_ceiling, z_oracle),
-            "ceiling_mse": mse(z_ceiling, z_oracle),
+            "retract_cos": retract_cos,
+            "retract_mse": mse(z_retract, z_oracle),
+            "model_replay_cos": replay_cos,
+            "model_replay_mse": mse(z_replay, z_oracle),
+            "ceiling_cos": ceiling_cos,
+            "ceiling_mse": mse(z_oracle, z_oracle),
+            # Derived per-chain (opposite remedies; see module docstring).
+            "selection_drift": replay_cos - retract_cos,   # model / selection side
+            "dynamics_gap": ceiling_cos - replay_cos,       # world / dynamics side
         })
 
     if not per_chain:
         raise RuntimeError("No chains processed.")
 
     n = len(per_chain)
+
+    def _mean(key: str) -> float:
+        return sum(c[key] for c in per_chain) / n
+
+    donothing_cos = _mean("donothing_cos")
+    retract_cos = _mean("retract_cos")
+    model_replay_cos = _mean("model_replay_cos")
+    ceiling_cos = _mean("ceiling_cos")
+
     agg = {
         "backend": "structured",
         "inverse_supported": True,
         "n_chains": n,
         "K": K,
         "retract_j": retract_j,
-        "retract_cos": sum(c["retract_cos"] for c in per_chain) / n,
-        "retract_mse": sum(c["retract_mse"] for c in per_chain) / n,
-        "donothing_cos": sum(c["donothing_cos"] for c in per_chain) / n,
-        "donothing_mse": sum(c["donothing_mse"] for c in per_chain) / n,
-        "ceiling_cos": sum(c["ceiling_cos"] for c in per_chain) / n,
-        "ceiling_mse": sum(c["ceiling_mse"] for c in per_chain) / n,
-        "retract_beats_donothing": (
-            sum(c["retract_cos"] for c in per_chain) / n
-            > sum(c["donothing_cos"] for c in per_chain) / n
+        # --- four-point bracket (expected monotone non-decreasing) ---
+        "donothing_cos": donothing_cos,
+        "donothing_mse": _mean("donothing_mse"),
+        "retract_cos": retract_cos,
+        "retract_mse": _mean("retract_mse"),
+        "model_replay_cos": model_replay_cos,
+        "model_replay_mse": _mean("model_replay_mse"),
+        "ceiling_cos": ceiling_cos,
+        "ceiling_mse": _mean("ceiling_mse"),
+        # --- derived metrics (opposite remedies; see module docstring) ---
+        "selection_drift": _mean("selection_drift"),  # model / selection side (H contamination)
+        "dynamics_gap": _mean("dynamics_gap"),         # world / dynamics side (rollout fidelity)
+        # --- bracket ordering checks ---
+        "retract_beats_donothing": retract_cos > donothing_cos,
+        "bracket_monotone": (
+            donothing_cos <= retract_cos + 1e-6
+            and retract_cos <= model_replay_cos + 1e-6
+            and model_replay_cos <= ceiling_cos + 1e-6
         ),
         "per_chain": per_chain,
     }
 
     print(
         f"\nRetraction probe results (n={n}, K={K}, j={retract_j}):\n"
-        f"  retract_cos      = {agg['retract_cos']:.4f}  (higher = closer to oracle-without-j)\n"
-        f"  donothing_cos    = {agg['donothing_cos']:.4f}  (baseline: no retraction)\n"
-        f"  ceiling_cos      = {agg['ceiling_cos']:.4f}  (best: full re-encode)\n"
-        f"  retract_beats_donothing = {agg['retract_beats_donothing']}"
+        f"  BRACKET (cos to oracle-without-j, expect non-decreasing):\n"
+        f"    do_nothing            = {agg['donothing_cos']:.4f}  (rolled WITH event j — worst)\n"
+        f"    algebraic_retraction  = {agg['retract_cos']:.4f}  (inverse of j on contaminated roll)\n"
+        f"    model_replay          = {agg['model_replay_cos']:.4f}  (honest j-deleted re-roll)\n"
+        f"    reencode_ceiling      = {agg['ceiling_cos']:.4f}  (reference-identity upper bound)\n"
+        f"  DERIVED (opposite remedies):\n"
+        f"    selection_drift       = {agg['selection_drift']:+.4f}  (model/selection: H path contamination)\n"
+        f"    dynamics_gap          = {agg['dynamics_gap']:+.4f}  (world/dynamics: rollout fidelity)\n"
+        f"  retract_beats_donothing = {agg['retract_beats_donothing']}   bracket_monotone = {agg['bracket_monotone']}"
     )
 
     if out_path:
