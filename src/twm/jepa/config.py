@@ -30,6 +30,7 @@ from twm.jepa import (
     NCEConfig,
     UnrollConfig,
     GatedMLPConfig,
+    TargetedConfig,
     LossConfig,
     DataConfig,
     ModelHParams,
@@ -88,11 +89,15 @@ def _build_model(profile: str, model_json: dict) -> ModelHParams:
     # v3 black-box baseline sizing (design §4.2): model.gated_mlp, read only when
     # operator_group=="gated_mlp" by model.py's factory; parsed always so it round-trips.
     gated_mlp = GatedMLPConfig(**_only_known(GatedMLPConfig, raw.pop("gated_mlp", {})))
+    # v4 targeted-action mask head sizing (jepa_v4_design §1). model.targeted; popped
+    # before the flat overlay so the raw dict never reaches ModelHParams(**...) as a scalar.
+    targeted = TargetedConfig(**_only_known(TargetedConfig, raw.pop("targeted", {})))
     return ModelHParams(
         transition=transition,
         prior=prior,
         decoder=decoder,
         gated_mlp=gated_mlp,
+        targeted=targeted,
         **_only_known(ModelHParams, raw),
     )
 
@@ -169,6 +174,7 @@ __all__ = [
     "NCEConfig",
     "UnrollConfig",
     "GatedMLPConfig",
+    "TargetedConfig",
     "LossConfig",
     "DataConfig",
     "ModelHParams",

@@ -872,6 +872,27 @@ def eval_entity_world(model, ew_cfg, device, tokenizer, max_text_tokens: int = 6
     except Exception as exc:
         metrics["_ent_rollout_error"] = str(exc)
 
+    # (d) target-recovery metrics (v4 §1.6) — only when use_targeted_actions=True.
+    if getattr(model, "use_targeted_actions", False):
+        try:
+            nmi_chains_for_target = _load_labeled_split(
+                labeled_dir, nmi_split, tokenizer, max_text_tokens, append_eos,
+                max_chains=max(subsample, 64),
+            )
+            metrics.update(_target_recovery(model, nmi_chains_for_target, device, out_dir, epoch_str))
+        except Exception as exc:
+            metrics["_ent_target_recovery_error"] = str(exc)
+
+    # (e) separation AUC (v4 §C5) — every-N-epochs metric, the v4 success criterion.
+    try:
+        sep_chains = _load_labeled_split(
+            labeled_dir, nmi_split, tokenizer, max_text_tokens, append_eos,
+            max_chains=max(subsample, 64),
+        )
+        metrics.update(_separation_auc(model, sep_chains, device))
+    except Exception as exc:
+        metrics["_ent_separation_auc_error"] = str(exc)
+
     # Normalise scalars to Python primitives (mirror eval_diagnostics_v2 tail).
     out: dict = {}
     for km, vm in metrics.items():
@@ -887,6 +908,343 @@ def eval_entity_world(model, ew_cfg, device, tokenizer, max_text_tokens: int = 6
             except (TypeError, ValueError):
                 out[km] = vm
     return out
+
+
+# ===========================================================================
+# v4 diagnostics: target-recovery (§1.6) and separation-AUC (§C5)
+# ===========================================================================
+
+@torch.no_grad()
+def _target_recovery(model, chains, device, out_dir, epoch_str) -> dict:
+    """(v4 §1.6) Target-recovery: inferred mask g_hard vs oracle moved-entity.
+
+    For each adjacent (s_t, s_{t+1}) pair with oracle label "<verb>@<entity_idx>":
+      - Run the posterior TransitionEncoder.forward_mask(k, k_tgt) to get g_logits (B,M).
+      - Hard-threshold at 0.5 to get g_hard (B,M) ∈ {0,1}.
+      - The oracle "moved slots" are those belonging to entity `entity_idx`. Since
+        slot↔entity is latent (unlabeled), we do a HUNGARIAN best-match assignment
+        over the dataset to find the best slot-to-entity-index mapping, then compute F1.
+    Also reports mask-sparsity (mean fraction of slots with g_hard=1) and a shuffle
+    baseline.
+
+    Returns ent_target_recovery_f1, ent_target_recovery_nmi, ent_target_recovery_shuffle,
+    ent_target_mask_density, ent_target_recovery_pass.
+    """
+    # Guard: requires use_targeted_actions.
+    if not getattr(model, "use_targeted_actions", False):
+        return {}
+
+    device = torch.device(device) if not isinstance(device, torch.device) else device
+
+    # Collect per-pair (g_hard, oracle_entity_idx, n_entities)
+    pair_masks = []   # list of (M,) int arrays (g_hard)
+    pair_actors = []  # list of actor entity indices (int)
+    pair_n_ent = []   # list of n_entities per chain step
+
+    for ch in chains:
+        ids, pad, actions = ch["ids"], ch["pad"], ch["actions"]
+        n_pairs = min(len(ids) - 1, len(actions))
+        # Determine n_entities per chain from types (if available).
+        n_ent = len(ch.get("types", [])) or 1
+        for i in range(n_pairs):
+            try:
+                actor_idx = int(actions[i].rsplit("@", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            src_ids = ids[i].unsqueeze(0).to(device)
+            src_pad_t = pad[i].unsqueeze(0).to(device)
+            tgt_ids = ids[i + 1].unsqueeze(0).to(device)
+            tgt_pad_t = pad[i + 1].unsqueeze(0).to(device)
+            # Get k (start nouns) from the encoder.
+            try:
+                _, k, _ = model.encoder(src_ids, src_pad_t)
+                # Get k_tgt via the EMA target encoder (the same path as TransitionEncoder.forward_mask).
+                k_tgt = model._target_slots(tgt_ids, tgt_pad_t)   # (1, M, dn) detached
+                g_logits = model.transition.forward_mask(k, k_tgt)  # (1, M)
+                g_hard = (torch.sigmoid(g_logits) > 0.5).squeeze(0).cpu().numpy().astype(int)  # (M,)
+            except Exception:
+                continue
+            pair_masks.append(g_hard)
+            pair_actors.append(actor_idx)
+            pair_n_ent.append(n_ent)
+
+    if not pair_masks:
+        return {
+            "ent_target_recovery_f1": float("nan"),
+            "ent_target_recovery_nmi": float("nan"),
+            "ent_target_recovery_shuffle": float("nan"),
+            "ent_target_mask_density": float("nan"),
+            "ent_target_recovery_pass": False,
+        }
+
+    M = pair_masks[0].shape[0]
+    masks_arr = np.stack(pair_masks)       # (N, M)
+    actors_arr = np.array(pair_actors)     # (N,)
+
+    # --- Mask density ---
+    mask_density = float(masks_arr.mean())
+
+    # --- NMI between mask-as-label and oracle actor ---
+    # For NMI, represent each pair's mask as a tuple (which slots fired) -> integer label.
+    # This is too sparse; instead use the dot-product "actor score" approach:
+    # For each slot s and entity e, count how often g_hard[s]=1 when oracle actor=e.
+    # The slot assignment is the Hungarian match maximizing this co-occurrence.
+    n_actors = int(actors_arr.max()) + 1
+    slot_entity_cooccur = np.zeros((M, n_actors), dtype=float)
+    for g, a in zip(pair_masks, pair_actors):
+        for s in range(M):
+            slot_entity_cooccur[s, a] += g[s]
+
+    # Hungarian assignment: assign slots to entities to maximize co-occurrence.
+    try:
+        from scipy.optimize import linear_sum_assignment
+        # We want to maximize co-occurrence -> minimize negative.
+        row_ind, col_ind = linear_sum_assignment(-slot_entity_cooccur)
+        slot_to_entity = {s: e for s, e in zip(row_ind, col_ind)}
+        # For slots not assigned, assign them to the entity with max co-occurrence.
+        for s in range(M):
+            if s not in slot_to_entity:
+                slot_to_entity[s] = int(slot_entity_cooccur[s].argmax())
+    except ImportError:
+        # Fallback: greedy assignment by max co-occurrence.
+        slot_to_entity = {s: int(slot_entity_cooccur[s].argmax()) for s in range(M)}
+
+    # Compute F1: for each pair, predicted moved slots = g_hard=1 slots;
+    # oracle moved slots = slots assigned to the actor entity.
+    tp_total = fp_total = fn_total = 0
+    for g, actor in zip(pair_masks, pair_actors):
+        predicted = set(s for s in range(M) if g[s] == 1)
+        oracle_slots = set(s for s in range(M) if slot_to_entity[s] == actor)
+        tp = len(predicted & oracle_slots)
+        fp = len(predicted - oracle_slots)
+        fn = len(oracle_slots - predicted)
+        tp_total += tp; fp_total += fp; fn_total += fn
+    prec = tp_total / max(tp_total + fp_total, 1)
+    rec = tp_total / max(tp_total + fn_total, 1)
+    f1 = 2 * prec * rec / max(prec + rec, 1e-12)
+
+    # NMI between slot-assignment-score (per pair: majority entity of fired slots) and oracle.
+    pred_entities = []
+    for g in pair_masks:
+        fired = [s for s in range(M) if g[s] == 1]
+        if fired:
+            entity_votes = [slot_to_entity[s] for s in fired]
+            pred_e = max(set(entity_votes), key=entity_votes.count)
+        else:
+            pred_e = 0
+        pred_entities.append(pred_e)
+    nmi_val = _nmi(pred_entities, actors_arr.tolist())
+
+    # Shuffle baseline: permute predicted entities.
+    rng = np.random.RandomState(0)
+    shuffled_pred = list(pred_entities)
+    rng.shuffle(shuffled_pred)
+    nmi_shuffle = _nmi(shuffled_pred, actors_arr.tolist())
+
+    metrics = {
+        "ent_target_recovery_f1": float(f1),
+        "ent_target_recovery_nmi": float(nmi_val),
+        "ent_target_recovery_shuffle": float(nmi_shuffle),
+        "ent_target_mask_density": float(mask_density),
+        "ent_target_recovery_pass": bool(f1 > nmi_shuffle + 0.05),
+    }
+
+    # Save per-pair contingency.
+    if out_dir is not None:
+        contingency = [
+            {"actor": int(a), "mask": g.tolist(), "pred_entity": int(pe)}
+            for a, g, pe in zip(actors_arr, pair_masks, pred_entities)
+        ]
+        with open(Path(out_dir) / f"target_recovery_{epoch_str}.json", "w") as f:
+            json.dump({"metrics": metrics, "slot_to_entity": {str(k): int(v) for k, v in slot_to_entity.items()},
+                       "n_pairs": len(pair_masks), "contingency": contingency[:200]}, f, indent=2)
+    return metrics
+
+
+@torch.no_grad()
+def _separation_auc(model, chains, device) -> dict:
+    """(v4 §C5) Separation AUC: linear-probe AUC on hard pools.
+
+    Ports the core of scripts/jepa_separation_diag.py (bb01bfd) into a per-epoch
+    metric. Measures whether the encoder's latent space has enough discriminative
+    structure to rank the correct next-state above same-chain distractors.
+
+    Three variants: ema, online, slot_mean (mirrors the script).
+    Reports ent_separation_auc, ent_separation_auc_ema, ent_separation_auc_online,
+    ent_separation_auc_slot_mean. The v4 success criterion is ent_separation_auc > 0.7.
+
+    No-ops cleanly on models without the required attributes (returns NaN scalars).
+    """
+    device = torch.device(device) if not isinstance(device, torch.device) else device
+
+    # Collect (src_ids, src_pad, tgt_ids, tgt_pad, chain_id) from chains.
+    src_ids_list, src_pad_list, tgt_ids_list, tgt_pad_list, cid_list = [], [], [], [], []
+    for ci, ch in enumerate(chains):
+        ids, pad = ch["ids"], ch["pad"]
+        for i in range(len(ids) - 1):
+            src_ids_list.append(ids[i])
+            src_pad_list.append(pad[i])
+            tgt_ids_list.append(ids[i + 1])
+            tgt_pad_list.append(pad[i + 1])
+            cid_list.append(ci)
+
+    if len(src_ids_list) < 4:
+        return {
+            "ent_separation_auc": float("nan"),
+            "ent_separation_auc_ema": float("nan"),
+            "ent_separation_auc_online": float("nan"),
+            "ent_separation_auc_slot_mean": float("nan"),
+        }
+
+    N = len(src_ids_list)
+    T = src_ids_list[0].shape[0]
+    src_ids_t = torch.stack(src_ids_list)     # (N, T)
+    src_pad_t = torch.stack(src_pad_list)     # (N, T)
+    tgt_ids_t = torch.stack(tgt_ids_list)     # (N, T)
+    tgt_pad_t = torch.stack(tgt_pad_list)     # (N, T)
+    chain_ids = np.array(cid_list)
+
+    # Encode variants in batches.
+    BS = 64
+    d_noun = getattr(model, "d_noun", None)
+    if d_noun is None:
+        return {"ent_separation_auc": float("nan")}
+
+    ema_vecs    = torch.zeros(N, d_noun)
+    online_vecs = torch.zeros(N, d_noun)
+    slot_vecs   = torch.zeros(N, d_noun)
+    zhat_vecs   = torch.zeros(N, d_noun)
+
+    has_ema = hasattr(model, "ema") and hasattr(model.ema, "pool_raw")
+    has_online = hasattr(model, "_online_bundle") and hasattr(model._online_bundle, "pool_raw")
+    has_encoder = hasattr(model, "encoder")
+    has_fwd = hasattr(model, "forward_v2")
+
+    for s in range(0, N, BS):
+        ti = tgt_ids_t[s:s + BS].to(device)
+        tp = tgt_pad_t[s:s + BS].to(device)
+        si = src_ids_t[s:s + BS].to(device)
+        sp = src_pad_t[s:s + BS].to(device)
+        b = ti.shape[0]
+        if has_ema:
+            try:
+                ema_vecs[s:s + b] = model.ema.pool_raw(ti, tp).cpu()
+            except Exception:
+                pass
+        if has_online:
+            try:
+                online_vecs[s:s + b] = model._online_bundle.pool_raw(ti, tp).cpu()
+            except Exception:
+                pass
+        if has_encoder:
+            try:
+                _, k, _ = model.encoder(ti, tp)
+                slot_vecs[s:s + b] = k.mean(dim=1).cpu()
+            except Exception:
+                pass
+        if has_fwd:
+            try:
+                out = model.forward_v2(si, sp, ti, tp, tau=1.0, hard=True)
+                zh = out.get("zhat")
+                if zh is not None:
+                    zhat_vecs[s:s + b] = zh.cpu()
+            except Exception:
+                pass
+
+    # Build hard pools (mirrors jepa_separation_diag.build_pools exactly).
+    same_chain = defaultdict(list)
+    for i, cid in enumerate(chain_ids):
+        for j, cid2 in enumerate(chain_ids):
+            if j != i and cid2 == cid:
+                same_chain[i].append(j)
+
+    HARD_NN = 40
+    zt_n = F.normalize(ema_vecs.float(), dim=-1)
+    sims_mat = (zt_n @ zt_n.T).numpy()
+    hard_pools = []
+    for i in range(N):
+        base = [i] + same_chain[i]
+        baseset = set(base)
+        order = np.argsort(-sims_mat[i])
+        nn = [int(j) for j in order if j not in baseset][:HARD_NN]
+        hard_pools.append(base + nn)
+
+    # Run the linear-probe AUC for each variant.
+    def _probe_auc(cand_vecs):
+        """Compute LR-probe AUC (mirrors jepa_separation_diag.linear_probe_auc)."""
+        rng2 = np.random.default_rng(0)
+        X_list, y_list = [], []
+        MAX_NEG = 10
+        for qi, pool in enumerate(hard_pools):
+            qv = zhat_vecs[qi].float().numpy()
+            gold_idx = pool[0]
+            cv = cand_vecs[gold_idx].float().numpy()
+            feat = np.concatenate([cv, qv, np.abs(cv - qv), cv * qv])
+            X_list.append(feat); y_list.append(1)
+            distractors = pool[1:]
+            neg_sel = rng2.choice(len(distractors),
+                                   size=min(MAX_NEG, len(distractors)), replace=False)
+            for ni in neg_sel:
+                cv2 = cand_vecs[distractors[ni]].float().numpy()
+                feat2 = np.concatenate([cv2, qv, np.abs(cv2 - qv), cv2 * qv])
+                X_list.append(feat2); y_list.append(0)
+        X = np.array(X_list, dtype=np.float32)
+        y = np.array(y_list, dtype=np.int32)
+        n = len(X)
+        if n < 10:
+            return float("nan")
+        perm = rng2.permutation(n)
+        X = X[perm]; y = y[perm]
+        split = int(0.8 * n)
+        X_tr, X_te = X[:split], X[split:]
+        y_tr, y_te = y[:split], y[split:]
+        mu = X_tr.mean(0, keepdims=True); std = X_tr.std(0, keepdims=True) + 1e-8
+        X_tr = (X_tr - mu) / std; X_te = (X_te - mu) / std
+        if len(np.unique(y_te)) < 2:
+            return float("nan")
+        try:
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.metrics import roc_auc_score
+            clf = LogisticRegression(max_iter=300, C=1.0, solver="lbfgs")
+            clf.fit(X_tr, y_tr)
+            proba = clf.predict_proba(X_te)[:, 1]
+            return float(roc_auc_score(y_te, proba))
+        except Exception:
+            # Fallback: cosine-score AUC
+            d = cand_vecs.shape[1]
+            scores_te = (X_te[:, :d] * X_te[:, d:2 * d]).sum(1)
+            try:
+                from sklearn.metrics import roc_auc_score
+                return float(roc_auc_score(y_te, scores_te))
+            except Exception:
+                # Pure-numpy trapz AUC
+                try:
+                    order = np.argsort(-scores_te)
+                    y_sorted = y_te[order]
+                    n_pos = y_sorted.sum(); n_neg = len(y_sorted) - n_pos
+                    if n_pos == 0 or n_neg == 0:
+                        return float("nan")
+                    tp = np.cumsum(y_sorted); fp = np.cumsum(1 - y_sorted)
+                    tpr = tp / n_pos; fpr = fp / n_neg
+                    return float(np.trapz(tpr, fpr))
+                except Exception:
+                    return float("nan")
+
+    auc_ema    = _probe_auc(ema_vecs)    if has_ema else float("nan")
+    auc_online = _probe_auc(online_vecs) if has_online else float("nan")
+    auc_slot   = _probe_auc(slot_vecs)   if has_encoder else float("nan")
+    best_auc   = max(v for v in [auc_ema, auc_online, auc_slot] if not np.isnan(v)) \
+                 if any(not np.isnan(v) for v in [auc_ema, auc_online, auc_slot]) \
+                 else float("nan")
+
+    return {
+        "ent_separation_auc":           float(best_auc),
+        "ent_separation_auc_ema":       float(auc_ema),
+        "ent_separation_auc_online":    float(auc_online),
+        "ent_separation_auc_slot_mean": float(auc_slot),
+        # v4 success criterion: AUC moving from 0.53 toward > 0.7
+        "ent_separation_auc_pass":      bool(best_auc > 0.7),
+    }
 
 
 def eval_diagnostics_v2(

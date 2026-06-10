@@ -443,3 +443,225 @@ class TestChainIds:
         assert len(ds) == cap
         assert len(ds.chain_ids) == cap
         assert set(ds.chain_ids) == {0, 1, 2}
+
+
+# ---------------------------------------------------------------------------
+# Diff-weighted CE token weights (v4 §2.1): _diff_weights + *_diff_w tensors
+# ---------------------------------------------------------------------------
+
+ENTITY_BPE_PATH = Path("data/glucose/jepa_bpe_512.json")
+ENTITY_TRAIN_PATH = Path("data/entity_world/train.jsonl")
+
+
+class TestDiffWeightsUnit:
+    """Direct unit tests of _diff_weights (no tokenizer — synthetic id sequences)."""
+
+    def test_replace_marks_target_diff(self):
+        from src.twm.jepa.data import _diff_weights
+        # src and tgt share [10, 11] then differ at the last token (replace 12 -> 99).
+        src = [10, 11, 12]
+        tgt = [10, 11, 99]
+        w = _diff_weights(src, tgt, w_diff=4.0, pad_id=0, T=8)
+        assert w.shape == (8,)
+        assert w[0].item() == 1.0 and w[1].item() == 1.0   # shared boilerplate
+        assert w[2].item() == 4.0                          # replaced token is the diff
+        assert w[3:].sum().item() == 0.0                   # pad positions zeroed
+
+    def test_insert_marks_target_diff(self):
+        from src.twm.jepa.data import _diff_weights
+        # tgt has an extra token (44) inserted at the front (an added action clause).
+        src = [10, 11, 12]
+        tgt = [44, 10, 11, 12]
+        w = _diff_weights(src, tgt, w_diff=3.0, pad_id=0, T=8)
+        assert w[0].item() == 3.0                          # inserted token is the diff
+        assert w[1].item() == 1.0 and w[2].item() == 1.0 and w[3].item() == 1.0
+
+    def test_equal_sequences_all_boilerplate(self):
+        from src.twm.jepa.data import _diff_weights
+        src = [10, 11, 12, 13]
+        tgt = [10, 11, 12, 13]
+        w = _diff_weights(src, tgt, w_diff=4.0, pad_id=0, T=8)
+        # No diff ⟹ every non-pad target weight is 1.0 even with w_diff=4.
+        assert w[:4].tolist() == [1.0, 1.0, 1.0, 1.0]
+        assert w[4:].sum().item() == 0.0
+
+    def test_w_diff_one_is_all_ones_over_nonpad(self):
+        from src.twm.jepa.data import _diff_weights
+        src = [10, 11, 12]
+        tgt = [10, 77, 88]  # two diffs, but w_diff=1.0 ⟹ all ones
+        w = _diff_weights(src, tgt, w_diff=1.0, pad_id=0, T=6)
+        assert w[:3].tolist() == [1.0, 1.0, 1.0]
+        assert w[3:].sum().item() == 0.0
+
+    def test_pad_positions_zero(self):
+        from src.twm.jepa.data import _diff_weights
+        src = [10, 11, 0, 0]    # trailing pad
+        tgt = [10, 99, 0, 0]
+        w = _diff_weights(src, tgt, w_diff=4.0, pad_id=0, T=4)
+        # Token 1 replaced -> 4.0; the two pad positions -> 0.0.
+        assert w[0].item() == 1.0
+        assert w[1].item() == 4.0
+        assert w[2].item() == 0.0 and w[3].item() == 0.0
+
+    def test_delete_does_not_index_out_of_range(self):
+        from src.twm.jepa.data import _diff_weights
+        # src has an extra token that is deleted in tgt — no target position to weight.
+        src = [10, 11, 12, 13]
+        tgt = [10, 12, 13]
+        w = _diff_weights(src, tgt, w_diff=4.0, pad_id=0, T=8)
+        assert w.shape == (8,)
+        # 11 deleted; tgt is [10, 12, 13]. SequenceMatcher sees a delete (no tgt weight).
+        # The remaining shared tokens stay boilerplate.
+        assert torch.isfinite(w).all()
+
+
+@pytest.fixture(scope="session")
+def entity_tokenizer():
+    if not ENTITY_BPE_PATH.exists():
+        pytest.skip(f"BPE artifact not found at {ENTITY_BPE_PATH}")
+    from src.twm.domain_bpe import DomainBPETokenizer
+    return DomainBPETokenizer.load(ENTITY_BPE_PATH, max_length=MAX_TEXT_TOKENS)
+
+
+@pytest.fixture(scope="session")
+def entity_triples_dataset(entity_tokenizer):
+    """A small slice of the real entity-world train data in triples mode."""
+    if not ENTITY_TRAIN_PATH.exists():
+        pytest.skip(f"Entity data not found at {ENTITY_TRAIN_PATH}")
+    from src.twm.jepa.data import JEPAChainDataset
+    with ENTITY_TRAIN_PATH.open() as f:
+        lines = [f.readline() for _ in range(80)]
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as tmp:
+        tmp.writelines(lines)
+        tmp_path = tmp.name
+    return JEPAChainDataset(
+        tmp_path, entity_tokenizer, max_text_tokens=MAX_TEXT_TOKENS,
+        mode="triples", w_diff=4.0,
+    )
+
+
+class TestDiffWeightTensorsTriples:
+    def test_keys_present(self, entity_triples_dataset):
+        item = entity_triples_dataset[0]
+        assert "s1_diff_w" in item and "s2_diff_w" in item
+        assert item["s1_diff_w"].shape == (MAX_TEXT_TOKENS,)
+        assert item["s2_diff_w"].shape == (MAX_TEXT_TOKENS,)
+        assert item["s1_diff_w"].dtype == torch.float32
+
+    def test_get_batch_keys(self, entity_triples_dataset):
+        batch = entity_triples_dataset.get_batch([0, 1, 2])
+        assert batch["s1_diff_w"].shape == (3, MAX_TEXT_TOKENS)
+        assert batch["s2_diff_w"].shape == (3, MAX_TEXT_TOKENS)
+
+    def test_pad_positions_zero(self, entity_triples_dataset):
+        """diff weight is 0 exactly where the target is pad (real entity data)."""
+        for i in range(min(len(entity_triples_dataset), 20)):
+            item = entity_triples_dataset[i]
+            s1_pad = item["s1_pad"]
+            assert (item["s1_diff_w"][s1_pad] == 0.0).all(), (
+                f"example {i}: s1_diff_w must be 0 at pad positions"
+            )
+            s2_pad = item["s2_pad"]
+            assert (item["s2_diff_w"][s2_pad] == 0.0).all()
+
+    def test_diff_weights_match_actual_changed_tokens(self, entity_triples_dataset):
+        """On real entity data the diff weight must mark exactly the tokens that differ
+        between consecutive states (vs the prior state), and ONLY those.
+
+        We recompute the expected diff independently via SequenceMatcher on the stored
+        id tensors and assert the dataset's stored weights agree position-by-position."""
+        from difflib import SequenceMatcher
+        ds = entity_triples_dataset
+        pad_id = ds.tokenizer.pad_token_id
+        n_checked = 0
+        n_with_diff = 0
+        for i in range(min(len(ds), 30)):
+            item = ds[i]
+            for src_key, tgt_key, w_key in (
+                ("s0_ids", "s1_ids", "s1_diff_w"),
+                ("s1_ids", "s2_ids", "s2_diff_w"),
+            ):
+                src = item[src_key].tolist()
+                tgt = item[tgt_key].tolist()
+                # strip pad like _diff_weights does
+                ns = len(src)
+                while ns > 0 and src[ns - 1] == pad_id:
+                    ns -= 1
+                nt = len(tgt)
+                while nt > 0 and tgt[nt - 1] == pad_id:
+                    nt -= 1
+                expected = torch.zeros(MAX_TEXT_TOKENS)
+                expected[:nt] = 1.0
+                sm = SequenceMatcher(a=src[:ns], b=tgt[:nt], autojunk=False)
+                for tag, _a, _b, j1, j2 in sm.get_opcodes():
+                    if tag in ("replace", "insert"):
+                        for j in range(j1, j2):
+                            expected[j] = 4.0
+                # pad positions are 0.0
+                expected[nt:] = 0.0
+                assert torch.equal(item[w_key], expected), (
+                    f"example {i} {w_key}: diff weights do not match the actual token diff"
+                )
+                n_checked += 1
+                if (expected == 4.0).any():
+                    n_with_diff += 1
+        assert n_checked > 0
+        # Entity-world consecutive states differ (an action changes some clause), so at
+        # least some examples must carry a real diff (else the test is vacuous).
+        assert n_with_diff > 0, "expected some real diffs in entity-world consecutive states"
+
+    def test_w_diff_one_yields_all_ones(self, entity_tokenizer):
+        """With w_diff=1.0 (default) the stored weights are all-ones over non-pad ⟹
+        bitwise-v3 uniform CE when consumed by token_ce."""
+        if not ENTITY_TRAIN_PATH.exists():
+            pytest.skip("entity data missing")
+        from src.twm.jepa.data import JEPAChainDataset
+        with ENTITY_TRAIN_PATH.open() as f:
+            lines = [f.readline() for _ in range(20)]
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as tmp:
+            tmp.writelines(lines)
+            p = tmp.name
+        ds = JEPAChainDataset(
+            p, entity_tokenizer, max_text_tokens=MAX_TEXT_TOKENS,
+            mode="triples", w_diff=1.0,
+        )
+        for i in range(len(ds)):
+            item = ds[i]
+            for w_key, pad_key in (("s1_diff_w", "s1_pad"), ("s2_diff_w", "s2_pad")):
+                w = item[w_key]
+                pad = item[pad_key]
+                assert (w[~pad] == 1.0).all(), f"{w_key} must be all-ones over non-pad with w_diff=1"
+                assert (w[pad] == 0.0).all()
+
+
+class TestDiffWeightTensorsPairs:
+    @pytest.fixture(scope="class")
+    def pairs_dataset(self, tiny_jsonl, tokenizer):
+        from src.twm.jepa.data import JEPAChainDataset
+        return JEPAChainDataset(
+            tiny_jsonl, tokenizer, max_text_tokens=MAX_TEXT_TOKENS,
+            mode="pairs", w_diff=4.0,
+        )
+
+    def test_key_present(self, pairs_dataset):
+        item = pairs_dataset[0]
+        assert "tgt_diff_w" in item
+        assert item["tgt_diff_w"].shape == (MAX_TEXT_TOKENS,)
+        assert item["tgt_diff_w"].dtype == torch.float32
+
+    def test_get_batch_key(self, pairs_dataset):
+        batch = pairs_dataset.get_batch([0, 1])
+        assert batch["tgt_diff_w"].shape == (2, MAX_TEXT_TOKENS)
+
+    def test_pad_positions_zero(self, pairs_dataset):
+        for i in range(len(pairs_dataset)):
+            item = pairs_dataset[i]
+            assert (item["tgt_diff_w"][item["tgt_pad"]] == 0.0).all()
+
+    def test_default_w_diff_is_one(self, tiny_jsonl, tokenizer):
+        """Default constructor (no w_diff) ⟹ w_diff=1.0 ⟹ all-ones over non-pad."""
+        from src.twm.jepa.data import JEPAChainDataset
+        ds = JEPAChainDataset(tiny_jsonl, tokenizer, max_text_tokens=MAX_TEXT_TOKENS)
+        assert ds.w_diff == 1.0
+        item = ds[0]
+        assert (item["tgt_diff_w"][~item["tgt_pad"]] == 1.0).all()

@@ -1,0 +1,39 @@
+{
+  "corpus": "wikihow",
+  "source": "gursi26/wikihow-cleaned",
+  "source_key": "wikihow_cleaned",
+  "license": "cc-by-nc-sa-3.0",
+  "license_note": "CC BY-NC-SA 3.0 (wikiHow content): non-commercial; research use OK, flag for release.",
+  "world_state_reading": "each step headline is a task-progress state snapshot; step transitions are implicit actions",
+  "action_label_heuristic": "first-verb lemma of the next step's headline (weak; see convert_wikihow.extract_action_label)",
+  "seed": 7,
+  "limit_articles": 2000,
+  "min_steps": 2,
+  "max_steps": 12,
+  "splits": {
+    "train": {
+      "chains": 1500,
+      "transitions": 8579
+    },
+    "test": {
+      "chains": 200,
+      "transitions": 1138
+    }
+  },
+  "build_stats": {
+    "articles_seen": 2000,
+    "chains_kept": 1986,
+    "dropped_too_short": 14,
+    "truncated_over_max": 288,
+    "min_steps": 2,
+    "max_steps": 12,
+    "mean_steps": 6.73,
+    "transitions": 11388
+  },
+  "files": [
+    "train.jsonl",
+    "train_labeled.jsonl",
+    "test.jsonl",
+    "test_labeled.jsonl"
+  ]
+}

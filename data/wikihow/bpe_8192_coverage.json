@@ -1,0 +1,23 @@
+{
+  "corpus": "wikihow",
+  "vocab_size": 8192,
+  "bpe_path": "data/wikihow/bpe_8192.json",
+  "recommended_max_text_tokens": 48,
+  "recommendation": "p99=33 -> max_text_tokens=48 covers >=99% of states; current candidate 64 drops 0.044%.",
+  "reports": [
+    {
+      "label": "wikihow",
+      "states": 11417,
+      "vocab_size": 6242,
+      "mean_tokens": 8.62,
+      "p50": 7,
+      "p90": 14,
+      "p95": 19,
+      "p99": 33,
+      "max": 143,
+      "max_text_tokens": 64,
+      "n_over_max": 5,
+      "pct_over_max": 0.044
+    }
+  ]
+}

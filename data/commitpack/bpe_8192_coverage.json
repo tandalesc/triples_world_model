@@ -1,0 +1,23 @@
+{
+  "corpus": "commitpack",
+  "vocab_size": 8192,
+  "bpe_path": "data/commitpack/bpe_8192.json",
+  "recommended_max_text_tokens": 272,
+  "recommendation": "p99=257 -> max_text_tokens=272 covers >=99% of states; current candidate 192 drops 11.5%.",
+  "reports": [
+    {
+      "label": "commitpack",
+      "states": 3400,
+      "vocab_size": 8192,
+      "mean_tokens": 137.99,
+      "p50": 135,
+      "p90": 197,
+      "p95": 216,
+      "p99": 257,
+      "max": 349,
+      "max_text_tokens": 192,
+      "n_over_max": 391,
+      "pct_over_max": 11.5
+    }
+  ]
+}

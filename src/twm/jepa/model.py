@@ -139,6 +139,7 @@ class JEPAOperatorModelV2(nn.Module):
         use_kind_head: bool = False,
         kind_codebook_size: int = 16,
         use_norm_budget: bool = False,
+        use_targeted_actions: bool = False,
     ):
         super().__init__()
         self.encoder = encoder
@@ -149,6 +150,13 @@ class JEPAOperatorModelV2(nn.Module):
         self.d_noun = d_noun
         self.n_verbs = n_verbs
         self.use_pred = use_pred
+
+        # v4 targeted latent actions (jepa_v4_design §1). When ON, the posterior emits a
+        # per-slot target mask `g (B, M)`; `_apply_action` applies the operator B_v ONLY to
+        # the targeted slots (convex combination, straight-through hard threshold at eval),
+        # exact identity elsewhere. The mask heads live on the transition/prior modules
+        # (built there when on). DEFAULT FALSE ⟹ g≡1 everywhere ⟹ v3 apply-all (bitwise).
+        self.use_targeted_actions = use_targeted_actions
 
         # v2.1 polar conditioning (design §3): the H map owns the per-slot phase offset
         # θ_offset = H(|k|). ZERO-INIT ⟹ v2.1 == v2.0 at step 0 (the §11 gate). When
@@ -200,7 +208,21 @@ class JEPAOperatorModelV2(nn.Module):
             self.scale_readout_proj = None
 
     # ------------------------------------------------------------------ action path
-    def _apply_action(self, k: torch.Tensor, v_onehot: torch.Tensor):
+    def _gate_from_logits(self, g_logits: torch.Tensor) -> torch.Tensor:
+        """Resolve per-slot mask logits g_logits (B, M) to the gate g (B, M) (§1.2).
+
+        Training: the SOFT sigmoid gate (full gradient). Eval: the HARD 0/1 threshold at
+        0.5 with a straight-through estimator (hard forward, soft backward) — so targeted
+        slots get the EXACT operator output and identity slots the EXACT input, making
+        disjoint-support commutation a structural property (§1.0).
+        """
+        g_soft = torch.sigmoid(g_logits)  # (B, M) in (0, 1)
+        if self.training:
+            return g_soft
+        g_hard = (g_soft > 0.5).to(g_soft.dtype)
+        return g_hard + (g_soft - g_soft.detach())  # straight-through
+
+    def _apply_action(self, k: torch.Tensor, v_onehot: torch.Tensor, g_logits=None):
         """a* = B_v k for ONE sequence-level action per pair (design §2.3).
 
         v_onehot: (B, V) hard straight-through one-hot. Broadcast to (B, M, V) so the
@@ -213,23 +235,96 @@ class JEPAOperatorModelV2(nn.Module):
         gradient, design §3.1) and passed to the operator. Zero-init H ⟹ offset == 0 at
         step 0 ⟹ identical to v2.0.
 
-        Return contract (entity §1.3):
-          - norm budget OFF (default): returns the bare `a (B, M, dn)` — BITWISE v2/v3.
-          - norm budget ON: passes `norm_budget=True` to the operator and returns
-            `(a, scale_delta)` where `scale_delta (B, M)` is this step's per-slot
-            log-scale (the structured operator's `log_rho`; the black-box's zeros).
-            `self.use_norm_budget` drives the branch, so this stays operator-agnostic.
+        v4 targeted actions (jepa_v4_design §1.2): when `g_logits` is provided (the mask
+        head output), the operator's effect is gated PER SLOT by the convex combination
+            a_i = g_i · (B_v k_i) + (1 − g_i) · k_i
+        with `g_i` the straight-through gate (hard 0/1 at eval). The polar conditioner
+        reads `|k|` BEFORE gating (§1.2: H sees the pre-step modulus, unchanged), so the
+        conditioning is untouched by the mask; on an identity slot the gated output is
+        `k_i` exactly, so at the next hop H feeds on the EXACT unchanged modulus profile.
+        The norm-budget `scale_delta` is ALSO gated by `g` (§1.2) so identity slots
+        accumulate EXACTLY ZERO scale — the load-bearing correctness point that keeps the
+        identity readout and the retraction inverse exact.
+
+        Return contract:
+          - targeted OFF (g_logits is None):
+              * norm budget OFF: bare `a (B, M, dn)` — BITWISE v2/v3.
+              * norm budget ON: `(a, scale_delta)` (entity §1.3) — BITWISE v3.
+          - targeted ON (g_logits given): a trailing `g_hard (B, M)` (the eval hard mask,
+            stored for the inverse §1.5) is appended:
+              * norm budget OFF: `(a, g_hard)`.
+              * norm budget ON: `(a, scale_delta, g_hard)`.
         """
         B, M, _ = k.shape
         v_slots = v_onehot.unsqueeze(1).expand(B, M, -1)  # (B, M, V)
+        # H reads the PRE-step, PRE-gate modulus (§1.2) — gating is applied to the OUTPUT.
         theta_offset = self.conditioner(k) if self.conditioner is not None else None
+
         if self.use_norm_budget:
-            return self.operator.apply(
+            a_op, scale_delta_op = self.operator.apply(
                 k, v_slots, theta_offset=theta_offset, norm_budget=True
-            )  # (a, scale_delta)
-        if theta_offset is not None:
-            return self.operator.apply(k, v_slots, theta_offset=theta_offset)
-        return self.operator.apply(k, v_slots)            # (B, M, dn)
+            )  # (B, M, dn), (B, M)
+        else:
+            if theta_offset is not None:
+                a_op = self.operator.apply(k, v_slots, theta_offset=theta_offset)
+            else:
+                a_op = self.operator.apply(k, v_slots)  # (B, M, dn)
+            scale_delta_op = None
+
+        if g_logits is None:
+            # Targeted OFF ⟹ v3 apply-all, bitwise (no convex combination).
+            if self.use_norm_budget:
+                return a_op, scale_delta_op
+            return a_op
+
+        # --- targeted ON: per-slot gated convex combination (§1.2) ---
+        g = self._gate_from_logits(g_logits)               # (B, M) soft (train) / ST-hard (eval)
+        a = g.unsqueeze(-1) * a_op + (1.0 - g).unsqueeze(-1) * k  # gated noun
+        # g_hard is the eval threshold — stored for the EXACT inverse (§1.5). Computed
+        # from the (detached) soft gate so it is a clean 0/1 partition regardless of mode.
+        with torch.no_grad():
+            g_hard = (torch.sigmoid(g_logits) > 0.5).to(k.dtype)  # (B, M)
+        if self.use_norm_budget:
+            # Gate the scale too: identity slots (g=0) accumulate ZERO scale (§1.2).
+            scale_delta = g * scale_delta_op               # (B, M)
+            return a, scale_delta, g_hard
+        return a, g_hard
+
+    # ------------------------------------------------------------------ targeted-mask input
+    @torch.no_grad()
+    def _target_slots(self, tgt_ids: torch.Tensor, tgt_pad: torch.Tensor) -> torch.Tensor:
+        """Detached EMA raw-noun encode of s_{t+1} -> k_tgt (B, M, dn) (jepa_v4_design §1.1).
+
+        The mask head reads `[k ; k_tgt ; |k_tgt − k|]`; `k_tgt` is the stop-grad EMA
+        encode of the next state (the SAME `self.ema.encoder` trunk the InfoNCE key uses).
+        Detaching here is what keeps the mask inferable from the pair WITHOUT opening a
+        continuous future channel (§1.4) — the mask carries location bits, not content.
+        """
+        return self.ema.encoder(tgt_ids, tgt_pad)[1].detach()  # k slot nouns
+
+    def _unpack_apply(self, ret):
+        """Normalize `_apply_action`'s variable-length return to (a, scale_delta, g_hard).
+
+        `_apply_action` returns one of {a, (a, scale_delta), (a, g_hard),
+        (a, scale_delta, g_hard)} depending on (use_norm_budget, use_targeted_actions).
+        This collapses all four shapes to a uniform triple with None for the absent
+        elements, so the forward/unroll bodies stay branch-free. A bare 2-tuple is
+        disambiguated by the instance flags: it is (a, scale_delta) when the budget is on
+        and targeting is off, or (a, g_hard) when targeting is on and the budget is off
+        (the two never coexist in a 2-tuple — both-on is a 3-tuple).
+        """
+        budget = self.use_norm_budget
+        targeted = self.use_targeted_actions
+        if budget and targeted:
+            a, scale_delta, g_hard = ret
+            return a, scale_delta, g_hard
+        if budget:           # (a, scale_delta)
+            a, scale_delta = ret
+            return a, scale_delta, None
+        if targeted:         # (a, g_hard)
+            a, g_hard = ret
+            return a, None, g_hard
+        return ret, None, None  # bare a
 
     # ------------------------------------------------------------------ readout helper
     def _anchor_pool(self, a: torch.Tensor, s_acc: torch.Tensor | None) -> torch.Tensor:
@@ -284,16 +379,25 @@ class JEPAOperatorModelV2(nn.Module):
         # --- prior p(v | text_t) for autonomous rollout (KL target is stopgrad q) ---
         p_logits = self.prior(pool_t)
 
+        # --- v4 targeted mask (jepa_v4_design §1.1/§1.3): posterior emits the per-slot
+        # target mask from `[k ; k_tgt ; |k_tgt − k|]` (k_tgt = detached EMA encode of
+        # s_{t+1}); the prior distills it from `k` alone. Both None when targeted off. ---
+        if self.use_targeted_actions:
+            k_tgt = self._target_slots(tgt_ids, tgt_pad)        # (B, M, dn) detached
+            g_logits = self.transition.forward_mask(k, k_tgt)    # (B, M)
+            g_prior_logits = self.prior.forward_mask(k)          # (B, M)
+        else:
+            g_logits = None
+            g_prior_logits = None
+
         # --- operator-transformed nouns: the ONLY decoder conditioning channel ---
         # entity §1.3: with the budget on, _apply_action returns (a, scale_delta); the
         # single-hop accumulator s_acc == scale_delta (s starts at 0). Off ⟹ bare a.
-        if self.use_norm_budget:
-            a, scale_delta = self._apply_action(k, v_onehot)  # (B,M,dn), (B,M)
-            s_acc = scale_delta
-        else:
-            a = self._apply_action(k, v_onehot)               # (B, M, dn)
-            scale_delta = None
-            s_acc = None
+        # v4 §1.2: with targeting on, a trailing g_hard (the eval hard mask) is returned.
+        a, scale_delta, g_hard = self._unpack_apply(
+            self._apply_action(k, v_onehot, g_logits=g_logits)
+        )
+        s_acc = scale_delta  # single hop: s_acc == this step's (gated) scale_delta
 
         # --- token decoder: memory = a* ONLY (structural leakage block) ---
         logits = self.decoder(a, tgt_ids, tgt_pad)  # (B, T, V)
@@ -310,6 +414,10 @@ class JEPAOperatorModelV2(nn.Module):
             # downstream guards on `is not None`).
             "scale_delta": scale_delta,
             "s_acc": s_acc,
+            # v4 §1.1/§1.3: per-slot mask logits + the stored hard mask (None when off).
+            "g_logits": g_logits,
+            "g_prior_logits": g_prior_logits,
+            "g_hard": g_hard,
         }
 
         # v2.1 optional kind readout (design §7): diagnostic label only, never routes.
@@ -418,13 +526,23 @@ class JEPAOperatorModelV2(nn.Module):
             # --- per-hop prior p(v | src) distilled from this hop's source pool (§2.2) ---
             p_logits = self.prior(pool_src)
 
-            # --- composed application: conditioning reads |k_in| at THIS hop (§2.3) ---
-            if self.use_norm_budget:
-                a, scale_delta = self._apply_action(k_in, v_onehot)  # (B,M,dn), (B,M)
-                s_acc = s_acc + scale_delta                          # log-domain accumulate
+            # --- v4 targeted mask: per-hop posterior mask from k_in (operator INPUT) and
+            # the detached EMA encode of THIS hop's target; prior mask from k_in alone. ---
+            if self.use_targeted_actions:
+                k_tgt = self._target_slots(tgt_ids, tgt_pad)         # (B, M, dn) detached
+                g_logits = self.transition.forward_mask(k_in, k_tgt)  # (B, M)
+                g_prior_logits = self.prior.forward_mask(k_in)        # (B, M)
             else:
-                a = self._apply_action(k_in, v_onehot)  # θoff = H(|k_in|)
-                scale_delta = None
+                g_logits = None
+                g_prior_logits = None
+
+            # --- composed application: conditioning reads |k_in| at THIS hop (§2.3),
+            # gated per-slot by the mask (§1.2) when targeting is on. ---
+            a, scale_delta, g_hard = self._unpack_apply(
+                self._apply_action(k_in, v_onehot, g_logits=g_logits)
+            )
+            if self.use_norm_budget:
+                s_acc = s_acc + scale_delta  # log-domain accumulate (gated ⟹ identity=0)
 
             # --- token decoder: memory = a* ONLY (structural leakage block) ---
             logits = self.decoder(a, tgt_ids, tgt_pad)
@@ -439,6 +557,9 @@ class JEPAOperatorModelV2(nn.Module):
                 "logits": logits,
                 "scale_delta": scale_delta,
                 "s_acc": s_acc if self.use_norm_budget else None,
+                "g_logits": g_logits,
+                "g_prior_logits": g_prior_logits,
+                "g_hard": g_hard,
             }
             if self.kind_head is not None:
                 hop_out["kind_ids"] = self.kind_head.assign(k_in)
@@ -507,16 +628,20 @@ class JEPAOperatorModelV2(nn.Module):
                 v = p_logits.argmax(dim=-1)  # (B,)
 
         v_onehot = F.one_hot(v, num_classes=self.n_verbs).to(k.dtype)  # (B, V)
-        # entity §1.3: _apply_action returns (a, scale_delta) when the budget is on; the
-        # decoder generates from `a` only (leakage unchanged). scale_delta surfaces in the
-        # rollout dict so callers (rollout-fidelity eval, retraction probe) can thread it.
-        if self.use_norm_budget:
-            a, scale_delta = self._apply_action(k, v_onehot)  # (B,M,dn), (B,M)
-        else:
-            a = self._apply_action(k, v_onehot)  # (B, M, dn)
-            scale_delta = None
+        # v4 §1.3: at rollout the posterior is gone, so the mask comes from the PRIOR mask
+        # head (reads state_t nouns k only — leakage-clean). None when targeting off.
+        g_logits = self.prior.forward_mask(k) if self.use_targeted_actions else None
+        # entity §1.3: _apply_action returns scale_delta when the budget is on; the decoder
+        # generates from `a` only (leakage unchanged). scale_delta / g_hard surface in the
+        # rollout dict so callers (rollout-fidelity eval, retraction probe) can thread them.
+        a, scale_delta, g_hard = self._unpack_apply(
+            self._apply_action(k, v_onehot, g_logits=g_logits)
+        )
         gen_ids = self.decoder.generate(a, max_tokens=max_tokens, temperature=temperature)
-        return {"v": v, "a": a, "gen_ids": gen_ids, "scale_delta": scale_delta}
+        return {
+            "v": v, "a": a, "gen_ids": gen_ids,
+            "scale_delta": scale_delta, "g_hard": g_hard,
+        }
 
     def _prior_pool(self, src_ids, src_pad) -> torch.Tensor:
         """Masked-mean pool of text_t through the (shared) trunk, for the prior at
@@ -531,7 +656,7 @@ class JEPAOperatorModelV2(nn.Module):
         return (ctx * mask).sum(dim=1) / denom
 
     # ------------------------------------------------------------------ pet/demo API
-    def step_latent(self, k: torch.Tensor, verb_idx):
+    def step_latent(self, k: torch.Tensor, verb_idx, g_logits=None):
         """One tick in latent space: a* = B_v k. verb_idx scalar or (B,)/(B,M).
 
         v2.1 (design §3/§4.2): when polar conditioning is on, returns
@@ -546,20 +671,51 @@ class JEPAOperatorModelV2(nn.Module):
         radius, so the undo needs the stored scale). The return is then
         `(a, theta_offset, scale_delta)` (theta_offset is None if no conditioner) —
         threaded exactly like theta_offset is today.
+
+        v4 targeted actions (jepa_v4_design §1.2/§1.5): pass `g_logits (B, M)` (e.g. from
+        a mask head, or a constructed mask for the retraction probe) to gate the operator
+        per slot. The return then APPENDS the stored hard mask `g_hard (B, M)` as the LAST
+        element so the caller threads it to `undo_latent(g_hard=...)` for an exact inverse
+        on a mixed mask. `g_hard` is appended in ALL conditioner/budget shapes:
+            (a, g_hard) | (a, theta_offset, g_hard) | (a, theta_offset, scale_delta, g_hard)
+        When `g_logits is None` the return is exactly the v2.1/entity shape (no g_hard) —
+        the bitwise-preserved path.
         """
         v_slots = self._verb_to_slots(k, verb_idx)
         theta_offset = self.conditioner(k) if self.conditioner is not None else None
+
+        if g_logits is None:
+            # --- bitwise v2.1/entity path (no gating, no g_hard appended) ---
+            if self.use_norm_budget:
+                a, scale_delta = self.operator.apply(
+                    k, v_slots, theta_offset=theta_offset, norm_budget=True
+                )
+                return a, theta_offset, scale_delta
+            if theta_offset is not None:
+                a = self.operator.apply(k, v_slots, theta_offset=theta_offset)
+                return a, theta_offset
+            return self.operator.apply(k, v_slots)
+
+        # --- v4 gated path: per-slot convex combination (mirror _apply_action §1.2) ---
+        g = self._gate_from_logits(g_logits)              # (B, M)
+        with torch.no_grad():
+            g_hard = (torch.sigmoid(g_logits) > 0.5).to(k.dtype)  # (B, M)
         if self.use_norm_budget:
-            a, scale_delta = self.operator.apply(
+            a_op, scale_delta_op = self.operator.apply(
                 k, v_slots, theta_offset=theta_offset, norm_budget=True
             )
-            return a, theta_offset, scale_delta
+            a = g.unsqueeze(-1) * a_op + (1.0 - g).unsqueeze(-1) * k
+            scale_delta = g * scale_delta_op              # identity slots ⟹ 0
+            return a, theta_offset, scale_delta, g_hard
         if theta_offset is not None:
-            a = self.operator.apply(k, v_slots, theta_offset=theta_offset)
-            return a, theta_offset
-        return self.operator.apply(k, v_slots)
+            a_op = self.operator.apply(k, v_slots, theta_offset=theta_offset)
+        else:
+            a_op = self.operator.apply(k, v_slots)
+        a = g.unsqueeze(-1) * a_op + (1.0 - g).unsqueeze(-1) * k
+        return a, theta_offset, g_hard
 
-    def undo_latent(self, a: torch.Tensor, verb_idx, theta_offset=None, scale_delta=None) -> torch.Tensor:
+    def undo_latent(self, a: torch.Tensor, verb_idx, theta_offset=None, scale_delta=None,
+                    g_hard=None) -> torch.Tensor:
         """Exact undo: k = B_v^{-1} a (structural inverse from the operator).
 
         v2.1 (design §4.2): pass the `theta_offset` returned by `step_latent` for an
@@ -572,20 +728,38 @@ class JEPAOperatorModelV2(nn.Module):
         `step_latent` so the inverse re-applies the renormalized radius BEFORE inverting
         — the round-trip is then exact including the tracked scale. The budget undo
         REQUIRES `scale_delta` (the operator asserts it).
+
+        v4 targeted actions (jepa_v4_design §1.5): pass the `g_hard (B, M)` stored by the
+        forward gated step. The inverse is then gated by the SAME hard mask:
+            k_i = g_i · inverse_apply(a, v, scale_delta=g·scale_delta_op)_i + (1 − g_i)·a_i
+        On a targeted slot (g=1) `a_i = B_v k_i` so the operator inverse recovers `k_i`;
+        on an identity slot (g=0) `a_i = k_i` so returning `a_i` recovers it exactly. The
+        stored `scale_delta` (already gated by g in the forward) feeds the operator inverse
+        unchanged — on identity slots it is 0, so the operator-inverse branch (which is
+        masked out anyway) sees no radius change. When `g_hard is None` this is the exact
+        v2.1/entity inverse (the bitwise path).
         """
         v_slots = self._verb_to_slots(a, verb_idx)
         if self.use_norm_budget:
             if self.conditioner is not None and theta_offset is None:
                 theta_offset = self.conditioner(a)
-            return self.operator.inverse_apply(
+            k_inv = self.operator.inverse_apply(
                 a, v_slots, theta_offset=theta_offset,
                 norm_budget=True, scale_delta=scale_delta,
             )
-        if self.conditioner is not None:
+        elif self.conditioner is not None:
             if theta_offset is None:
                 theta_offset = self.conditioner(a)
-            return self.operator.inverse_apply(a, v_slots, theta_offset=theta_offset)
-        return self.operator.inverse_apply(a, v_slots)
+            k_inv = self.operator.inverse_apply(a, v_slots, theta_offset=theta_offset)
+        else:
+            k_inv = self.operator.inverse_apply(a, v_slots)
+
+        if g_hard is None:
+            return k_inv
+        # v4 §1.5: gate the inverse with the SAME hard mask the forward used. Identity
+        # slots (g=0) return `a` unchanged (which equals the original k_i on those slots).
+        gh = g_hard.to(k_inv.dtype).unsqueeze(-1)  # (B, M, 1)
+        return gh * k_inv + (1.0 - gh) * a
 
     def _verb_to_slots(self, x: torch.Tensor, verb_idx) -> torch.Tensor:
         """Resolve a sequence-level / per-slot verb index to (B, M) long for the operator."""
@@ -693,6 +867,16 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         d_h=getattr(gmlp, "d_h", 8),
     )
 
+    # v4 targeted latent actions (jepa_v4_design §1): the mask heads are built ONLY when
+    # use_targeted_actions=True. `mask_hidden` comes from the optional model.targeted block
+    # (B-owned schema); default 2*dn for nano. getattr keeps this safe if B's schema field
+    # has not landed yet (mirrors the use_norm_budget getattr pattern).
+    use_targeted_actions = getattr(m, "use_targeted_actions", False)
+    targeted_cfg = getattr(m, "targeted", None)
+    mask_hidden = getattr(targeted_cfg, "mask_hidden", None)
+    if mask_hidden is None:
+        mask_hidden = 2 * m.d_noun
+
     # Posterior + prior action heads share the encoder's bound text trunk (design §2.1):
     # zero new attention params, posterior's view in the noun-building space.
     transition = _construct(
@@ -702,12 +886,18 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         n_verbs=m.n_verbs,
         mlp_hidden=m.transition.mlp_hidden,
         use_delta=m.transition.use_delta,
+        use_targeted_actions=use_targeted_actions,
+        d_noun=m.d_noun,
+        mask_hidden=mask_hidden,
     )
     prior = _construct(
         PriorHead,
         d_model=m.d_model,
         n_verbs=m.n_verbs,
         mlp_hidden=m.prior.mlp_hidden,
+        use_targeted_actions=use_targeted_actions,
+        d_noun=m.d_noun,
+        mask_hidden=mask_hidden,
     )
 
     decoder = _construct(
@@ -735,6 +925,7 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         use_kind_head=getattr(m, "use_kind_head", False),
         kind_codebook_size=getattr(m, "kind_codebook_size", 16),
         use_norm_budget=getattr(m, "use_norm_budget", False),
+        use_targeted_actions=use_targeted_actions,
     )
 
 

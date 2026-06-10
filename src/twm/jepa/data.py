@@ -10,6 +10,7 @@ Storage: contiguous CPU tensors, direct index slicing (no DataLoader).
 """
 
 import json
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterator
 
@@ -17,6 +18,62 @@ import torch
 from torch import Tensor
 
 from ..domain_bpe import DomainBPETokenizer
+
+
+def _diff_weights(
+    src_ids: list[int],
+    tgt_ids: list[int],
+    w_diff: float,
+    pad_id: int,
+    T: int,
+) -> Tensor:
+    """Per-token diff weights for diff-weighted CE (design v4 §2.1).
+
+    Aligns the two token-id sequences with a SequenceMatcher (LCS) and marks the TARGET
+    tokens that are NOT in a shared block (the inserted/replaced tokens — the s_t→s_{t+1}
+    diff) with weight `w_diff`; shared (`equal`) boilerplate tokens get 1.0. Source-only
+    (`delete`) tokens have no target position and are skipped. The weight vector is padded
+    / truncated to length `T`; pad positions (beyond `len(tgt_ids)`) get weight 0.0 (they
+    are excluded from the weighted-CE denominator anyway).
+
+    When `w_diff == 1.0` (default) every weight is 1.0 over the non-pad target positions
+    (pad ⟹ 0.0), so the weighted CE is BITWISE the v3 uniform mean CE. The diff is always
+    computed at the BPE-token level (the CE is over token positions), matching the loss.
+
+    Args:
+        src_ids: state_t token ids (post-encode, pre-pad-stripped list[int]).
+        tgt_ids: state_{t+1} token ids (the CE target; its positions are weighted).
+        w_diff:  weight for diff (replace/insert) target tokens.
+        pad_id:  padding id (the source/target lists may include trailing pad ids; pad
+                 positions in the OUTPUT vector are zeroed regardless).
+        T:       output length (== max_text_tokens).
+
+    Returns:
+        (T,) float weight tensor aligned to tgt_ids positions.
+    """
+    # Strip trailing pad so the alignment matches on the real content tokens; pad
+    # positions in the target get weight 0.0 below regardless of the diff.
+    n_tgt = len(tgt_ids)
+    while n_tgt > 0 and tgt_ids[n_tgt - 1] == pad_id:
+        n_tgt -= 1
+    n_src = len(src_ids)
+    while n_src > 0 and src_ids[n_src - 1] == pad_id:
+        n_src -= 1
+    src_real = src_ids[:n_src]
+    tgt_real = tgt_ids[:n_tgt]
+
+    w = [1.0] * n_tgt                              # boilerplate weight
+    sm = SequenceMatcher(a=src_real, b=tgt_real, autojunk=False)
+    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "insert"):          # target tokens j1:j2 ARE the diff
+            for j in range(j1, j2):
+                w[j] = w_diff
+        # "delete" (src-only) has no target position; "equal" keeps weight 1.0.
+
+    weights = torch.zeros(T, dtype=torch.float32)
+    for j in range(min(n_tgt, T)):
+        weights[j] = w[j]                          # pad positions (>= n_tgt) stay 0.0
+    return weights
 
 
 class JEPAChainDataset:
@@ -43,6 +100,7 @@ class JEPAChainDataset:
         max_text_tokens: int = 64,
         append_eos: bool = False,
         mode: str = "pairs",
+        w_diff: float = 1.0,
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
@@ -50,6 +108,11 @@ class JEPAChainDataset:
         self.max_text_tokens = max_text_tokens
         self.append_eos = append_eos
         self.mode = mode
+        # Diff-weighted CE (v4 §2): per-token weights on the s_t→s_{t+1} token diff.
+        # ALWAYS computed (cheap; runs once at load), so the trainer can flip w_diff
+        # without a data rebuild. w_diff=1.0 (default) ⟹ all-ones over non-pad ⟹ v3
+        # bitwise uniform CE. The weights live in _*_diff_w tensors (built below).
+        self.w_diff = w_diff
         pad_id = tokenizer.pad_token_id  # 0 per domain_bpe.py convention
         # <eos>=4 per the GLUCOSE BPE artifact (design v2 §7). Only used when
         # append_eos=True so the AR token decoder learns to stop.
@@ -108,9 +171,19 @@ class JEPAChainDataset:
         self._tgt_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
         self._tgt_pad: Tensor = torch.ones((n, T), dtype=torch.bool)
 
+        # Diff-weighted CE (§2.1): per-token weights on the (src→tgt) token diff. The CE
+        # target is tgt, so the weights are aligned to tgt positions. Always computed;
+        # all-ones (over non-pad) when w_diff==1.0 ⟹ v3-bitwise uniform CE.
+        self._tgt_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
+
+        pad_id = self.tokenizer.pad_token_id
         for i, (src, tgt) in enumerate(zip(src_texts, tgt_texts)):
             self._src_ids[i], self._src_pad[i] = _encode(src)
             self._tgt_ids[i], self._tgt_pad[i] = _encode(tgt)
+            self._tgt_diff_w[i] = _diff_weights(
+                self._src_ids[i].tolist(), self._tgt_ids[i].tolist(),
+                self.w_diff, pad_id, T,
+            )
 
         # Keep the raw texts for iter_text_pairs() (operator-fit pass-2 §7).
         self._src_texts: list[str] = src_texts
@@ -156,10 +229,25 @@ class JEPAChainDataset:
         self._s2_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
         self._s2_pad: Tensor = torch.ones((n, T), dtype=torch.bool)
 
+        # Diff-weighted CE (§2.1), per hop: _s1_diff_w weights the s0→s1 diff (hop-1 CE
+        # target s1), _s2_diff_w weights the s1→s2 diff (hop-2 CE target s2). Always
+        # computed; all-ones over non-pad when w_diff==1.0 ⟹ v3-bitwise uniform CE.
+        self._s1_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
+        self._s2_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
+
+        pad_id = self.tokenizer.pad_token_id
         for i in range(n):
             self._s0_ids[i], self._s0_pad[i] = _encode(s0_texts[i])
             self._s1_ids[i], self._s1_pad[i] = _encode(s1_texts[i])
             self._s2_ids[i], self._s2_pad[i] = _encode(s2_texts[i])
+            self._s1_diff_w[i] = _diff_weights(
+                self._s0_ids[i].tolist(), self._s1_ids[i].tolist(),
+                self.w_diff, pad_id, T,
+            )
+            self._s2_diff_w[i] = _diff_weights(
+                self._s1_ids[i].tolist(), self._s2_ids[i].tolist(),
+                self.w_diff, pad_id, T,
+            )
 
         self._s0_texts: list[str] = s0_texts
         self._s1_texts: list[str] = s1_texts
@@ -206,6 +294,8 @@ class JEPAChainDataset:
                 "s1_pad": self._s1_pad[idx],
                 "s2_ids": self._s2_ids[idx],
                 "s2_pad": self._s2_pad[idx],
+                "s1_diff_w": self._s1_diff_w[idx],
+                "s2_diff_w": self._s2_diff_w[idx],
                 "chain_id": self._chain_ids[idx],
             }
         return {
@@ -213,6 +303,7 @@ class JEPAChainDataset:
             "src_pad": self._src_pad[idx],
             "tgt_ids": self._tgt_ids[idx],
             "tgt_pad": self._tgt_pad[idx],
+            "tgt_diff_w": self._tgt_diff_w[idx],
         }
 
     def get_batch(self, indices) -> dict:
@@ -232,6 +323,8 @@ class JEPAChainDataset:
                 "s1_pad": self._s1_pad[indices],
                 "s2_ids": self._s2_ids[indices],
                 "s2_pad": self._s2_pad[indices],
+                "s1_diff_w": self._s1_diff_w[indices],
+                "s2_diff_w": self._s2_diff_w[indices],
                 "chain_id": torch.tensor(
                     [self._chain_ids[i] for i in indices], dtype=torch.long
                 ),
@@ -241,6 +334,7 @@ class JEPAChainDataset:
             "src_pad": self._src_pad[indices],
             "tgt_ids": self._tgt_ids[indices],
             "tgt_pad": self._tgt_pad[indices],
+            "tgt_diff_w": self._tgt_diff_w[indices],
         }
 
     # ------------------------------------------------------------------

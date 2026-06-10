@@ -181,6 +181,7 @@ def token_ce(
     logits: torch.Tensor,       # (B, T, V_vocab) — output of TokenDecoder.forward(a*, tgt_ids, tgt_pad)
     tgt_ids: torch.Tensor,      # (B, T) target token ids
     pad_id: int = 0,
+    token_weights: torch.Tensor | None = None,  # (B, T) per-token diff weights (§2.2); None ⟹ uniform
 ) -> torch.Tensor:
     """Cross-entropy loss for autoregressive token prediction.
 
@@ -192,21 +193,104 @@ def token_ce(
     Pad positions are excluded from the denominator (ignore_index). EOS (id 4) is
     included as a real predicted token (not masked), so the decoder learns to stop.
 
+    Diff-weighting (v4 §2.2): when `token_weights` is given, each non-pad position's CE
+    is scaled by its weight (diff tokens get `w_diff`, boilerplate 1.0) and the loss is a
+    WEIGHTED mean (`Σ w·ce / Σ w` over non-pad positions). When `token_weights` is None
+    — OR an all-ones tensor over the non-pad positions — this is BITWISE the v3 mean CE
+    (same `ignore_index`, same denominator), so `w_diff=1.0` reproduces v3 exactly.
+
     Args:
         logits:  (B, T, V_vocab) — decoder logits (no manual shift needed; the shift
                  is baked into ARDecoder's [bos]+tgt[:-1] construction).
         tgt_ids: (B, T) target token ids (EOS appended before pad, as §7 requires).
         pad_id:  id of the padding token (0 in jepa_bpe_512.json).
+        token_weights: optional (B, T) float per-token weights. None ⟹ uniform (v3 path).
 
     Returns:
-        scalar mean CE over non-pad positions.
+        scalar (weighted) mean CE over non-pad positions.
     """
     B, T, V = logits.shape
-    return F.cross_entropy(
+    if token_weights is None:
+        # v3-bitwise path: identical to the historical implementation.
+        return F.cross_entropy(
+            logits.reshape(B * T, V),
+            tgt_ids.reshape(B * T),
+            ignore_index=pad_id,
+        )
+    # Weighted path: per-token CE (no reduction), then a weighted mean over non-pad.
+    ce = F.cross_entropy(
         logits.reshape(B * T, V),
         tgt_ids.reshape(B * T),
         ignore_index=pad_id,
-    )
+        reduction="none",
+    ).reshape(B, T)                                   # (B, T) — 0 at ignored (pad) positions
+    valid = (tgt_ids != pad_id).to(ce.dtype)          # (B, T) non-pad mask
+    w = token_weights.to(ce.dtype) * valid            # zero out pad weights defensively
+    return (ce * w).sum() / w.sum().clamp_min(1.0)
+
+
+# ---------------------------------------------------------------------------
+# token_margin: token-level hard-negative contrastive (the encoder-AIM fix, §3)
+# ---------------------------------------------------------------------------
+
+def _per_example_ce(
+    logits: torch.Tensor,       # (B, T, V_vocab)
+    tgt_ids: torch.Tensor,      # (B, T)
+    pad_id: int = 0,
+) -> torch.Tensor:
+    """Per-example mean CE: the non-pad mean cross-entropy of each row (B,).
+
+    Reuses the `reduction="none"` CE path of `token_ce`, reduced PER ROW so the margin
+    (§3.1) is on the same scale (nats) as `L_token`. Pad positions are excluded from
+    both numerator and denominator. A row that is entirely pad contributes 0.0 (the
+    denominator is clamped to 1.0), which never happens for a real target.
+    """
+    B, T, V = logits.shape
+    ce = F.cross_entropy(
+        logits.reshape(B * T, V),
+        tgt_ids.reshape(B * T),
+        ignore_index=pad_id,
+        reduction="none",
+    ).reshape(B, T)                                   # (B, T) — 0 at pad positions
+    valid = (tgt_ids != pad_id).to(ce.dtype)          # (B, T)
+    return (ce * valid).sum(dim=1) / valid.sum(dim=1).clamp_min(1.0)   # (B,)
+
+
+def token_margin(
+    logits_gold: torch.Tensor,  # (B, T, V) decoder run on a* teacher-forced on the GOLD target
+    gold_ids: torch.Tensor,     # (B, T) gold target ids
+    logits_neg: torch.Tensor,   # (B, T, V) decoder run on the SAME a* teacher-forced on a NEIGHBOR
+    neg_ids: torch.Tensor,      # (B, T) same-chain neighbor target ids
+    pad_id: int = 0,
+    margin: float = 0.5,
+) -> torch.Tensor:
+    """Per-pair token-level hard-negative hinge (design v4 §3.1).
+
+        L_margin = mean_i  max(0,  m − ( CE(neighbor_i | a*_i) − CE(gold_i | a*_i) ) )
+
+    Decoding the WRONG (same-chain neighbor) next-state from a*_i should cost MORE CE than
+    decoding the right one, by at least `margin` nats. Both decoder runs use the SAME a*_i
+    memory (`logits_gold` and `logits_neg` are produced from the gold's operator output);
+    only the teacher-forced target ids differ. This is the encoder-AIM fix (separation
+    0.53 → >0.7): unlike pooled InfoNCE, the hinge bites at the token level where the
+    discriminative clause lives.
+
+    The hinge is zero whenever `ce_neg − ce_gold ≥ margin` (gold already beats the
+    neighbor by the margin) and positive otherwise. Gradient flows into BOTH passes' a*
+    geometry (push gold-likely / neighbor-unlikely) and into the decoder.
+
+    Args:
+        logits_gold/logits_neg: (B, T, V) — decoder logits on the SAME a* memory.
+        gold_ids/neg_ids:       (B, T) — gold vs neighbor teacher-forced target ids.
+        pad_id:  padding id (excluded from the per-example CE, as in token_ce).
+        margin:  hinge margin in nats (default 0.5).
+
+    Returns:
+        scalar mean hinge over the batch (≥ 0).
+    """
+    ce_gold = _per_example_ce(logits_gold, gold_ids, pad_id)   # (B,)
+    ce_neg = _per_example_ce(logits_neg, neg_ids, pad_id)      # (B,)
+    return F.relu(margin - (ce_neg - ce_gold)).mean()
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +414,36 @@ def prior_kl(
     return kl.clamp_min(0.0)
 
 
+def mask_prior_kl(
+    g_logits: torch.Tensor,        # (B, M) posterior per-slot mask logits (from s_t, s_{t+1})
+    g_prior_logits: torch.Tensor,  # (B, M) prior per-slot mask logits (from s_t alone)
+) -> torch.Tensor:
+    """KL( stopgrad(Bernoulli(σ(g_logits))) ‖ Bernoulli(σ(g_prior_logits)) ), per slot (§1.3).
+
+    The targeted-action mask is the analogue of the verb prior: at rollout the model has
+    only s_t, so the PriorHead must predict WHICH slots an action will touch from the start
+    state alone. The posterior mask (which reads s_{t+1}) is the stop-grad target; the prior
+    learns to imitate it. Per-slot independent Bernoulli KL, averaged over slots and batch.
+
+    Forward KL (mode-covering, matching `prior_kl`): the prior keeps mass on every slot the
+    posterior touches. = 0 iff the prior matches the posterior gate probability on every slot.
+
+    Args:
+        g_logits:       (B, M) posterior mask logits — the target (stop-grad).
+        g_prior_logits: (B, M) prior mask logits — receives gradient.
+
+    Returns:
+        scalar mean per-slot Bernoulli KL, ≥ 0.
+    """
+    eps = 1e-6
+    with torch.no_grad():
+        q = torch.sigmoid(g_logits).clamp(eps, 1.0 - eps)  # (B, M) posterior gate prob
+    p = torch.sigmoid(g_prior_logits).clamp(eps, 1.0 - eps)  # (B, M) prior gate prob
+    # KL(q ‖ p) for Bernoulli = q log(q/p) + (1−q) log((1−q)/(1−p)), per slot.
+    kl = q * (q.log() - p.log()) + (1.0 - q) * ((1.0 - q).log() - (1.0 - p).log())
+    return kl.mean().clamp_min(0.0)
+
+
 # ---------------------------------------------------------------------------
 # JEPALossV2 aggregator
 # ---------------------------------------------------------------------------
@@ -354,6 +468,9 @@ class JEPALossV2(nn.Module):
         w_sigreg: float = 0.05,
         w_pred: float = 0.25,
         w_nce: float = 0.0,
+        w_margin: float = 0.0,
+        margin: float = 0.5,
+        w_mask_prior: float = 0.0,
         nce_temperature: float = 0.1,
         n_slices: int = 256,
         n_knots: int = 17,
@@ -371,6 +488,12 @@ class JEPALossV2(nn.Module):
         self.w_sigreg = w_sigreg
         self.w_pred = w_pred
         self.w_nce = w_nce
+        # v4 §3: token-level hard-negative margin. w_margin=0.0 ⟹ off (v3 bitwise).
+        self.w_margin = w_margin
+        self.margin = margin
+        # v4 §1.3: targeted-mask prior KL. w_mask_prior=0.0 ⟹ off (v3 bitwise); skipped
+        # entirely when the model does not emit prior-mask logits (targeting off).
+        self.w_mask_prior = w_mask_prior
         self.nce_temperature = nce_temperature
         self.n_slices = n_slices
         self.n_knots = n_knots
@@ -393,6 +516,11 @@ class JEPALossV2(nn.Module):
         tau: float = 1.0,            # current Gumbel temperature (for L_prior KL sharpness)
         chain_ids: torch.Tensor | None = None,   # (B,) long — same-chain negatives (§1.4)
         nce_neg_keys: torch.Tensor | None = None,  # (B, n_neg, dn) cross-hop hard negs (§2.4)
+        token_weights: torch.Tensor | None = None,   # (B, T) diff-CE per-token weights (§2.2)
+        margin_logits_neg: torch.Tensor | None = None,  # (B, T, V) decoder on a* + neighbor ids (§3)
+        margin_neg_ids: torch.Tensor | None = None,      # (B, T) same-chain neighbor target ids (§3)
+        g_logits: torch.Tensor | None = None,         # (B, M) posterior mask logits (§1.3)
+        g_prior_logits: torch.Tensor | None = None,   # (B, M) prior mask logits (§1.3)
     ) -> tuple[torch.Tensor, dict]:
         """Compute total loss and per-term components.
 
@@ -408,7 +536,8 @@ class JEPALossV2(nn.Module):
             logging (plus 'loss' = total.item() for convenience).
         """
         # L_token: primary grounding loss — CE of text_{t+1} tokens given a* memory.
-        l_token = token_ce(logits, tgt_ids, pad_id=self.pad_id)
+        # Diff-weighted when token_weights is given (§2.2); None ⟹ v3-bitwise mean CE.
+        l_token = token_ce(logits, tgt_ids, pad_id=self.pad_id, token_weights=token_weights)
 
         # L_prior: KL from posterior to prior, enables autonomous rollout.
         l_prior = prior_kl(v_logits, p_logits, tau=tau)
@@ -438,6 +567,27 @@ class JEPALossV2(nn.Module):
         else:
             l_nce = None
 
+        # L_margin: token-level hard-negative hinge (§3). Computed only when active AND the
+        # train loop supplies the neighbor pass (logits/ids on the SAME a* memory). When
+        # w_margin=0.0 (or the neighbor pass is absent) it is skipped ⟹ v3-bitwise total.
+        if self.w_margin > 0 and margin_logits_neg is not None and margin_neg_ids is not None:
+            l_margin = token_margin(
+                logits, tgt_ids,
+                margin_logits_neg, margin_neg_ids,
+                pad_id=self.pad_id,
+                margin=self.margin,
+            )
+        else:
+            l_margin = None
+
+        # L_mask_prior: per-slot Bernoulli KL teaching the PriorHead's mask to imitate the
+        # posterior mask (§1.3). Computed only when targeting is ON (both mask logits given)
+        # AND w_mask_prior>0; otherwise skipped ⟹ v3-bitwise total.
+        if self.w_mask_prior > 0 and g_logits is not None and g_prior_logits is not None:
+            l_mask_prior = mask_prior_kl(g_logits, g_prior_logits)
+        else:
+            l_mask_prior = None
+
         total = (
             self.w_token  * l_token
             + self.w_prior  * l_prior
@@ -446,6 +596,10 @@ class JEPALossV2(nn.Module):
         )
         if l_nce is not None:
             total = total + self.w_nce * l_nce
+        if l_margin is not None:
+            total = total + self.w_margin * l_margin
+        if l_mask_prior is not None:
+            total = total + self.w_mask_prior * l_mask_prior
 
         components = {
             "loss":       total.item(),
@@ -454,6 +608,8 @@ class JEPALossV2(nn.Module):
             "L_sigreg":   l_sigreg.item(),
             "L_pred":     l_pred.item(),
             "L_nce":      (l_nce.item() if l_nce is not None else 0.0),
+            "L_margin":   (l_margin.item() if l_margin is not None else 0.0),
+            "L_mask_prior": (l_mask_prior.item() if l_mask_prior is not None else 0.0),
             "gumbel_tau": float(tau),
             # weights logged for interpretability
             "w_token":    float(self.w_token),
@@ -461,6 +617,8 @@ class JEPALossV2(nn.Module):
             "w_sigreg":   float(self.w_sigreg),
             "w_pred":     float(self.w_pred),
             "w_nce":      float(self.w_nce),
+            "w_margin":   float(self.w_margin),
+            "w_mask_prior": float(self.w_mask_prior),
         }
         return total, components
 

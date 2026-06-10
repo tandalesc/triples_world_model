@@ -106,6 +106,13 @@ def build_loss_v2(cfg, operator):
         # Defaults (0.0 / 0.1) reproduce v2.1 — the loss skips the matmul when w_nce=0.
         w_nce=getattr(lc, "w_nce", 0.0),
         nce_temperature=getattr(getattr(lc, "nce", None), "temperature", 0.1),
+        # v4 discriminative + targeted-mask losses (jepa_v4_design §3/§1.3). All defaults
+        # (w_margin=0.0, w_mask_prior=0.0) reproduce v3 bitwise — the loss skips each term
+        # when its weight is 0 or the model/trainer does not supply the extra inputs.
+        # NOTE: w_diff is applied at the DATASET level (baked into token_weights), NOT here.
+        w_margin=getattr(lc, "w_margin", 0.0),
+        margin=getattr(lc, "margin", 0.5),
+        w_mask_prior=getattr(lc, "w_mask_prior", 0.0),
         n_slices=lc.sigreg.n_slices,
         n_knots=lc.sigreg.n_knots,
         knot_max=lc.sigreg.knot_max,
@@ -182,7 +189,13 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
     """One v2 pairs-mode training step. When w_nce==0 this is BITWISE the v2.1 step
     (no chain_ids passed → loss skips InfoNCE). When w_nce>0, same-chain negatives are
     enabled via the batch's chain_ids (the in-batch (B,B) matrix already holds the hard
-    negative thanks to chain-contiguous batching, design §1.5)."""
+    negative thanks to chain-contiguous batching, design §1.5).
+
+    v4: when the loss has w_diff>1 the dataset's per-token diff weights (_tgt_diff_w) are
+    threaded as `token_weights`; when w_margin>0 a same-chain neighbor decoder pass on the
+    SAME a* memory is supplied; when the model emits prior-mask logits (targeting on) they
+    are threaded for the mask-prior KL. All of these are no-ops at v3 defaults (the dataset
+    weights are all-ones, w_margin=0, targeting off ⟹ g_logits None)."""
     src_ids, src_pad, tgt_ids, tgt_pad = _get_batch(dataset, idx)
     src_ids = src_ids.to(device)
     src_pad = src_pad.to(device)
@@ -197,6 +210,25 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
 
     # Hard ST one-hot posterior action (design §6 L3: bounds future->decoder bits).
     out = model(src_ids, src_pad, tgt_ids, tgt_pad, tau=tau, hard=True)
+
+    # v4 §2.2: diff-token CE weights (baked w_diff at load). w_diff==1.0 ⟹ all-ones over
+    # non-pad == uniform CE, so we pass None to keep the EXACT v3-bitwise CE path.
+    token_weights = (
+        dataset._tgt_diff_w[idx].to(device)
+        if getattr(dataset, "w_diff", 1.0) != 1.0
+        else None
+    )
+
+    # v4 §3: same-chain hard-negative neighbor decoder pass on the SAME a* (only when on).
+    margin_logits_neg = margin_neg_ids = None
+    if getattr(loss_fn, "w_margin", 0.0) > 0:
+        # Chain-contiguous batching places siblings adjacently; roll-by-1 gives each example
+        # a (mostly same-chain) neighbor target. Decode it from the SAME a* memory.
+        neigh = torch.roll(torch.arange(tgt_ids.shape[0]), shifts=1)
+        margin_neg_ids = tgt_ids[neigh].contiguous()
+        margin_pad_neg = tgt_pad[neigh].contiguous()
+        margin_logits_neg = model.decoder(out["a"], margin_neg_ids, margin_pad_neg)
+
     loss, comps = loss_fn(
         logits=out["logits"],
         tgt_ids=tgt_ids,
@@ -208,6 +240,11 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
         z_target=out["z_target"],
         tau=tau,
         chain_ids=chain_ids,
+        token_weights=token_weights,
+        margin_logits_neg=margin_logits_neg,
+        margin_neg_ids=margin_neg_ids,
+        g_logits=out.get("g_logits"),
+        g_prior_logits=out.get("g_prior_logits"),
     )
     return loss, comps
 
@@ -231,6 +268,16 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
     hops = model.forward_unroll(s0i, s0p, s1i, s1p, s2i, s2p, tau=tau, hard=True)
     hop_tgt = [(s1i, s1p), (s2i, s2p)]
 
+    # v4 §2.2: per-hop diff-token CE weights (hop-1 weights the s0→s1 diff, hop-2 the
+    # s1→s2 diff). w_diff==1.0 ⟹ all-ones ⟹ uniform CE, so pass None to keep v3-bitwise.
+    if getattr(dataset, "w_diff", 1.0) != 1.0:
+        hop_weights_tok = [
+            dataset._s1_diff_w[idx].to(device),
+            dataset._s2_diff_w[idx].to(device),
+        ]
+    else:
+        hop_weights_tok = [None, None]
+
     # Cross-hop hard negatives: hop h's negative is the OTHER hop's z_target (the EMA pool
     # of the sibling future), shaped (B, 1, dn). Only available when use_pred built the EMA
     # head (z_target not None). Guarded so a model without the anchor head still runs.
@@ -244,6 +291,16 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
     agg: dict = {}
     for h, (out, (tids, tpad)) in enumerate(zip(hops, hop_tgt)):
         wt = hop_weights[h] if h < len(hop_weights) else 1.0
+
+        # v4 §3: same-chain hard-negative neighbor decoder pass on THIS hop's a* (when on).
+        margin_logits_neg = margin_neg_ids = None
+        if getattr(loss_fn, "w_margin", 0.0) > 0:
+            neigh = torch.roll(torch.arange(tids.shape[0]), shifts=1)
+            margin_neg_ids = tids[neigh].contiguous()
+            margin_logits_neg = model.decoder(
+                out["a"], margin_neg_ids, tpad[neigh].contiguous()
+            )
+
         loss_h, comps_h = loss_fn(
             logits=out["logits"],
             tgt_ids=tids,
@@ -256,10 +313,15 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
             tau=tau,
             chain_ids=cids,
             nce_neg_keys=neg_for_hop[h],
+            token_weights=hop_weights_tok[h] if h < len(hop_weights_tok) else None,
+            margin_logits_neg=margin_logits_neg,
+            margin_neg_ids=margin_neg_ids,
+            g_logits=out.get("g_logits"),
+            g_prior_logits=out.get("g_prior_logits"),
         )
         total = wt * loss_h if total is None else total + wt * loss_h
         # Aggregate components for logging: weighted sums (matching `total`) plus per-hop CE.
-        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce"):
+        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior"):
             agg[key] = agg.get(key, 0.0) + wt * float(comps_h.get(key, 0.0))
         agg[f"L_token_h{h + 1}"] = float(comps_h.get("L_token", 0.0))
 
@@ -388,12 +450,15 @@ def train(config_path: str):
         cfg.data.tokenizer, max_length=cfg.data.max_text_tokens
     )
     mode = getattr(cfg.data, "mode", "pairs")
+    # v4 §2.2: w_diff is baked into the dataset's per-token diff weights at load. Default
+    # 1.0 ⟹ all-ones over non-pad ⟹ v3-bitwise uniform CE; entity configs set w_diff>1.
     dataset = JEPAChainDataset(
         path=cfg.data.path,
         tokenizer=tokenizer,
         max_text_tokens=cfg.data.max_text_tokens,
         append_eos=cfg.data.append_eos,
         mode=mode,
+        w_diff=getattr(cfg.loss, "w_diff", 1.0),
     )
     n_train = len(dataset)
     if getattr(cfg.data, "max_chains", None):
@@ -408,6 +473,9 @@ def train(config_path: str):
                 dataset._s1_pad = dataset._s1_pad[:cap].contiguous()
                 dataset._s2_ids = dataset._s2_ids[:cap].contiguous()
                 dataset._s2_pad = dataset._s2_pad[:cap].contiguous()
+                # v4 §2.2: keep the per-hop diff-weight tensors aligned with the cap.
+                dataset._s1_diff_w = dataset._s1_diff_w[:cap].contiguous()
+                dataset._s2_diff_w = dataset._s2_diff_w[:cap].contiguous()
                 dataset._s0_texts = dataset._s0_texts[:cap]
                 dataset._s1_texts = dataset._s1_texts[:cap]
                 dataset._s2_texts = dataset._s2_texts[:cap]
@@ -420,6 +488,8 @@ def train(config_path: str):
                 dataset._src_pad = dataset._src_pad[:cap].contiguous()
                 dataset._tgt_ids = dataset._tgt_ids[:cap].contiguous()
                 dataset._tgt_pad = dataset._tgt_pad[:cap].contiguous()
+                # v4 §2.2: keep the diff-weight tensor aligned with the cap.
+                dataset._tgt_diff_w = dataset._tgt_diff_w[:cap].contiguous()
                 dataset._src_texts = dataset._src_texts[:cap]
                 dataset._tgt_texts = dataset._tgt_texts[:cap]
                 # Keep chain_ids aligned with the truncated dataset (design §8.2).
@@ -480,6 +550,7 @@ def train(config_path: str):
         else:
             perm = torch.randperm(n_train)
         ep_total = ep_token = ep_prior = ep_sig = ep_pred = ep_nce = 0.0
+        ep_margin = ep_mask_prior = 0.0
         ep_tok_h1 = ep_tok_h2 = 0.0
         n_batches = 0
 
@@ -513,6 +584,8 @@ def train(config_path: str):
             ep_sig += float(comps.get("L_sigreg", 0.0))
             ep_pred += float(comps.get("L_pred", 0.0))
             ep_nce += float(comps.get("L_nce", 0.0))
+            ep_margin += float(comps.get("L_margin", 0.0))
+            ep_mask_prior += float(comps.get("L_mask_prior", 0.0))
             ep_tok_h1 += float(comps.get("L_token_h1", 0.0))
             ep_tok_h2 += float(comps.get("L_token_h2", 0.0))
             n_batches += 1
@@ -522,6 +595,7 @@ def train(config_path: str):
             f"Epoch {epoch:4d} | loss {ep_total/nb:.4f} "
             f"L_token={ep_token/nb:.4f} L_prior={ep_prior/nb:.4f} "
             f"L_sigreg={ep_sig/nb:.4f} L_pred={ep_pred/nb:.4f} L_nce={ep_nce/nb:.4f} "
+            f"L_margin={ep_margin/nb:.4f} L_mask_prior={ep_mask_prior/nb:.4f} "
         )
         if mode == "triples":
             line += f"L_tok_h1={ep_tok_h1/nb:.4f} L_tok_h2={ep_tok_h2/nb:.4f} "

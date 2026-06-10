@@ -254,7 +254,7 @@ class TestBlackboxBackend:
             type_names = [rng.choice(train_types)]
             init_states = [gen._random_state(rng, tn) for tn in type_names]
             entities = list(zip(type_names, [dict(s) for s in init_states]))
-            texts, actions = gen._generate_chain_from_entities(rng, entities, chain_len)
+            texts, actions, _ = gen._generate_chain_from_entities(rng, entities, chain_len)
             records.append({
                 "chain": texts,
                 "actions": actions,
@@ -415,7 +415,7 @@ class TestOracleReplay:
         # Build a 4-action chain manually.
         entities_init = [(tn, gen._random_state(rng, tn)) for tn in type_names]
         initial_states = [dict(st) for _, st in entities_init]
-        texts, actions = gen._generate_chain_from_entities(
+        texts, actions, _ = gen._generate_chain_from_entities(
             rng, entities_init, chain_len=5, wait_weight=0.15
         )
         chain_record = {
@@ -449,7 +449,7 @@ class TestOracleReplay:
         for attempt in range(20):
             entities_init = [(tn, gen._random_state(rng, tn)) for tn in type_names]
             initial_states = [dict(st) for _, st in entities_init]
-            texts, actions = gen._generate_chain_from_entities(
+            texts, actions, _ = gen._generate_chain_from_entities(
                 rng, entities_init, chain_len=4, wait_weight=0.1
             )
             # Check there's at least one non-wait action in positions 0,1,2.

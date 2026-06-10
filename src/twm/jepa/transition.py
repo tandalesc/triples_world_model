@@ -97,6 +97,9 @@ class TransitionEncoder(nn.Module):
         n_verbs: int = 8,
         mlp_hidden: int = 128,
         use_delta: bool = True,
+        use_targeted_actions: bool = False,
+        d_noun: int = 32,
+        mask_hidden: int = 64,
     ):
         super().__init__()
         # Stash the trunk callable WITHOUT registering it as a submodule. A plain
@@ -116,6 +119,26 @@ class TransitionEncoder(nn.Module):
         self.act = nn.GELU()
         self.norm = nn.LayerNorm(mlp_hidden)
         self.fc2 = nn.Linear(mlp_hidden, n_verbs)
+
+        # v4 targeted latent actions (jepa_v4_design §1.1): a SECOND, per-slot head that
+        # emits a target-slot mask `g (B, M)` from the per-slot DELTA between the start
+        # nouns `k` and the EMA target nouns `k_tgt`. Built ONLY when
+        # use_targeted_actions=True (default off ⟹ NO new params, bitwise v3). Unlike the
+        # verb head (which reads the POOLED pair vector), the mask head needs PER-SLOT
+        # granularity, so it reads the slot nouns directly off the noun trunk — the masked-
+        # mean text pool destroys the per-slot signal.
+        self.use_targeted_actions = use_targeted_actions
+        self.d_noun = d_noun
+        self.mask_hidden = mask_hidden
+        if use_targeted_actions:
+            # feat = cat([k, k_tgt, |k_tgt - k|]) -> (B, M, 3*dn) -> per-slot logit.
+            self.mask_fc1 = nn.Linear(3 * d_noun, mask_hidden)
+            self.mask_act = nn.GELU()
+            self.mask_fc2 = nn.Linear(mask_hidden, 1)
+        else:
+            self.mask_fc1 = None
+            self.mask_act = None
+            self.mask_fc2 = None
 
     @property
     def encode_text(self):
@@ -165,6 +188,29 @@ class TransitionEncoder(nn.Module):
 
         return v_onehot, v_logits, pool_t
 
+    def forward_mask(
+        self,
+        k: torch.Tensor,      # (B, M, dn) start nouns (encode of s_t)
+        k_tgt: torch.Tensor,  # (B, M, dn) EMA target nouns (detached encode of s_{t+1})
+    ) -> torch.Tensor:
+        """Per-slot target-mask logits g_logits (B, M) (jepa_v4_design §1.1).
+
+        Scores each slot from `[k_i ; k_tgt_i ; |k_tgt_i - k_i|]` — the directly
+        inferable "which slot's content changed" signal. `k_tgt` is the stop-grad EMA
+        raw-noun encode of s_{t+1} (the model detaches it before passing here), which is
+        what keeps the mask inferable from the pair WITHOUT leaking a continuous future
+        channel (§1.4): the mask carries LOCATION bits, not CONTENT.
+
+        Only valid when `use_targeted_actions=True` (the head exists then). Returns
+        per-slot LOGITS; the model applies sigmoid + the straight-through hard threshold.
+        """
+        assert self.use_targeted_actions, (
+            "forward_mask requires use_targeted_actions=True (no mask head built)"
+        )
+        feat = torch.cat([k, k_tgt, (k_tgt - k).abs()], dim=-1)  # (B, M, 3dn)
+        g_logits = self.mask_fc2(self.mask_act(self.mask_fc1(feat)))  # (B, M, 1)
+        return g_logits.squeeze(-1)  # (B, M)
+
 
 class PriorHead(nn.Module):
     """Prior p(v | text_t) -> action logits from state_t alone (spec §3).
@@ -189,6 +235,9 @@ class PriorHead(nn.Module):
         d_model: int = 64,
         n_verbs: int = 8,
         mlp_hidden: int = 64,
+        use_targeted_actions: bool = False,
+        d_noun: int = 32,
+        mask_hidden: int = 64,
     ):
         super().__init__()
         self.d_model = d_model
@@ -198,6 +247,24 @@ class PriorHead(nn.Module):
         self.act = nn.GELU()
         self.fc2 = nn.Linear(mlp_hidden, n_verbs)
 
+        # v4 targeted latent actions (jepa_v4_design §1.3): for autonomous rollout the
+        # posterior is gone, so the prior must predict the mask too — from state_t slot
+        # nouns ALONE (no s_{t+1}, so leakage-clean by the same argument as PriorHead
+        # itself). Distilled from the (stop-grad) posterior mask via L_mask_prior
+        # (losses.py, Task B). Built ONLY when use_targeted_actions=True (default off ⟹
+        # no new params, bitwise v3).
+        self.use_targeted_actions = use_targeted_actions
+        self.d_noun = d_noun
+        self.mask_hidden = mask_hidden
+        if use_targeted_actions:
+            self.mask_fc1 = nn.Linear(d_noun, mask_hidden)
+            self.mask_act = nn.GELU()
+            self.mask_fc2 = nn.Linear(mask_hidden, 1)
+        else:
+            self.mask_fc1 = None
+            self.mask_act = None
+            self.mask_fc2 = None
+
     def forward(self, pool_t: torch.Tensor) -> torch.Tensor:
         """pool_t (B, d) -> p_logits (B, V).
 
@@ -205,3 +272,16 @@ class PriorHead(nn.Module):
         text_{t+1} (spec §6 L7).
         """
         return self.fc2(self.act(self.fc1(pool_t)))
+
+    def forward_mask(self, k: torch.Tensor) -> torch.Tensor:
+        """Per-slot prior mask logits g_prior_logits (B, M) from start nouns k (B, M, dn).
+
+        Reads ONLY state_t slot nouns (no s_{t+1}), so it is leakage-clean (§1.3). At
+        rollout the model thresholds these at 0.5 and gates the operator the same way the
+        posterior mask does. Only valid when use_targeted_actions=True.
+        """
+        assert self.use_targeted_actions, (
+            "forward_mask requires use_targeted_actions=True (no prior mask head built)"
+        )
+        g = self.mask_fc2(self.mask_act(self.mask_fc1(k)))  # (B, M, 1)
+        return g.squeeze(-1)  # (B, M)

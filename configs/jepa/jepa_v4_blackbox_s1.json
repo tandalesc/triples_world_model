@@ -1,0 +1,117 @@
+{
+  "profile": "jepa_v3",
+  "seed": 1,
+  "data": {
+    "path": "data/entity_world/train.jsonl",
+    "tokenizer": "data/entity_world/bpe_512.json",
+    "vocab_size": 512,
+    "max_text_tokens": 64,
+    "pairing": "adjacent",
+    "mode": "triples",
+    "append_eos": true
+  },
+  "model": {
+    "d_model": 64,
+    "d_noun": 32,
+    "n_slots": 8,
+    "n_verbs": 8,
+    "block": 2,
+    "n_text_layers": 2,
+    "tie_text_layers": true,
+    "n_heads": 4,
+    "n_slot_iters": 3,
+    "operator_group": "gated_mlp",
+    "n_steps_T": 1,
+    "use_polar_conditioning": false,
+    "use_norm_budget": true,
+    "use_targeted_actions": false,
+    "use_kind_head": false,
+    "kind_codebook_size": 16,
+    "transition": {
+      "mlp_hidden": 128,
+      "use_delta": true
+    },
+    "prior": {
+      "mlp_hidden": 64
+    },
+    "decoder": {
+      "d_dec": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "d_ff": 256
+    },
+    "gated_mlp": {
+      "d_e": 4,
+      "d_h": 8
+    },
+    "targeted": {
+      "mask_hidden": 64
+    }
+  },
+  "loss": {
+    "w_token": 1.0,
+    "w_prior": 0.1,
+    "w_sigreg": 0.05,
+    "w_pred": 0.0,
+    "w_nce": 0.25,
+    "w_diff": 4.0,
+    "w_margin": 0.25,
+    "margin": 0.5,
+    "w_mask_prior": 0.1,
+    "sigreg": {
+      "n_slices": 256,
+      "n_knots": 17,
+      "knot_max": 3.0,
+      "standardize": true
+    },
+    "verb": {
+      "gumbel_tau_start": 3.0,
+      "gumbel_tau_end": 1.0,
+      "anneal_frac": 0.5
+    },
+    "nce": {
+      "temperature": 0.1
+    },
+    "unroll": {
+      "hop_weights": [
+        1.0,
+        0.5
+      ]
+    }
+  },
+  "ema": {
+    "tau": 0.995,
+    "schedule": "fixed"
+  },
+  "optim": {
+    "lr": 0.0003,
+    "weight_decay": 0.01,
+    "batch_size": 64,
+    "epochs": 100,
+    "grad_clip": 1.0,
+    "warmup_steps": 200
+  },
+  "eval": {
+    "every_epochs": 5,
+    "n_examples": 512,
+    "out_dir": "results/jepa_v4_blackbox_s1",
+    "n_text_samples": 16,
+    "temperatures": [
+      0.7,
+      1.0
+    ],
+    "entity_world": {
+      "enabled": true,
+      "labeled_dir": "data/entity_world",
+      "splits": [
+        "test_iid",
+        "test_ood_near",
+        "test_ood_far"
+      ],
+      "subsample": 512,
+      "n_rollout_chains": 128,
+      "rollout_max_depth": 4,
+      "action_recovery_split": "test_iid"
+    }
+  }
+}

@@ -127,7 +127,7 @@ class TestRetractionBracket:
                 train_types, 2)
             init = [gen._random_state(rng, tn) for tn in type_names]
             entities = list(zip(type_names, [dict(s) for s in init]))
-            texts, actions = gen._generate_chain_from_entities(
+            texts, actions, _ = gen._generate_chain_from_entities(
                 rng, entities, chain_len=K + 2, wait_weight=0.05)
             if len(actions) >= K:
                 records.append({"chain": texts, "actions": actions,

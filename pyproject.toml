@@ -15,6 +15,7 @@ dependencies = [
     "pyarrow>=23.0.1",
     "spacy>=3.8.11",
     "graphviz>=0.21",
+    "datasets>=2.18",
 ]
 
 [project.optional-dependencies]

@@ -72,6 +72,23 @@ CONFIG = {
     # TYPE_LIBRARY below and surfaced in the manifest.
     "bpe_path": "data/glucose/jepa_bpe_512.json",   # existing 512 domain BPE
     "max_text_tokens": 64,
+    # ---------------------------------------------------------------------------
+    # v4 entity-world-v2 extension (jepa_v4_design.md §4). All keys below default to
+    # v1 values so the default CONFIG is byte-identical to the campaign (world_version=1).
+    # ---------------------------------------------------------------------------
+    # Master switch: 1 = campaign byte-identical (ignore all *_v2 keys); 2 = expanded.
+    "world_version": 1,
+    # v2 entity counts (used only when world_version==2)
+    "entities_per_chain_v2": (3, 5),
+    # v2 chain lengths (used only when world_version==2)
+    "chain_len_min_v2": 6,
+    "chain_len_max_v2": 12,
+    # v2 training chains (used only when world_version==2)
+    "n_train_chains_v2": 120_000,
+    # Optional stochastic mode (used only when world_version==2 and stochastic_v2=True).
+    # When on, per-type "stochastic" tables are sampled; oracle_dist is emitted in labeled.
+    "stochastic_v2": False,
+    "stochastic_p": 0.15,
 }
 
 # =====================================================================================
@@ -288,6 +305,135 @@ TYPE_LIBRARY = {
         "similarity": "near: overwatering penalty removed; wait also lowers mood",
     },
 
+    # ---- ADDITIONAL TRAIN TYPES (v2: world_version=2 only) ----
+    "rabbit": {
+        "display": "the rabbit",
+        "schema": _living_schema(),
+        "profile": {
+            "feed": {"hunger": "up", "mood": "up"},
+            "play": {"mood": "up", "energy": "down"},
+            "rest": {"energy": "up"},
+            "wash": {"cleanliness": "up"},
+        },
+        "cond": {
+            "feed": [({"hunger": {"full"}}, {"mood": "down"})],  # overfeeding upsets it
+        },
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "goat": {
+        "display": "the goat",
+        "schema": _living_schema(),
+        "profile": {
+            "feed": {"hunger": "up"},
+            "play": {"mood": "up", "energy": "down", "cleanliness": "down"},
+            "wash": {"cleanliness": "up"},
+            "rest": {"energy": "up", "mood": "up"},
+        },
+        "cond": {},
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "cactus": {
+        "display": "the cactus",
+        "schema": _plant_schema(),
+        "profile": {
+            "water": {"thirst": "up"},
+            "wash": {"cleanliness": "up"},
+            "wait": {"thirst": "down"},
+        },
+        "cond": {
+            "water": [({"thirst": {"watered"}}, {"mood": "down"})],  # overwatering harms it
+        },
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "vine": {
+        "display": "the vine",
+        "schema": _plant_schema(),
+        "profile": {
+            "water": {"thirst": "up", "mood": "up"},
+            "wash": {"cleanliness": "up"},
+            "wait": {"thirst": "down", "mood": "down"},
+        },
+        "cond": {},
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "heater": {
+        "display": "the heater",
+        "schema": _device_schema(),
+        "profile": {
+            "switch on": {"power": "up", "fill": "down"},   # burns fuel when on
+            "switch off": {"power": "down"},
+            "fill": {"fill": "up"},
+            "wash": {"cleanliness": "up"},
+        },
+        "cond": {
+            "switch on": [({"fill": {"empty"}}, {"power": "up"})],  # runs but no fuel
+        },
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "fan": {
+        "display": "the fan",
+        "schema": _device_schema(),
+        "profile": {
+            "switch on": {"power": "up"},
+            "switch off": {"power": "down"},
+            "wash": {"cleanliness": "up"},
+            "wait": {"cleanliness": "down"},   # dust accumulates
+        },
+        "cond": {},
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "jar": {
+        "display": "the jar",
+        "schema": _container_schema(),
+        "profile": {
+            "fill": {"fill": "up"},
+            "open": {"open": "up"},
+            "close": {"open": "down"},
+            "wash": {"cleanliness": "up"},
+        },
+        "cond": {},
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+    "crate": {
+        "display": "the crate",
+        "schema": _container_schema(),
+        "profile": {
+            "fill": {"fill": "up", "cleanliness": "down"},
+            "open": {"open": "up"},
+            "close": {"open": "down"},
+            "wash": {"cleanliness": "up"},
+            "wait": {"cleanliness": "down"},
+        },
+        "cond": {},
+        "split_role": "train",
+        "world_version_min": 2,
+    },
+
+    # ---- ADDITIONAL NEAR-OOD TYPE (v2, 4th near-OOD) ----
+    "kitten": {
+        "display": "the kitten",
+        "schema": _living_schema(),
+        # derived from cat: rest also boosts energy (cats sleep a lot); play drains less.
+        "profile": {
+            "feed": {"hunger": "up"},
+            "play": {"mood": "up"},                         # <- no energy drain (tiny)
+            "wash": {"cleanliness": "up", "mood": "down"},
+            "rest": {"energy": "up", "mood": "up"},
+        },
+        "cond": {},
+        "split_role": "near_ood",
+        "derived_from": "cat",
+        "similarity": "near: play no longer drains energy; rest already strong",
+        "world_version_min": 2,
+    },
+
     # ---------------------------- FAR-OOD TYPES ----------------------------
     # Novel RECOMBINATION of seen attribute schemas + structurally novel profile.
     "terrarium": {
@@ -328,7 +474,65 @@ TYPE_LIBRARY = {
         "derived_from": "lamp+dog",
         "similarity": "far: device+living combo; charge<->mood<->energy coupling unseen in training",
     },
+    # ---- ADDITIONAL FAR-OOD TYPES (v2) ----
+    "aquarium": {
+        "display": "the aquarium",
+        # novel schema: container (fill/open) + living-mood (fish well-being) + thirst (water quality).
+        # No training type couples container mechanics with a living creature's mood.
+        "schema": ["fill", "open", "mood", "thirst"],
+        "profile": {
+            "fill": {"fill": "up", "thirst": "up"},        # more water = cleaner water
+            "open": {"open": "up", "mood": "up"},           # fish enjoy open lid briefly
+            "close": {"open": "down"},
+            "water": {"thirst": "up"},
+            "feed": {"mood": "up"},                         # feeding cheers the fish
+            "wait": {"thirst": "down", "fill": "down"},     # water evaporates + quality drops
+        },
+        "cond": {
+            "open": [({"fill": {"empty"}}, {"mood": "down"})],  # empty tank = sad fish
+        },
+        "split_role": "far_ood",
+        "derived_from": "kettle+fern+dog",
+        "similarity": "far: container+living-mood+water-quality; cross-schema coupling unseen in training",
+        "world_version_min": 2,
+    },
+    "greenhouse": {
+        "display": "the greenhouse",
+        # novel schema: device (power/fill=fuel) + plant (thirst/mood=plant health).
+        # Power drives the irrigation pump; fill is fuel/water reservoir.
+        "schema": ["power", "fill", "thirst", "mood"],
+        "profile": {
+            "switch on": {"power": "up", "thirst": "up"},   # pump runs; waters plants
+            "switch off": {"power": "down"},
+            "fill": {"fill": "up"},
+            "water": {"thirst": "up", "mood": "up"},         # manual watering
+            "wait": {"thirst": "down", "fill": "down", "mood": "down"},
+        },
+        "cond": {
+            "switch on": [({"fill": {"empty"}}, {"power": "up"})],  # runs dry: no water
+        },
+        "split_role": "far_ood",
+        "derived_from": "lamp+fern",
+        "similarity": "far: device+plant combo; power-driven irrigation coupling unseen in training",
+        "world_version_min": 2,
+    },
 }
+
+
+# ---------------------------------------------------------------------------
+# world_version helpers: filter TYPE_LIBRARY by minimum world_version
+# ---------------------------------------------------------------------------
+
+def _type_min_version(name: str) -> int:
+    """Return the minimum world_version a type requires (default 1 = always present)."""
+    return TYPE_LIBRARY[name].get("world_version_min", 1)
+
+
+def _types_for_world(world_version: int = 1) -> dict:
+    """Return the subset of TYPE_LIBRARY active under `world_version`."""
+    return {n: d for n, d in TYPE_LIBRARY.items()
+            if _type_min_version(n) <= world_version}
+
 
 # =====================================================================================
 # ORACLE DYNAMICS
@@ -364,21 +568,71 @@ def _effects_for(type_def, state, action):
     return dict(type_def["profile"].get(action, {}))
 
 
-def apply_action(type_name, state, action, rng=None):
-    """Oracle transition. Deterministic unless CONFIG['stochastic'] and a tie occurs.
+def apply_action(type_name, state, action, rng=None, stochastic_v2: bool = False):
+    """Oracle transition. Deterministic unless stochastic_v2=True and the type has a
+    stochastic table for this action.
 
     `state` is {attr: value} restricted to the type's schema. Returns a NEW state dict.
     Effects on attributes outside the schema are ignored (defensive; profiles are authored
     to stay in-schema).
+
+    When stochastic_v2=True and the type has `"stochastic": {action: [(p, effects), ...]}`
+    the effects are sampled from that distribution. If rng is None we fall back to the
+    deterministic effects (safe for replay when the branch was pre-recorded).
     """
     type_def = TYPE_LIBRARY[type_name]
     schema = set(type_def["schema"])
-    effects = _effects_for(type_def, state, action)
+
+    # Stochastic branch: check for a stochastic table for this action.
+    if stochastic_v2 and rng is not None:
+        stoch_table = type_def.get("stochastic", {}).get(action)
+        if stoch_table:
+            probs = [p for p, _ in stoch_table]
+            effects_list = [eff for _, eff in stoch_table]
+            # Sample a branch
+            total = sum(probs)
+            r = rng.random() * total
+            cum = 0.0
+            effects = effects_list[-1]  # fallback to last
+            for p, eff in zip(probs, effects_list):
+                cum += p
+                if r < cum:
+                    effects = dict(eff)
+                    break
+        else:
+            effects = _effects_for(type_def, state, action)
+    else:
+        effects = _effects_for(type_def, state, action)
+
     new = dict(state)
     for attr, direction in effects.items():
         if attr in schema:
             new[attr] = _shift(state[attr], attr, direction)
     return new
+
+
+def _oracle_dist_for(type_name, state, action, stochastic_v2: bool = False):
+    """Return the oracle next-state distribution as a list of {"text": rendered, "prob": p}.
+
+    For deterministic transitions or when stochastic_v2=False, emits a single entry
+    with prob=1.0.  When stochastic_v2=True and the type has a stochastic table,
+    emits the full distribution (with each branch's rendered state approximated by
+    just the entity's own state — the full rendering needs the other entities too,
+    so we record the per-entity effects distribution instead).
+
+    Note: full multi-entity state rendering would require the entire entities list;
+    this function records the raw effects distribution so callers can construct
+    oracle_dist at the chain level.
+    """
+    type_def = TYPE_LIBRARY[type_name]
+    if stochastic_v2:
+        stoch_table = type_def.get("stochastic", {}).get(action)
+        if stoch_table:
+            return [{"effects": dict(eff), "prob": float(p)}
+                    for p, eff in stoch_table]
+    # Deterministic: single branch, prob 1.0.
+    effects = _effects_for(type_def, state, action)
+    return [{"effects": dict(effects), "prob": 1.0}]
 
 
 # =====================================================================================
@@ -455,29 +709,8 @@ def generate_chain(rng, type_names, chain_len, wait_weight=0.15):
     label is "<action>@<entity_index>" so action-recovery eval can align actor + verb.
     """
     entities = [(tn, _random_state(rng, tn)) for tn in type_names]
-
-    chain_texts = []
-    action_labels = []
-
-    # state_0
-    chain_texts.append(render_state(entities))
-
-    for _ in range(chain_len - 1):
-        actor_idx = rng.randrange(len(entities))
-        type_name = entities[actor_idx][0]
-        action = _sample_action(rng, type_name, wait_weight)
-
-        # apply oracle
-        new_state = apply_action(type_name, entities[actor_idx][1], action, rng)
-        entities[actor_idx] = (type_name, new_state)
-
-        action_sentence = render_action(entities, action, actor_idx)
-        state_sentence = render_state(entities)
-        # Each chain step text = the action that happened + the resulting state.
-        chain_texts.append(f"{action_sentence} {state_sentence}")
-        action_labels.append(f"{action}@{actor_idx}")
-
-    return chain_texts, action_labels
+    texts, actions, _ = _generate_chain_from_entities(rng, entities, chain_len, wait_weight)
+    return texts, actions
 
 
 def replay_chain(type_names, initial_states, action_labels):
@@ -502,8 +735,10 @@ def replay_chain(type_names, initial_states, action_labels):
 # SPLIT BUILD
 # =====================================================================================
 
-def _types_for_role(role):
-    return [name for name, d in TYPE_LIBRARY.items() if d["split_role"] == role]
+def _types_for_role(role, world_version: int = 1):
+    """Return type names for `role` active under `world_version`."""
+    return [name for name, d in TYPE_LIBRARY.items()
+            if d["split_role"] == role and _type_min_version(name) <= world_version]
 
 
 def _sample_type_names(rng, allowed_types, k_range):
@@ -539,49 +774,79 @@ def build_split(rng, allowed_types, n_chains, cfg):
     has been applied.  This lets the retraction probe (jepa_entity_campaign.md §4.2) replay
     chains from the oracle without fragile text parsing.  The field is deterministic (seeded
     generator) and regenerated by the GPU job on every run.
+
+    v4 extension: when world_version==2, uses *_v2 chain_len and entities_per_chain from
+    cfg.  When stochastic_v2=True, oracle_dist is added to each labeled step.
     """
+    world_version = cfg.get("world_version", 1)
+    stochastic_v2 = cfg.get("stochastic_v2", False) and world_version == 2
+
+    if world_version == 2:
+        len_min = cfg.get("chain_len_min_v2", cfg["chain_len_min"])
+        len_max = cfg.get("chain_len_max_v2", cfg["chain_len_max"])
+        ent_range = cfg.get("entities_per_chain_v2", cfg["entities_per_chain"])
+    else:
+        len_min = cfg["chain_len_min"]
+        len_max = cfg["chain_len_max"]
+        ent_range = cfg["entities_per_chain"]
+
     plain, labeled = [], []
     for _ in range(n_chains):
-        chain_len = rng.randint(cfg["chain_len_min"], cfg["chain_len_max"])
-        type_names = _sample_type_names(rng, allowed_types, cfg["entities_per_chain"])
-        # generate_chain builds entities = [(type_name, state_dict), ...] internally.
-        # We call it and also capture the initial states for the labeled record.
+        chain_len = rng.randint(len_min, len_max)
+        type_names = _sample_type_names(rng, allowed_types, ent_range)
         entities_init = [(tn, _random_state(rng, tn)) for tn in type_names]
-        # Capture initial states BEFORE mutation by the chain generator.
         initial_states = [dict(st) for _, st in entities_init]
-        texts, actions = _generate_chain_from_entities(rng, entities_init, chain_len,
-                                                        cfg.get("wait_weight", 0.15))
+        texts, actions, oracle_dists = _generate_chain_from_entities(
+            rng, entities_init, chain_len,
+            cfg.get("wait_weight", 0.15),
+            stochastic_v2=stochastic_v2,
+        )
         plain.append({"chain": texts})
-        labeled.append({
+        rec = {
             "chain": texts,
             "actions": actions,
             "types": type_names,
             "initial_states": initial_states,
-        })
+        }
+        # oracle_dist: present always when world_version==2 (degenerate when deterministic).
+        if world_version == 2:
+            rec["oracle_dist"] = oracle_dists
+        labeled.append(rec)
     return plain, labeled
 
 
-def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15):
+def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
+                                   stochastic_v2: bool = False):
     """Generate a chain starting from the given (mutable) entities list.
 
     Mirrors the body of ``generate_chain`` but accepts pre-constructed entities so
     ``build_split`` can capture the initial states before generation begins.
 
+    Returns (chain_texts, action_labels, oracle_dists) where oracle_dists is a list
+    of per-step oracle-distribution dicts (one per action, same length as action_labels).
+    Each entry is {"type": type_name, "action": action, "dist": [{"effects": ..., "prob": p}]}.
+    For deterministic steps or stochastic_v2=False the dist has a single entry with prob=1.0.
+
     Mutates ``entities`` in place (same semantics as ``generate_chain``).
     """
     chain_texts = [render_state(entities)]
     action_labels = []
+    oracle_dists = []
     for _ in range(chain_len - 1):
         actor_idx = rng.randrange(len(entities))
         type_name = entities[actor_idx][0]
         action = _sample_action(rng, type_name, wait_weight)
-        new_state = apply_action(type_name, entities[actor_idx][1], action, rng)
+        # Collect oracle distribution BEFORE applying (uses current state).
+        dist = _oracle_dist_for(type_name, entities[actor_idx][1], action, stochastic_v2)
+        new_state = apply_action(type_name, entities[actor_idx][1], action, rng,
+                                  stochastic_v2=stochastic_v2)
         entities[actor_idx] = (type_name, new_state)
         action_sentence = render_action(entities, action, actor_idx)
         state_sentence = render_state(entities)
         chain_texts.append(f"{action_sentence} {state_sentence}")
         action_labels.append(f"{action}@{actor_idx}")
-    return chain_texts, action_labels
+        oracle_dists.append({"type": type_name, "action": action, "dist": dist})
+    return chain_texts, action_labels, oracle_dists
 
 
 # =====================================================================================
@@ -597,8 +862,10 @@ def write_jsonl(path, records):
 
 def build_manifest(cfg):
     """Describe every type's schema and response profile + the split design."""
+    world_version = cfg.get("world_version", 1)
+    active_types = _types_for_world(world_version)
     types = {}
-    for name, d in TYPE_LIBRARY.items():
+    for name, d in active_types.items():
         types[name] = {
             "display": d["display"],
             "schema": d["schema"],
@@ -618,12 +885,13 @@ def build_manifest(cfg):
         "actions": ACTIONS,
         "attr_copula": ATTR_COPULA,
         "splits": {
-            "train":         {"types": _types_for_role("train"),    "discriminates": "in-distribution dynamics"},
-            "test_iid":      {"types": _types_for_role("train"),    "discriminates": "generalization to fresh states/actions, seen types"},
-            "test_ood_near": {"types": _types_for_role("near_ood"), "discriminates": "identity-space interpolation (small profile perturbation)"},
-            "test_ood_far":  {"types": _types_for_role("far_ood"),  "discriminates": "novel schema recombination + structurally novel profile"},
+            "train":         {"types": _types_for_role("train", world_version),    "discriminates": "in-distribution dynamics"},
+            "test_iid":      {"types": _types_for_role("train", world_version),    "discriminates": "generalization to fresh states/actions, seen types"},
+            "test_ood_near": {"types": _types_for_role("near_ood", world_version), "discriminates": "identity-space interpolation (small profile perturbation)"},
+            "test_ood_far":  {"types": _types_for_role("far_ood", world_version),  "discriminates": "novel schema recombination + structurally novel profile"},
         },
         "types": types,
+        "world_version": world_version,
     }
 
 
@@ -683,21 +951,30 @@ def main():
     cfg = CONFIG
     rng = random.Random(cfg["seed"])
     out_dir = Path(cfg["out_dir"])
+    world_version = cfg.get("world_version", 1)
 
-    train_types = _types_for_role("train")
-    near_types = _types_for_role("near_ood")
-    far_types = _types_for_role("far_ood")
+    train_types = _types_for_role("train", world_version)
+    near_types = _types_for_role("near_ood", world_version)
+    far_types = _types_for_role("far_ood", world_version)
 
     print("Entity-World generator")
-    print(f"  train types : {train_types}")
-    print(f"  near-OOD    : {near_types}")
-    print(f"  far-OOD     : {far_types}")
-    print(f"  seed={cfg['seed']} stochastic={cfg['stochastic']}")
+    print(f"  world_version={world_version}")
+    print(f"  train types ({len(train_types)}) : {train_types}")
+    print(f"  near-OOD    ({len(near_types)}) : {near_types}")
+    print(f"  far-OOD     ({len(far_types)}) : {far_types}")
+    print(f"  seed={cfg['seed']} stochastic={cfg.get('stochastic', False)} "
+          f"stochastic_v2={cfg.get('stochastic_v2', False)}")
     print()
+
+    # Determine train chain count (v2 may use n_train_chains_v2).
+    if world_version == 2:
+        n_train = cfg.get("n_train_chains_v2", cfg["n_train_chains"])
+    else:
+        n_train = cfg["n_train_chains"]
 
     # Build splits. Distinct rng streams keep splits reproducible & disjoint in states.
     train_plain, train_labeled = build_split(
-        random.Random(cfg["seed"] + 1), train_types, cfg["n_train_chains"], cfg)
+        random.Random(cfg["seed"] + 1), train_types, n_train, cfg)
     iid_plain, iid_labeled = build_split(
         random.Random(cfg["seed"] + 2), train_types, cfg["n_test_chains"], cfg)
     near_plain, near_labeled = build_split(

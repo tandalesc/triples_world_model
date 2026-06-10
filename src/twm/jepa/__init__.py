@@ -339,6 +339,13 @@ class LossConfig:
     w_prior: float = 0.1   # KL(stopgrad q ‖ p) for autonomous rollout
     # v3 additions (design §1.7 / §2.4):
     w_nce: float = 0.0     # InfoNCE next-state weight; v3 sets 0.25 (replaces w_pred)
+    # v4 additions (jepa_v4_design §2/§3/§1.3). ALL default to the v3-bitwise neutral
+    # value (w_diff=1.0 ⟹ uniform CE; w_margin=0.0 ⟹ no margin; w_mask_prior=0.0 ⟹ no
+    # mask-prior KL), so every existing v3 config parses and trains IDENTICALLY.
+    w_diff: float = 1.0       # diff-token CE up-weight (§2.2); 1.0 ⟹ uniform v3 CE
+    w_margin: float = 0.0     # token-level hard-negative hinge (§3); 0.0 ⟹ off
+    margin: float = 0.5       # hinge margin in nats (§3); read only when w_margin>0
+    w_mask_prior: float = 0.0  # KL(stopgrad posterior-mask ‖ prior-mask) (§1.3); 0.0 ⟹ off
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
     nce: NCEConfig = field(default_factory=NCEConfig)
@@ -379,6 +386,16 @@ class GatedMLPConfig:
 
 
 @dataclass
+class TargetedConfig:
+    """Targeted latent-action mask head sizing (jepa_v4_design §1). model.targeted.
+
+    Only read when ModelHParams.use_targeted_actions=True; ignored otherwise so
+    every existing v3 config builds an identical (mask-off) model.
+    """
+    mask_hidden: int = 64  # hidden width of the per-slot posterior/prior mask MLPs
+
+
+@dataclass
 class DataConfig:
     path: str = "data/glucose/chain_general_train.jsonl"
     tokenizer: str = "data/glucose/jepa_bpe_512.json"
@@ -416,11 +433,17 @@ class ModelHParams:
     # s_acc is threaded — BITWISE v3 GLUCOSE behavior. Entity (structured) configs flip it
     # true; the model only constructs scale_readout_proj when it is on (entity §1.0/§1.5).
     use_norm_budget: bool = False
+    # v4 targeted latent actions (jepa_v4_design §1). DEFAULT FALSE ⟹ the posterior/prior
+    # build no mask heads, _apply_action ignores the mask, and the model is BITWISE v3.
+    # Entity (structured) configs flip it true; model.py reads model.targeted.mask_hidden.
+    use_targeted_actions: bool = False
     # v2 nested heads (design §10). default_factory so v1 configs without these blocks
     # still construct a valid ModelHParams.
     transition: TransitionConfig = field(default_factory=TransitionConfig)
     prior: PriorConfig = field(default_factory=PriorConfig)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
+    # v4 targeted-action mask head sizing; only read when use_targeted_actions=True.
+    targeted: TargetedConfig = field(default_factory=TargetedConfig)
     # v3 black-box baseline sizing (design §4.2). Only read when
     # operator_group=="gated_mlp"; ignored otherwise so existing configs are unchanged.
     gated_mlp: GatedMLPConfig = field(default_factory=GatedMLPConfig)
@@ -598,6 +621,7 @@ __all__ = [
     "NCEConfig",
     "UnrollConfig",
     "GatedMLPConfig",
+    "TargetedConfig",
     "EMAConfig",
     "OptimConfig",
     "EvalConfig",

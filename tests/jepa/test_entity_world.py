@@ -205,7 +205,12 @@ def test_labeled_records_carry_actions_and_types(gen):
 
 def test_manifest_describes_all_types(gen):
     m = gen.build_manifest(gen.CONFIG)
-    assert set(m["types"].keys()) == set(gen.TYPE_LIBRARY.keys())
+    # Manifest only includes types active under the config's world_version.
+    # For world_version=1 (the default CONFIG) this is the v1 types only.
+    world_version = gen.CONFIG.get("world_version", 1)
+    expected_types = {name for name, d in gen.TYPE_LIBRARY.items()
+                      if d.get("world_version_min", 1) <= world_version}
+    assert set(m["types"].keys()) == expected_types
     for name, t in m["types"].items():
         assert t["schema"]
         assert t["profile"]

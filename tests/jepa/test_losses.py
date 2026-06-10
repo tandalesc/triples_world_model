@@ -26,6 +26,8 @@ from twm.jepa.losses import (
     prior_kl,
     sigreg_loss,
     token_ce,
+    token_margin,
+    _per_example_ce,
 )
 
 
@@ -413,3 +415,371 @@ def test_sigreg_available_in_losses():
     x = torch.randn(256, 32)
     loss = sigreg_loss(x, n_slices=64)
     assert torch.isfinite(loss) and loss.item() >= 0
+
+
+# ---------------------------------------------------------------------------
+# Diff-weighted CE (v4 §2.2): token_ce token_weights argument
+# ---------------------------------------------------------------------------
+
+def test_token_ce_token_weights_none_is_v3_bitwise():
+    """token_ce(token_weights=None) must be BITWISE the historical v3 mean CE.
+
+    The None path takes the exact F.cross_entropy(reduction='mean', ignore_index)
+    branch, so it is identical to the pre-v4 implementation.
+    """
+    _seed()
+    B, T, V = 4, 16, 512
+    logits = torch.randn(B, T, V)
+    tgt_ids = torch.randint(5, V, (B, T))
+    tgt_ids[:, -3:] = 0  # some pad positions
+    ref = torch.nn.functional.cross_entropy(
+        logits.reshape(B * T, V), tgt_ids.reshape(B * T), ignore_index=0
+    )
+    got = token_ce(logits, tgt_ids, pad_id=0, token_weights=None)
+    assert torch.equal(ref, got), "token_weights=None must reproduce v3 CE bitwise"
+
+
+def test_token_ce_all_ones_weights_equals_uniform():
+    """All-ones weights over non-pad ⟹ the weighted mean == the uniform mean CE.
+
+    This is the w_diff=1.0 bitwise guarantee (§2.2): the dataset always emits a weight
+    tensor, and an all-ones one must equal the None (v3) path to within float tolerance.
+    """
+    _seed()
+    B, T, V = 4, 16, 512
+    logits = torch.randn(B, T, V)
+    tgt_ids = torch.randint(5, V, (B, T))
+    tgt_ids[:, -4:] = 0  # pad tail
+    uniform = token_ce(logits, tgt_ids, pad_id=0, token_weights=None)
+    ones = token_ce(logits, tgt_ids, pad_id=0, token_weights=torch.ones(B, T))
+    assert math.isclose(uniform.item(), ones.item(), rel_tol=1e-6, abs_tol=1e-7), (
+        f"all-ones weighted CE ({ones.item()}) must match uniform CE ({uniform.item()})"
+    )
+
+
+def test_token_ce_diff_weights_focus_loss():
+    """Up-weighting the high-CE token positions must increase the weighted loss.
+
+    Construct weights that are large exactly where per-token CE is large; the weighted
+    mean must then exceed the uniform mean (the loss "focuses" on those tokens).
+    """
+    _seed()
+    B, T, V = 2, 8, 32
+    logits = torch.randn(B, T, V)
+    tgt_ids = torch.randint(5, V, (B, T))
+    # Per-token CE to locate the highest-CE positions.
+    ce = torch.nn.functional.cross_entropy(
+        logits.reshape(B * T, V), tgt_ids.reshape(B * T),
+        ignore_index=0, reduction="none",
+    ).reshape(B, T)
+    weights = torch.ones(B, T)
+    # Up-weight the single highest-CE position in each row.
+    hi = ce.argmax(dim=1)
+    for b in range(B):
+        weights[b, hi[b]] = 4.0
+    uniform = token_ce(logits, tgt_ids, pad_id=0, token_weights=None).item()
+    weighted = token_ce(logits, tgt_ids, pad_id=0, token_weights=weights).item()
+    assert weighted > uniform, (
+        f"up-weighting the highest-CE token should raise the loss: "
+        f"weighted={weighted:.4f} uniform={uniform:.4f}"
+    )
+
+
+def test_token_ce_diff_weights_pad_excluded():
+    """Pad positions contribute neither to numerator nor denominator under weighting.
+
+    Even with a nonzero weight on a pad position, that position's CE is 0 (ignore_index)
+    AND its weight is zeroed by the non-pad mask, so changing a pad-position weight cannot
+    change the weighted loss.
+    """
+    _seed()
+    B, T, V = 3, 10, 64
+    logits = torch.randn(B, T, V)
+    tgt_ids = torch.randint(5, V, (B, T))
+    tgt_ids[:, -3:] = 0  # pad
+    w_a = torch.ones(B, T)
+    w_b = torch.ones(B, T)
+    w_b[:, -3:] = 9.0  # large weight on pad positions
+    la = token_ce(logits, tgt_ids, pad_id=0, token_weights=w_a).item()
+    lb = token_ce(logits, tgt_ids, pad_id=0, token_weights=w_b).item()
+    assert math.isclose(la, lb, rel_tol=1e-6, abs_tol=1e-7), (
+        f"pad-position weights must be ignored: {la} vs {lb}"
+    )
+
+
+def test_token_ce_weighted_gradient_flows():
+    _seed()
+    B, T, V = 4, 12, 64
+    logits = torch.randn(B, T, V, requires_grad=True)
+    tgt_ids = torch.randint(5, V, (B, T))
+    weights = torch.ones(B, T)
+    weights[:, 0] = 4.0
+    loss = token_ce(logits, tgt_ids, pad_id=0, token_weights=weights)
+    loss.backward()
+    assert logits.grad is not None and logits.grad.abs().sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# token_margin (v4 §3.1): per-pair token-level hard-negative hinge
+# ---------------------------------------------------------------------------
+
+def test_per_example_ce_shape_and_matches_mean():
+    """_per_example_ce returns (B,) and its mean over a uniform batch matches token_ce."""
+    _seed()
+    B, T, V = 4, 12, 64
+    logits = torch.randn(B, T, V)
+    tgt_ids = torch.randint(5, V, (B, T))  # no pad
+    per = _per_example_ce(logits, tgt_ids, pad_id=0)
+    assert per.shape == (B,)
+    # With no pad, the mean of per-row means equals the global mean CE.
+    glob = token_ce(logits, tgt_ids, pad_id=0).item()
+    assert math.isclose(per.mean().item(), glob, rel_tol=1e-5)
+
+
+def test_token_margin_zero_when_gold_beats_neighbor():
+    """Hinge is exactly 0 when CE(neighbor) − CE(gold) ≥ margin for every row.
+
+    We make the gold logits assign near-certain probability to the gold ids (tiny CE)
+    and the neighbor logits assign tiny probability to the neighbor ids (large CE), so the
+    gap exceeds the margin with room to spare.
+    """
+    _seed()
+    B, T, V = 3, 6, 16
+    gold_ids = torch.randint(2, V, (B, T))
+    neg_ids = torch.randint(2, V, (B, T))
+    # Gold logits: huge mass on gold ids ⟹ CE ≈ 0.
+    logits_gold = torch.full((B, T, V), -10.0)
+    logits_gold.scatter_(2, gold_ids.unsqueeze(-1), 20.0)
+    # Neg logits: huge mass AWAY from neg ids ⟹ CE large.
+    logits_neg = torch.full((B, T, V), 0.0)
+    logits_neg.scatter_(2, neg_ids.unsqueeze(-1), -20.0)
+    m = token_margin(logits_gold, gold_ids, logits_neg, neg_ids, pad_id=0, margin=0.5)
+    assert math.isclose(m.item(), 0.0, abs_tol=1e-6), (
+        f"hinge should be 0 when gold beats neighbor by > margin, got {m.item()}"
+    )
+
+
+def test_token_margin_positive_when_neighbor_easier():
+    """Hinge is positive when the neighbor is decoded MORE easily than the gold.
+
+    Swap the construction: neighbor near-certain (tiny CE), gold hard (large CE). Then
+    CE(neighbor) − CE(gold) < 0 < margin ⟹ hinge > 0.
+    """
+    _seed()
+    B, T, V = 3, 6, 16
+    gold_ids = torch.randint(2, V, (B, T))
+    neg_ids = torch.randint(2, V, (B, T))
+    logits_neg = torch.full((B, T, V), -10.0)
+    logits_neg.scatter_(2, neg_ids.unsqueeze(-1), 20.0)   # neighbor easy ⟹ CE ≈ 0
+    logits_gold = torch.full((B, T, V), 0.0)
+    logits_gold.scatter_(2, gold_ids.unsqueeze(-1), -20.0)  # gold hard ⟹ CE large
+    m = token_margin(logits_gold, gold_ids, logits_neg, neg_ids, pad_id=0, margin=0.5)
+    assert m.item() > 0.0, f"hinge should be positive when neighbor is easier, got {m.item()}"
+
+
+def test_token_margin_exactly_margin_when_equal_ce():
+    """When CE(gold) == CE(neighbor), the gap is 0, so the hinge == margin."""
+    _seed()
+    B, T, V = 2, 5, 16
+    ids = torch.randint(2, V, (B, T))
+    logits = torch.randn(B, T, V)
+    # Same logits AND same ids ⟹ ce_gold == ce_neg ⟹ gap 0 ⟹ hinge == margin.
+    m = token_margin(logits, ids, logits.clone(), ids.clone(), pad_id=0, margin=0.5)
+    assert math.isclose(m.item(), 0.5, rel_tol=1e-5), (
+        f"equal-CE hinge should equal the margin (0.5), got {m.item()}"
+    )
+
+
+def test_token_margin_gradient_flows_to_both_passes():
+    _seed()
+    B, T, V = 3, 6, 16
+    gold_ids = torch.randint(2, V, (B, T))
+    neg_ids = torch.randint(2, V, (B, T))
+    logits_gold = torch.randn(B, T, V, requires_grad=True)
+    logits_neg = torch.randn(B, T, V, requires_grad=True)
+    m = token_margin(logits_gold, gold_ids, logits_neg, neg_ids, pad_id=0, margin=0.5)
+    m.backward()
+    assert logits_gold.grad is not None and logits_gold.grad.abs().sum() > 0
+    assert logits_neg.grad is not None and logits_neg.grad.abs().sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# JEPALossV2 v4 passthrough: diff-weights + margin + bitwise v3 reproduction
+# ---------------------------------------------------------------------------
+
+def test_jepav2loss_w_diff_off_w_margin_off_reproduces_v3():
+    """w_diff=1.0 (token_weights all-ones) + w_margin=0.0 ⟹ EXACT v3 loss total.
+
+    With token_weights=None and the margin disabled, the total must equal the v3 total
+    computed without any v4 arguments (bitwise, same seed for sigreg slices).
+    """
+    B, M, dn, V_verb = 4, 6, 32, 8
+    op = _FakeOperator(V_verb, dn)
+    logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target = _make_inputs(
+        B=B, M=M, dn=dn, V_verb=V_verb
+    )
+
+    torch.manual_seed(7)
+    loss_v3 = JEPALossV2(operator=op, n_slices=32, w_nce=0.0)
+    total_v3, comp_v3 = loss_v3(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0
+    )
+
+    torch.manual_seed(7)
+    loss_v4 = JEPALossV2(operator=op, n_slices=32, w_nce=0.0, w_margin=0.0)
+    total_v4, comp_v4 = loss_v4(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+        token_weights=torch.ones(B, tgt_ids.shape[1]),   # all-ones ⟹ uniform
+        margin_logits_neg=None, margin_neg_ids=None,
+    )
+    assert math.isclose(comp_v3["L_token"], comp_v4["L_token"], rel_tol=1e-6, abs_tol=1e-7)
+    assert math.isclose(total_v3.item(), total_v4.item(), rel_tol=1e-6, abs_tol=1e-6), (
+        f"v4 with w_diff=1/w_margin=0 must reproduce v3 total: "
+        f"{total_v3.item()} vs {total_v4.item()}"
+    )
+    assert comp_v4["L_margin"] == 0.0
+
+
+def test_jepav2loss_margin_adds_to_total():
+    """When w_margin>0 and a neighbor pass is supplied, L_margin is added to the total."""
+    B, M, dn, V_verb, T = 4, 6, 32, 8, 16
+    op = _FakeOperator(V_verb, dn)
+    logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target = _make_inputs(
+        B=B, M=M, dn=dn, V_verb=V_verb, T=T
+    )
+    # A neighbor that is NOT easy to decode from logits ⟹ positive hinge expected.
+    neg_ids = torch.randint(5, 512, (B, T))
+
+    torch.manual_seed(11)
+    base = JEPALossV2(operator=op, n_slices=32, w_margin=0.0)
+    total_base, _ = base(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+    )
+
+    torch.manual_seed(11)
+    with_margin = JEPALossV2(operator=op, n_slices=32, w_margin=0.25, margin=0.5)
+    total_m, comp_m = with_margin(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+        margin_logits_neg=logits, margin_neg_ids=neg_ids,
+    )
+    expected = total_base.item() + 0.25 * comp_m["L_margin"]
+    assert math.isclose(total_m.item(), expected, rel_tol=1e-5, abs_tol=1e-6), (
+        f"margin term must add w_margin*L_margin: {total_m.item()} vs {expected}"
+    )
+    assert "L_margin" in comp_m and "w_margin" in comp_m
+
+
+def test_jepav2loss_margin_skipped_without_neighbor():
+    """w_margin>0 but no neighbor pass ⟹ margin skipped (L_margin=0), no crash."""
+    B, M, dn, V_verb = 4, 6, 32, 8
+    op = _FakeOperator(V_verb, dn)
+    logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target = _make_inputs(
+        B=B, M=M, dn=dn, V_verb=V_verb
+    )
+    loss_fn = JEPALossV2(operator=op, n_slices=32, w_margin=0.25)
+    total, comp = loss_fn(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+    )
+    assert torch.isfinite(total)
+    assert comp["L_margin"] == 0.0
+
+
+def test_jepav2loss_diff_weighting_changes_token_loss():
+    """Passing non-uniform token_weights changes L_token (the diff-CE actually bites)."""
+    B, M, dn, V_verb, T = 4, 6, 32, 8, 16
+    op = _FakeOperator(V_verb, dn)
+    logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target = _make_inputs(
+        B=B, M=M, dn=dn, V_verb=V_verb, T=T
+    )
+    weights = torch.ones(B, T)
+    weights[:, :4] = 4.0  # up-weight the first 4 positions
+
+    torch.manual_seed(5)
+    loss_fn = JEPALossV2(operator=op, n_slices=32)
+    _, comp_uniform = loss_fn(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+        token_weights=None,
+    )
+    torch.manual_seed(5)
+    _, comp_weighted = loss_fn(
+        logits, tgt_ids, tgt_pad, k, v_logits, p_logits, zhat, z_target, tau=1.0,
+        token_weights=weights,
+    )
+    assert not math.isclose(comp_uniform["L_token"], comp_weighted["L_token"], rel_tol=1e-4), (
+        "non-uniform diff weights should change L_token"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v4 §1.3 mask_prior_kl + w_mask_prior wiring (Integrator)
+# ---------------------------------------------------------------------------
+def test_mask_prior_kl_nonnegative_and_finite():
+    from twm.jepa.losses import mask_prior_kl
+    _seed()
+    g = torch.randn(5, 8)
+    gp = torch.randn(5, 8)
+    kl = mask_prior_kl(g, gp)
+    assert torch.isfinite(kl) and kl.item() >= 0.0
+
+
+def test_mask_prior_kl_zero_when_equal():
+    from twm.jepa.losses import mask_prior_kl
+    z = torch.randn(4, 8)
+    assert mask_prior_kl(z, z.clone()).item() < 1e-6
+
+
+def test_mask_prior_kl_stopgrad_on_posterior():
+    """Posterior mask is the target (stop-grad); only the prior mask receives gradient."""
+    from twm.jepa.losses import mask_prior_kl
+    g = torch.randn(4, 8, requires_grad=True)
+    gp = torch.randn(4, 8, requires_grad=True)
+    mask_prior_kl(g, gp).backward()
+    assert g.grad is None or g.grad.abs().sum() == 0, "posterior mask must be stop-grad"
+    assert gp.grad is not None and gp.grad.abs().sum() > 0, "prior mask must get gradient"
+
+
+def test_jepav2loss_w_mask_prior_off_reproduces_v3():
+    """w_mask_prior=0 (or missing mask logits) ⟹ L_mask_prior skipped, v3-bitwise total."""
+    B, M, dn, V_verb = 4, 6, 32, 8
+    op = _FakeOperator(V_verb, dn)
+    inp = _make_inputs(B=B, M=M, dn=dn, V_verb=V_verb)
+    g_logits = torch.randn(B, M)
+    g_prior_logits = torch.randn(B, M)
+
+    # Re-seed before each forward so the sigreg random slices match (it advances global RNG).
+    loss_off = JEPALossV2(operator=op, n_slices=32, w_mask_prior=0.0)
+    _seed()
+    t_off, c_off = loss_off(*inp, tau=1.0, g_logits=g_logits, g_prior_logits=g_prior_logits)
+    loss_base = JEPALossV2(operator=op, n_slices=32)
+    _seed()
+    t_base, c_base = loss_base(*inp, tau=1.0)
+    assert math.isclose(t_off.item(), t_base.item(), rel_tol=1e-6)
+    assert c_off["L_mask_prior"] == 0.0
+
+
+def test_jepav2loss_w_mask_prior_adds_to_total():
+    B, M, dn, V_verb = 4, 6, 32, 8
+    op = _FakeOperator(V_verb, dn)
+    inp = _make_inputs(B=B, M=M, dn=dn, V_verb=V_verb)
+    g_logits = torch.randn(B, M)
+    g_prior_logits = torch.randn(B, M)
+
+    loss_base = JEPALossV2(operator=op, n_slices=32, w_mask_prior=0.0)
+    _seed()
+    t_base, _ = loss_base(*inp, tau=1.0, g_logits=g_logits, g_prior_logits=g_prior_logits)
+    loss_on = JEPALossV2(operator=op, n_slices=32, w_mask_prior=0.5)
+    _seed()
+    t_on, c_on = loss_on(*inp, tau=1.0, g_logits=g_logits, g_prior_logits=g_prior_logits)
+    assert c_on["L_mask_prior"] > 0.0
+    # Same sigreg slices (re-seeded) ⟹ the only delta is +w_mask_prior * L_mask_prior > 0.
+    assert t_on.item() > t_base.item()
+
+
+def test_jepav2loss_mask_prior_skipped_without_logits():
+    """Even with w_mask_prior>0, missing mask logits ⟹ term skipped (targeting off path)."""
+    B, M, dn, V_verb = 4, 6, 32, 8
+    op = _FakeOperator(V_verb, dn)
+    inp = _make_inputs(B=B, M=M, dn=dn, V_verb=V_verb)
+    loss_on = JEPALossV2(operator=op, n_slices=32, w_mask_prior=0.5)
+    _, c = loss_on(*inp, tau=1.0)  # no g_logits/g_prior_logits
+    assert c["L_mask_prior"] == 0.0

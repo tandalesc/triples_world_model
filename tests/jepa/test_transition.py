@@ -346,3 +346,156 @@ def test_trunk_not_registered_as_submodule():
     # No child module of `post` should be the SlotEncoder (no trunk params captured).
     for _, m in post.named_modules():
         assert not isinstance(m, SlotEncoder)
+
+
+# ---------------------------------------------------------------------------
+# v4 targeted latent actions — TransitionEncoder.forward_mask + PriorHead.forward_mask
+# (jepa_v4_design §1.1/§1.3, Task A)
+# ---------------------------------------------------------------------------
+
+D_NOUN = 32
+M_SLOTS = 8
+MASK_HIDDEN = 64
+
+
+def _make_posterior_targeted(trunk=None, mask_hidden=MASK_HIDDEN):
+    enc = trunk if trunk is not None else _make_trunk()
+    post = TransitionEncoder(
+        enc.encode_text,
+        d_model=D_MODEL,
+        n_verbs=N_VERBS,
+        mlp_hidden=MLP_HIDDEN_POST,
+        use_delta=True,
+        use_targeted_actions=True,
+        d_noun=D_NOUN,
+        mask_hidden=mask_hidden,
+    )
+    return enc, post
+
+
+def test_default_off_builds_no_mask_head():
+    """use_targeted_actions=False ⟹ NO mask head (None) on both heads (bitwise-v3 gate)."""
+    _, post = _make_posterior()  # default use_targeted_actions=False
+    assert post.use_targeted_actions is False
+    assert post.mask_fc1 is None and post.mask_fc2 is None
+    prior = PriorHead(d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR)
+    assert prior.use_targeted_actions is False
+    assert prior.mask_fc1 is None and prior.mask_fc2 is None
+
+
+def test_posterior_mask_head_shape_and_finite():
+    _, post = _make_posterior_targeted()
+    B = 6
+    k = torch.randn(B, M_SLOTS, D_NOUN)
+    k_tgt = torch.randn(B, M_SLOTS, D_NOUN)
+    g_logits = post.forward_mask(k, k_tgt)
+    assert g_logits.shape == (B, M_SLOTS)
+    assert torch.isfinite(g_logits).all()
+    # mask_fc1 reads [k; k_tgt; |k_tgt-k|] = 3*dn wide.
+    assert post.mask_fc1.in_features == 3 * D_NOUN
+
+
+def test_prior_mask_head_shape_and_finite():
+    prior = PriorHead(
+        d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR,
+        use_targeted_actions=True, d_noun=D_NOUN, mask_hidden=MASK_HIDDEN,
+    )
+    B = 5
+    k = torch.randn(B, M_SLOTS, D_NOUN)
+    g_prior = prior.forward_mask(k)
+    assert g_prior.shape == (B, M_SLOTS)
+    assert torch.isfinite(g_prior).all()
+    # prior mask reads start nouns ALONE: dn wide.
+    assert prior.mask_fc1.in_features == D_NOUN
+
+
+def test_posterior_mask_gradient_flows():
+    """Gradient reaches the mask head from a scalar on g_logits."""
+    _, post = _make_posterior_targeted()
+    k = torch.randn(4, M_SLOTS, D_NOUN)
+    k_tgt = torch.randn(4, M_SLOTS, D_NOUN)
+    g_logits = post.forward_mask(k, k_tgt)
+    g_logits.sum().backward()
+    assert post.mask_fc1.weight.grad is not None
+    assert post.mask_fc1.weight.grad.abs().sum() > 0
+    assert post.mask_fc2.weight.grad is not None
+    assert post.mask_fc2.weight.grad.abs().sum() > 0
+
+
+def test_posterior_mask_depends_on_pair_permutation():
+    """The mask is inferred from the (k, k_tgt) PAIR: permuting k_tgt changes g_logits.
+
+    This is the v4 obligation-2 invariant — which slots changed is read off the delta
+    between the two states' nouns, so a different target partner gives a different mask.
+    """
+    _, post = _make_posterior_targeted()
+    torch.manual_seed(11)
+    B = 32
+    k = torch.randn(B, M_SLOTS, D_NOUN)
+    k_tgt = torch.randn(B, M_SLOTS, D_NOUN)
+    with torch.no_grad():
+        g_a = post.forward_mask(k, k_tgt)
+        perm = torch.randperm(B)
+        while torch.equal(perm, torch.arange(B)):
+            perm = torch.randperm(B)
+        g_b = post.forward_mask(k, k_tgt[perm])
+    assert not torch.allclose(g_a, g_b, atol=1e-4), (
+        "mask did not change when the target partner was permuted — it is ignoring k_tgt"
+    )
+
+
+def test_prior_mask_independent_of_target():
+    """The prior mask reads start nouns ONLY (leakage-clean §1.3): same k ⟹ same mask,
+    regardless of any target."""
+    prior = PriorHead(
+        d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR,
+        use_targeted_actions=True, d_noun=D_NOUN, mask_hidden=MASK_HIDDEN,
+    )
+    prior.eval()
+    k = torch.randn(7, M_SLOTS, D_NOUN)
+    with torch.no_grad():
+        a = prior.forward_mask(k)
+        b = prior.forward_mask(k.clone())
+    assert torch.allclose(a, b)
+
+
+def test_mask_head_param_count():
+    """The mask head is the only v4 param addition (jepa_v4_design §1.1/§5.3, nano dn=32,
+    mask_hidden=64): posterior ≈ 6,273; prior ≈ 2,177."""
+    _, post = _make_posterior_targeted()
+    _, post_base = _make_posterior()
+    post_mask_params = sum(p.numel() for p in [
+        post.mask_fc1.weight, post.mask_fc1.bias, post.mask_fc2.weight, post.mask_fc2.bias
+    ])
+    # mask_fc1: (3*32)*64 + 64 = 6208 ; mask_fc2: 64*1 + 1 = 65 ; total 6273.
+    assert post_mask_params == 6_273
+    # the verb-head params are unchanged (mask is purely additive).
+    base_params = sum(p.numel() for p in post_base.parameters())
+    targeted_params = sum(p.numel() for p in post.parameters())
+    assert targeted_params - base_params == 6_273
+
+    prior = PriorHead(
+        d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR,
+        use_targeted_actions=True, d_noun=D_NOUN, mask_hidden=MASK_HIDDEN,
+    )
+    prior_base = PriorHead(d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR)
+    prior_mask_params = sum(p.numel() for p in [
+        prior.mask_fc1.weight, prior.mask_fc1.bias, prior.mask_fc2.weight, prior.mask_fc2.bias
+    ])
+    # mask_fc1: 32*64 + 64 = 2112 ; mask_fc2: 64 + 1 = 65 ; total 2177.
+    assert prior_mask_params == 2_177
+    assert sum(p.numel() for p in prior.parameters()) - sum(
+        p.numel() for p in prior_base.parameters()
+    ) == 2_177
+
+
+def test_forward_mask_asserts_when_off():
+    """forward_mask must refuse to run when the head was not built (use_targeted=False)."""
+    import pytest
+    _, post = _make_posterior()
+    k = torch.randn(2, M_SLOTS, D_NOUN)
+    with pytest.raises(AssertionError):
+        post.forward_mask(k, k)
+    prior = PriorHead(d_model=D_MODEL, n_verbs=N_VERBS, mlp_hidden=MLP_HIDDEN_PRIOR)
+    with pytest.raises(AssertionError):
+        prior.forward_mask(k)

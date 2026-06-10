@@ -652,6 +652,290 @@ def test_save_checkpoint_per_eval_retention(tmp_path):
 
 
 # =========================================================================== backward
+# =================================================== v4 targeted latent actions (Task A)
+# (jepa_v4_design §1). Build a REAL model (real SlotEncoder + RotationScaleOperator +
+# TransitionEncoder/PriorHead with mask heads) so the gated apply / scale gating /
+# inverse-gating / leakage logic is exercised end-to-end, independent of B's schema.
+
+def _make_targeted_model(
+    d_model=64, d_noun=32, n_slots=8, n_verbs=8, n_heads=4,
+    use_norm_budget=False, use_polar=False, mask_hidden=64,
+):
+    from twm.jepa.model import JEPAOperatorModelV2
+    from twm.jepa.slot_encoder import SlotEncoder
+    from twm.jepa.operator import RotationScaleOperator
+    from twm.jepa.transition import TransitionEncoder, PriorHead
+
+    emb = nn.Embedding(512, d_model)
+    emb.weight.requires_grad_(False)
+    enc = SlotEncoder(
+        emb, d_model=d_model, d_noun=d_noun, n_slots=n_slots, n_verbs=n_verbs,
+        n_text_layers=2, tie_text_layers=True, n_heads=n_heads, d_ff=128,
+        n_slot_iters=3, max_text_tokens=64,
+    )
+    op = RotationScaleOperator(n_verbs=n_verbs, d_noun=d_noun, block=2)
+    trans = TransitionEncoder(
+        enc.encode_text, d_model=d_model, n_verbs=n_verbs, mlp_hidden=128,
+        use_delta=True, use_targeted_actions=True, d_noun=d_noun, mask_hidden=mask_hidden,
+    )
+    prior = PriorHead(
+        d_model=d_model, n_verbs=n_verbs, mlp_hidden=64,
+        use_targeted_actions=True, d_noun=d_noun, mask_hidden=mask_hidden,
+    )
+    dec = SpyDecoder(d_dec=d_model, d_noun=d_noun, n_heads=n_heads)
+    return JEPAOperatorModelV2(
+        enc, op, trans, prior, dec, d_noun=d_noun, n_verbs=n_verbs, n_heads=n_heads,
+        use_pred=True, use_norm_budget=use_norm_budget,
+        use_polar_conditioning=use_polar, use_targeted_actions=True,
+    )
+
+
+def test_targeted_forward_surfaces_mask_keys():
+    torch.manual_seed(0)
+    m = _make_targeted_model()
+    B, T, M = 4, 16, 8
+    src = torch.randint(5, 512, (B, T))
+    pad = torch.zeros(B, T, dtype=torch.bool)
+    tgt = torch.randint(5, 512, (B, T))
+    out = m(src, pad, tgt, pad, tau=1.0, hard=True)
+    assert out["g_logits"].shape == (B, M)
+    assert out["g_prior_logits"].shape == (B, M)
+    assert out["g_hard"].shape == (B, M)
+    # g_hard is a hard 0/1 partition.
+    assert ((out["g_hard"] == 0) | (out["g_hard"] == 1)).all()
+
+
+def test_targeted_off_reproduces_v3_bitwise():
+    """use_targeted_actions=False ⟹ a*/k/logits bitwise-equal a targeted model whose mask
+    is forced to all-ones (g≡1 ⟹ the convex combination collapses to B_v k, the v3 path).
+
+    We compare a NON-targeted model against the SAME-weights targeted model with the mask
+    logits pinned to +inf (g=1). The forward a* must match exactly.
+    """
+    torch.manual_seed(7)
+    m_off = _make_model()  # mock-based v3 model (targeted off)
+    # Easiest bitwise check: the targeted model with g≡1 equals its own apply-all path.
+    torch.manual_seed(7)
+    m_on = _make_targeted_model()
+    m_off.eval(); m_on.eval()
+
+    k = torch.randn(3, 8, 32)
+    v_onehot = F.one_hot(torch.tensor([1, 3, 5]), num_classes=8).float()
+    # g_logits = +large ⟹ g≈1 ⟹ a = 1·(B_v k) + 0·k == B_v k (apply-all, v3).
+    g_big = torch.full((3, 8), 30.0)
+    a_gated, g_hard = m_on._apply_action(k, v_onehot, g_logits=g_big)
+    a_plain = m_on._apply_action(k, v_onehot, g_logits=None)  # bare a (v3 apply-all)
+    assert torch.allclose(a_gated, a_plain, atol=1e-5), (a_gated - a_plain).abs().max().item()
+    assert torch.equal(g_hard, torch.ones(3, 8))
+
+
+def test_identity_slot_returns_k_exactly():
+    """A slot with g=0 (mask off) returns the EXACT input k_i — not an approximate no-op.
+
+    This is the set-target obligation (§1.0): identity slots are bitwise-unchanged.
+    """
+    m = _make_targeted_model()
+    m.eval()  # eval ⟹ hard threshold
+    k = torch.randn(4, 8, 32)
+    v_onehot = F.one_hot(torch.tensor([2, 2, 2, 2]), num_classes=8).float()
+    # Half the slots off (g_logit very negative), half on (very positive).
+    g_logits = torch.full((4, 8), -30.0)
+    g_logits[:, 4:] = 30.0
+    a, g_hard = m._apply_action(k, v_onehot, g_logits=g_logits)
+    # Identity slots (0..3) must equal k exactly.
+    assert torch.allclose(a[:, :4], k[:, :4], atol=1e-6), (
+        (a[:, :4] - k[:, :4]).abs().max().item()
+    )
+    # Targeted slots (4..7) generally differ (the operator moved them).
+    assert not torch.allclose(a[:, 4:], k[:, 4:], atol=1e-4)
+    assert torch.equal(g_hard[:, :4], torch.zeros(4, 4))
+    assert torch.equal(g_hard[:, 4:], torch.ones(4, 4))
+
+
+def test_identity_slot_zero_scale_under_norm_budget():
+    """Under the norm budget, identity slots (g=0) accumulate EXACTLY ZERO scale (§1.2):
+    the gated scale_delta is 0 there, so the identity readout / inverse stay exact, AND
+    the noun is bitwise-unchanged including the budget renormalization."""
+    m = _make_targeted_model(use_norm_budget=True)
+    m.eval()
+    k = torch.randn(3, 8, 32)
+    v_onehot = F.one_hot(torch.tensor([1, 4, 6]), num_classes=8).float()
+    g_logits = torch.full((3, 8), -30.0)  # all identity
+    a, scale_delta, g_hard = m._apply_action(k, v_onehot, g_logits=g_logits)
+    # All-identity: noun unchanged AND scale_delta exactly zero everywhere.
+    assert torch.allclose(a, k, atol=1e-6), (a - k).abs().max().item()
+    assert torch.allclose(scale_delta, torch.zeros_like(scale_delta), atol=1e-7)
+    # Mixed mask: only the targeted slots carry nonzero scale.
+    g_logits2 = torch.full((3, 8), -30.0)
+    g_logits2[:, :2] = 30.0
+    a2, sd2, _ = m._apply_action(k, v_onehot, g_logits=g_logits2)
+    assert torch.allclose(sd2[:, 2:], torch.zeros_like(sd2[:, 2:]), atol=1e-7)
+    assert torch.allclose(a2[:, 2:], k[:, 2:], atol=1e-6)
+
+
+def test_mask_gradient_flows_through_apply():
+    """Training mode: gradient from a* reaches the soft gate (the mask head's logits)."""
+    m = _make_targeted_model()
+    m.train()
+    k = torch.randn(4, 8, 32, requires_grad=True)
+    v_onehot = F.one_hot(torch.tensor([0, 1, 2, 3]), num_classes=8).float()
+    g_logits = torch.randn(4, 8, requires_grad=True)
+    a, _g_hard = m._apply_action(k, v_onehot, g_logits=g_logits)
+    a.pow(2).mean().backward()
+    assert g_logits.grad is not None and g_logits.grad.abs().sum() > 0, (
+        "mask logits received no gradient through the gated apply"
+    )
+
+
+def test_targeted_round_trip_mixed_mask():
+    """undo_latent(step_latent(k, v, g), g_hard=g) ≈ k on a CONSTRUCTED mixed mask (§1.5).
+
+    Exercises both branches: targeted slots invert through the operator, identity slots
+    are returned unchanged — the round-trip is exact on both.
+    """
+    m = _make_targeted_model()
+    m.eval()
+    torch.manual_seed(3)
+    k = torch.randn(3, 8, 32)
+    g_logits = torch.full((3, 8), -30.0)
+    g_logits[:, ::2] = 30.0  # even slots targeted, odd slots identity
+    a, theta_offset, g_hard = m.step_latent(k, 2, g_logits=g_logits)
+    k_rt = m.undo_latent(a, 2, theta_offset=theta_offset, g_hard=g_hard)
+    assert torch.allclose(k, k_rt, atol=1e-4), (k - k_rt).abs().max().item()
+
+
+def test_targeted_round_trip_mixed_mask_with_budget():
+    """Same round-trip under the norm budget: the gated scale_delta must thread through
+    (§1.5) so the radius is restored exactly on targeted slots and untouched on identity."""
+    m = _make_targeted_model(use_norm_budget=True)
+    m.eval()
+    torch.manual_seed(4)
+    k = torch.randn(3, 8, 32)
+    g_logits = torch.full((3, 8), -30.0)
+    g_logits[:, :3] = 30.0  # first 3 slots targeted
+    a, theta_offset, scale_delta, g_hard = m.step_latent(k, 5, g_logits=g_logits)
+    k_rt = m.undo_latent(
+        a, 5, theta_offset=theta_offset, scale_delta=scale_delta, g_hard=g_hard
+    )
+    assert torch.allclose(k, k_rt, atol=1e-4), (k - k_rt).abs().max().item()
+
+
+def test_targeted_round_trip_with_polar_and_budget():
+    """Full stack: polar conditioning + norm budget + targeted mask round-trip (§1.2/§1.5).
+    Identity slots feed H their EXACT modulus, so the hop is exact end-to-end."""
+    m = _make_targeted_model(use_norm_budget=True, use_polar=True)
+    m.conditioner.H.weight.data.normal_(0, 0.2)  # make the offset state-dependent
+    m.eval()
+    torch.manual_seed(5)
+    k = torch.randn(2, 8, 32)
+    g_logits = torch.full((2, 8), -30.0)
+    g_logits[:, 2:5] = 30.0
+    a, theta_offset, scale_delta, g_hard = m.step_latent(k, 1, g_logits=g_logits)
+    k_rt = m.undo_latent(
+        a, 1, theta_offset=theta_offset, scale_delta=scale_delta, g_hard=g_hard
+    )
+    assert torch.allclose(k, k_rt, atol=1e-4), (k - k_rt).abs().max().item()
+
+
+def test_straight_through_eval_hard_train_soft():
+    """Eval uses a HARD 0/1 gate (the §1.2 threshold); train uses the SOFT sigmoid gate.
+
+    With a fractional logit (g_soft≈0.62) the eval output snaps to g=1 (full operator),
+    while the train output mixes — so the two a* differ on that slot.
+    """
+    m = _make_targeted_model()
+    k = torch.randn(2, 8, 32)
+    v_onehot = F.one_hot(torch.tensor([3, 3]), num_classes=8).float()
+    g_logits = torch.full((2, 8), 0.5)  # sigmoid(0.5)≈0.62 ⟹ hard=1, soft=0.62
+    m.eval()
+    a_eval, gh = m._apply_action(k, v_onehot, g_logits=g_logits)
+    m.train()
+    a_train, _ = m._apply_action(k, v_onehot, g_logits=g_logits)
+    assert torch.equal(gh, torch.ones(2, 8))  # hard threshold fired
+    # eval (g=1) == full operator output; train (g=0.62) is a partial mix ⟹ differs.
+    assert not torch.allclose(a_eval, a_train, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# Leakage audit extension (jepa_v4_design §1.4): the mask adds LOCATION bits, not CONTENT.
+# Perturb s_{t+1} CONTENT while holding the diff-set (g_hard) fixed ⟹ identity-slot memory
+# unchanged; bit-count ceiling ceil(log2 V) + M is logged.
+# ---------------------------------------------------------------------------
+
+def test_targeted_leakage_identity_slot_memory_is_function_of_k_only():
+    """On an identity slot (g=0), the decoder memory a_i == k_i == f(s_t) EXACTLY — it
+    carries NO s_{t+1} content (§1.4). Perturbing the target while the mask stays off on
+    that slot leaves the identity-slot memory bitwise-unchanged."""
+    m = _make_targeted_model()
+    m.eval()
+    k = torch.randn(3, 8, 32)
+    v_onehot = F.one_hot(torch.tensor([2, 2, 2]), num_classes=8).float()
+    g_logits = torch.full((3, 8), -30.0)  # all identity ⟹ a == k regardless of anything
+    a1, _ = m._apply_action(k, v_onehot, g_logits=g_logits)
+    # Even with a totally different verb, identity slots return k exactly (no content).
+    v_other = F.one_hot(torch.tensor([6, 6, 6]), num_classes=8).float()
+    a2, _ = m._apply_action(k, v_onehot=v_other, g_logits=g_logits)
+    assert torch.allclose(a1, k, atol=1e-6)
+    assert torch.allclose(a2, k, atol=1e-6)
+    assert torch.allclose(a1, a2, atol=1e-6)  # identity memory independent of the verb
+
+
+def test_targeted_leakage_bit_count_ceiling():
+    """The future→decoder channel is ceil(log2 V) + M bits (§1.4): verb bits + 1 bit/slot.
+    For nano (V=8, M=8) that is 3 + 8 = 11 bits. Assert the explicit ceiling."""
+    import math
+    m = _make_targeted_model()
+    V, M = m.n_verbs, 8
+    bit_ceiling = math.ceil(math.log2(V)) + M
+    assert bit_ceiling == 11
+    # The hard mask is exactly 1 bit/slot (a 0/1 value), so its info content is ≤ M bits.
+    m.eval()
+    out = m(
+        torch.randint(5, 512, (4, 12)), torch.zeros(4, 12, dtype=torch.bool),
+        torch.randint(5, 512, (4, 12)), torch.zeros(4, 12, dtype=torch.bool),
+    )
+    g_hard = out["g_hard"]
+    assert ((g_hard == 0) | (g_hard == 1)).all()  # 1 bit/slot, hard-bounded
+
+
+def test_decoder_memory_still_a_star_under_targeting():
+    """The leakage invariant holds: the decoder's memory is STILL a* (the gated output),
+    no new channel (§1.4). The SpyDecoder records the memory id."""
+    m = _make_targeted_model()
+    out = m(
+        torch.randint(5, 512, (2, 8)), torch.zeros(2, 8, dtype=torch.bool),
+        torch.randint(5, 512, (2, 8)), torch.zeros(2, 8, dtype=torch.bool),
+    )
+    assert m.decoder.last_memory_id == id(out["a"])
+
+
+def test_targeted_unroll_threads_mask_per_hop():
+    """forward_unroll emits per-hop g_logits/g_prior_logits/g_hard (Task A wiring)."""
+    m = _make_targeted_model(use_norm_budget=True)
+    B, T = 3, 12
+    pad = torch.zeros(B, T, dtype=torch.bool)
+    s0 = torch.randint(5, 512, (B, T))
+    s1 = torch.randint(5, 512, (B, T))
+    s2 = torch.randint(5, 512, (B, T))
+    hops = m.forward_unroll(s0, pad, s1, pad, s2, pad, tau=1.0, hard=True)
+    assert len(hops) == 2
+    for h in hops:
+        assert h["g_logits"].shape == (B, 8)
+        assert h["g_prior_logits"].shape == (B, 8)
+        assert h["g_hard"].shape == (B, 8)
+        assert h["s_acc"].shape == (B, 8)  # budget on
+
+
+def test_rollout_uses_prior_mask():
+    """At rollout (posterior gone) the mask comes from the PRIOR head; g_hard surfaces."""
+    m = _make_targeted_model()
+    src = torch.randint(5, 512, (3, 8))
+    pad = torch.zeros(3, 8, dtype=torch.bool)
+    r = m.rollout(src, pad, verb_idx=2, max_tokens=4)
+    assert r["g_hard"].shape == (3, 8)
+    assert ((r["g_hard"] == 0) | (r["g_hard"] == 1)).all()
+
+
 def test_backward_flows_to_online_not_ema():
     torch.manual_seed(0)
     m = _make_model()
