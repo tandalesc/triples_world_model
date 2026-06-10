@@ -2,6 +2,7 @@
 
 Combined loss:
     L = w_token·L_token + w_prior·L_prior + w_sigreg·L_sigreg + w_pred·L_pred
+        + w_nce·L_nce
 
   - L_token (CE, weight 1.0): cross-entropy of text_{t+1} tokens given operator-
     transformed slots a*. This is THE primary loss — it forces the discrete latent
@@ -15,6 +16,12 @@ Combined loss:
   - L_pred (0.25, optional): MSE(zhat, z.detach()) EMA aux objective. Keeps the JEPA
     latent objective alive as a regularizer on a*. Setting w_pred=0 is a supported
     ablation (pure token-grounding).
+  - L_nce (0.25 in v3, default 0.0): InfoNCE next-state contrastive. The DISCRIMINATIVE
+    upgrade of L_pred — same pooled anchor zhat vs stop-grad EMA key z_target, turned into
+    a softmax-CE that pulls toward the true next-state AND pushes away in-batch + same-chain
+    negatives (the retrieval objective hard_mrr needs). Computed only when w_nce>0; in the
+    v3 recipe it takes over w_pred's 0.25 slot (mutually exclusive). w_nce=0 reproduces
+    exact v2.1 behavior (recoverability — design doc §1.7).
 
 L_div is GONE: verb informativeness comes from necessity (the decoder needs v's bits)
 not a gameable regularizer. Codebook usage is a diagnostic only (diagnostics.py). The
@@ -203,6 +210,86 @@ def token_ce(
 
 
 # ---------------------------------------------------------------------------
+# info_nce: discriminative next-state contrastive (replaces vestigial L_pred)
+# ---------------------------------------------------------------------------
+
+def info_nce(
+    zhat: torch.Tensor,                       # (B, dn) anchor (gradient) = Predictor(Readout(a*))
+    z_target: torch.Tensor,                   # (B, dn) positive key (stop-grad) = EMA.pool_raw(text_{t+1})
+    chain_ids: torch.Tensor | None = None,    # (B,) long — same-chain hard-negative bookkeeping (§1.4)
+    temperature: float = 0.1,
+    neg_keys: torch.Tensor | None = None,     # (B, n_neg, dn) extra hard-neg keys (unroll cross-hop, §2.4)
+) -> torch.Tensor:
+    """InfoNCE next-state contrastive loss (design doc §1.3).
+
+    Standard InfoNCE with cosine similarity and temperature τ. The anchor `zhat` is the
+    model's predicted next-state pool over the operator-transformed slots a*; the positive
+    key `z_target` is the stop-grad EMA raw-noun readout pool of the TRUE next state. The
+    loss pulls each anchor toward its own key (the diagonal) and pushes it away from every
+    other key in the batch (in-batch negatives) plus any explicit `neg_keys` (cross-hop
+    hard negatives in unroll mode).
+
+    Negatives (§1.4):
+      - In-batch: every off-diagonal key kn[j], j≠i.
+      - Same-chain (`chain_ids` given): off-diagonal columns that share row i's chain are
+        already hard negatives in the (B,B) matrix — kept as negatives (they are wrong
+        next-states on the same narrative). The mask is only used DEFENSIVELY to drop a
+        column that would duplicate the anchor's own positive (a chain contributing the
+        same target twice); such columns are masked to -inf so they never count as a
+        spurious negative. The diagonal positive is never masked.
+      - `neg_keys` (§2.4): explicit per-anchor hard negatives (the cross-hop sibling key,
+        e.g. z_2 when scoring hop 1), appended as extra logit columns.
+
+    The positive key is stop-grad: only the anchor receives gradient (MoCo/BYOL asymmetry
+    inherited from L_pred — cannot drive representational collapse). z_target is detached
+    defensively here regardless of the caller.
+
+    Args:
+        zhat:       (B, dn) anchor (receives gradient).
+        z_target:   (B, dn) positive key (detached internally).
+        chain_ids:  optional (B,) long; same-chain bookkeeping (see above). When None,
+                    plain in-batch InfoNCE.
+        temperature: τ_nce (cosine-sim divisor). 0.1 by default (SimCLR/MoCo).
+        neg_keys:   optional (B, n_neg, dn) explicit hard-negative keys (detached
+                    internally), appended as extra columns of the logits matrix.
+
+    Returns:
+        scalar InfoNCE loss (≈ 0 when each anchor's normalized direction matches its own
+        key and is orthogonal to all negatives).
+    """
+    B = zhat.shape[0]
+    # Positive key (and explicit negatives) are stop-grad — only the anchor gets gradient.
+    z_target = z_target.detach()
+
+    qn = F.normalize(zhat, dim=-1)               # (B, dn)
+    kn = F.normalize(z_target, dim=-1)           # (B, dn)
+
+    logits = (qn @ kn.t()) / temperature         # (B, B) cosine sim to every in-batch key
+
+    # Defensive same-chain handling (§1.4): mask only OFF-DIAGONAL columns that exactly
+    # duplicate the anchor's own positive key (a chain contributing the same target twice).
+    # We never mask the diagonal (the true positive). Plain same-chain wrong-next-states
+    # stay as negatives by design.
+    if chain_ids is not None:
+        same = chain_ids.view(-1, 1) == chain_ids.view(1, -1)   # (B, B)
+        eye = torch.eye(B, dtype=torch.bool, device=logits.device)
+        # A column j (j≠i) duplicates i's positive iff same-chain AND its key matches i's
+        # key direction (cosine ≈ 1). Detect duplicate keys to avoid a false negative.
+        key_sim = (kn @ kn.t())                                 # (B, B) key-key cosine
+        dup_pos = same & (~eye) & (key_sim > 1.0 - 1e-4)
+        logits = logits.masked_fill(dup_pos, float("-inf"))
+
+    # Explicit cross-hop hard negatives (§2.4): append (B, n_neg) extra columns.
+    if neg_keys is not None:
+        neg = F.normalize(neg_keys.detach(), dim=-1)            # (B, n_neg, dn)
+        neg_logits = torch.einsum("bd,bnd->bn", qn, neg) / temperature  # (B, n_neg)
+        logits = torch.cat([logits, neg_logits], dim=1)         # (B, B + n_neg)
+
+    labels = torch.arange(B, device=logits.device)              # diagonal is the positive
+    return F.cross_entropy(logits, labels)
+
+
+# ---------------------------------------------------------------------------
 # prior_kl: KL(stopgrad q ‖ p) — distill posterior into prior
 # ---------------------------------------------------------------------------
 
@@ -266,6 +353,8 @@ class JEPALossV2(nn.Module):
         w_prior: float = 0.1,
         w_sigreg: float = 0.05,
         w_pred: float = 0.25,
+        w_nce: float = 0.0,
+        nce_temperature: float = 0.1,
         n_slices: int = 256,
         n_knots: int = 17,
         knot_max: float = 3.0,
@@ -281,6 +370,8 @@ class JEPALossV2(nn.Module):
         self.w_prior = w_prior
         self.w_sigreg = w_sigreg
         self.w_pred = w_pred
+        self.w_nce = w_nce
+        self.nce_temperature = nce_temperature
         self.n_slices = n_slices
         self.n_knots = n_knots
         self.knot_max = knot_max
@@ -297,11 +388,20 @@ class JEPALossV2(nn.Module):
         k: torch.Tensor,             # (B, M, dn) nouns (for L_sigreg)
         v_logits: torch.Tensor,      # (B, V) posterior action logits (q)
         p_logits: torch.Tensor,      # (B, V) prior action logits (p)
-        zhat: torch.Tensor,          # (B, dn) predicted latent (for L_pred aux)
-        z_target: torch.Tensor,      # (B, dn) EMA target latent, stop-grad
+        zhat: torch.Tensor,          # (B, dn) predicted latent (anchor; L_pred + L_nce)
+        z_target: torch.Tensor,      # (B, dn) EMA target latent, stop-grad (positive key)
         tau: float = 1.0,            # current Gumbel temperature (for L_prior KL sharpness)
+        chain_ids: torch.Tensor | None = None,   # (B,) long — same-chain negatives (§1.4)
+        nce_neg_keys: torch.Tensor | None = None,  # (B, n_neg, dn) cross-hop hard negs (§2.4)
     ) -> tuple[torch.Tensor, dict]:
         """Compute total loss and per-term components.
+
+        The InfoNCE term (`L_nce`) is computed ONLY when `w_nce > 0` (skips the similarity
+        matmul otherwise, so v2.1 configs pay zero cost). `w_nce` takes over `w_pred`'s slot
+        in the v3 recipe; the default v3 config sets `w_pred=0.0, w_nce=0.25`, and setting
+        `w_nce=0.0, w_pred=0.25` recovers exact v2.1 behavior. This call is hop-agnostic:
+        the unroll trainer (Task B) calls it once per hop and sums with hop weights
+        outside.
 
         Returns:
             (total, components) where components is a flat dict of scalar floats for
@@ -325,12 +425,27 @@ class JEPALossV2(nn.Module):
         # L_pred: JEPA latent MSE aux objective (optional; w_pred=0 ablates it).
         l_pred = F.mse_loss(zhat, z_target.detach())
 
+        # L_nce: discriminative next-state contrastive (replaces L_pred in v3). Only
+        # computed when active — when w_nce=0 we skip the matmul and report 0.0.
+        if self.w_nce > 0:
+            l_nce = info_nce(
+                zhat,
+                z_target,
+                chain_ids=chain_ids,
+                temperature=self.nce_temperature,
+                neg_keys=nce_neg_keys,
+            )
+        else:
+            l_nce = None
+
         total = (
             self.w_token  * l_token
             + self.w_prior  * l_prior
             + self.w_sigreg * l_sigreg
             + self.w_pred   * l_pred
         )
+        if l_nce is not None:
+            total = total + self.w_nce * l_nce
 
         components = {
             "loss":       total.item(),
@@ -338,12 +453,14 @@ class JEPALossV2(nn.Module):
             "L_prior":    l_prior.item(),
             "L_sigreg":   l_sigreg.item(),
             "L_pred":     l_pred.item(),
+            "L_nce":      (l_nce.item() if l_nce is not None else 0.0),
             "gumbel_tau": float(tau),
             # weights logged for interpretability
             "w_token":    float(self.w_token),
             "w_prior":    float(self.w_prior),
             "w_sigreg":   float(self.w_sigreg),
             "w_pred":     float(self.w_pred),
+            "w_nce":      float(self.w_nce),
         }
         return total, components
 

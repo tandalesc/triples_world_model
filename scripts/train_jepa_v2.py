@@ -102,6 +102,10 @@ def build_loss_v2(cfg, operator):
         w_prior=lc.w_prior,
         w_sigreg=lc.w_sigreg,
         w_pred=lc.w_pred,
+        # v3 InfoNCE (design §1.7): w_nce takes over w_pred's slot; nce_temperature τ=0.1.
+        # Defaults (0.0 / 0.1) reproduce v2.1 — the loss skips the matmul when w_nce=0.
+        w_nce=getattr(lc, "w_nce", 0.0),
+        nce_temperature=getattr(getattr(lc, "nce", None), "temperature", 0.1),
         n_slices=lc.sigreg.n_slices,
         n_knots=lc.sigreg.n_knots,
         knot_max=lc.sigreg.knot_max,
@@ -135,9 +139,167 @@ def _get_batch(dataset, idx: torch.Tensor):
     )
 
 
+def _get_triple_batch(dataset, idx: torch.Tensor):
+    """Return (s0_ids, s0_pad, s1_ids, s1_pad, s2_ids, s2_pad, chain_ids) for an index
+    tensor in triple mode (design §2.1). chain_ids is a (B,) long tensor of originating
+    chain ids — one per example — for InfoNCE same-chain bookkeeping."""
+    s0i, s0p = dataset._s0_ids[idx], dataset._s0_pad[idx]
+    s1i, s1p = dataset._s1_ids[idx], dataset._s1_pad[idx]
+    s2i, s2p = dataset._s2_ids[idx], dataset._s2_pad[idx]
+    cids = torch.tensor(
+        [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long
+    )
+    return s0i, s0p, s1i, s1p, s2i, s2p, cids
+
+
+def chain_contiguous_perm(chain_ids: list[int], generator=None) -> torch.Tensor:
+    """Chain-grouped shuffle (design §1.5): shuffle at the CHAIN level, then flatten so a
+    chain's sibling examples are adjacent in the permutation. With batch_size a multiple of
+    the per-chain example count (64 % 2 == 0 for pairs), siblings co-occur in one batch, so
+    the in-batch (B,B) InfoNCE matrix already contains the same-chain hard negative.
+
+    This does NOT change the loss math — only which negatives populate the matrix. For
+    triple mode the hard negative is per-example (s1 vs s2), so contiguity is not required;
+    we still group by chain for consistency and reproducibility.
+    """
+    # Map chain_id -> list of dataset indices belonging to it, in first-seen chain order.
+    order: list[int] = []
+    buckets: dict[int, list[int]] = {}
+    for i, cid in enumerate(chain_ids):
+        if cid not in buckets:
+            buckets[cid] = []
+            order.append(cid)
+        buckets[cid].append(i)
+    # Shuffle the chain order (not the within-chain item order, which stays contiguous).
+    perm_chains = torch.randperm(len(order), generator=generator).tolist()
+    flat: list[int] = []
+    for ci in perm_chains:
+        flat.extend(buckets[order[ci]])
+    return torch.tensor(flat, dtype=torch.long)
+
+
+def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
+    """One v2 pairs-mode training step. When w_nce==0 this is BITWISE the v2.1 step
+    (no chain_ids passed → loss skips InfoNCE). When w_nce>0, same-chain negatives are
+    enabled via the batch's chain_ids (the in-batch (B,B) matrix already holds the hard
+    negative thanks to chain-contiguous batching, design §1.5)."""
+    src_ids, src_pad, tgt_ids, tgt_pad = _get_batch(dataset, idx)
+    src_ids = src_ids.to(device)
+    src_pad = src_pad.to(device)
+    tgt_ids = tgt_ids.to(device)
+    tgt_pad = tgt_pad.to(device)
+
+    chain_ids = None
+    if w_nce > 0:
+        chain_ids = torch.tensor(
+            [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long, device=device
+        )
+
+    # Hard ST one-hot posterior action (design §6 L3: bounds future->decoder bits).
+    out = model(src_ids, src_pad, tgt_ids, tgt_pad, tau=tau, hard=True)
+    loss, comps = loss_fn(
+        logits=out["logits"],
+        tgt_ids=tgt_ids,
+        tgt_pad=tgt_pad,
+        k=out["k"],
+        v_logits=out["v_logits"],
+        p_logits=out["p_logits"],
+        zhat=out["zhat"],
+        z_target=out["z_target"],
+        tau=tau,
+        chain_ids=chain_ids,
+    )
+    return loss, comps
+
+
+def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
+    """One v3 triple-mode two-hop unroll step (design §2.3/§2.4).
+
+    Calls model.forward_unroll (Task C) to get per-hop outputs, then assembles the total
+    loss = Σ_h hop_weights[h] · loss_fn(hop_h). The cross-hop hard negative is supplied
+    per example (design §2.4): for the hop-1 anchor, z_target of hop 2 (= EMA pool of s2)
+    is the same-chain negative; for the hop-2 anchor, z_target of hop 1 (= EMA pool of s1)
+    is. These enter as nce_neg_keys (B, 1, dn). The loss is called ONCE PER HOP and summed
+    here with the hop weights (design §6 Task B: hops live in the trainer, the loss is
+    hop-agnostic)."""
+    s0i, s0p, s1i, s1p, s2i, s2p, cids = _get_triple_batch(dataset, idx)
+    s0i, s0p = s0i.to(device), s0p.to(device)
+    s1i, s1p = s1i.to(device), s1p.to(device)
+    s2i, s2p = s2i.to(device), s2p.to(device)
+    cids = cids.to(device)
+
+    hops = model.forward_unroll(s0i, s0p, s1i, s1p, s2i, s2p, tau=tau, hard=True)
+    hop_tgt = [(s1i, s1p), (s2i, s2p)]
+
+    # Cross-hop hard negatives: hop h's negative is the OTHER hop's z_target (the EMA pool
+    # of the sibling future), shaped (B, 1, dn). Only available when use_pred built the EMA
+    # head (z_target not None). Guarded so a model without the anchor head still runs.
+    z_targets = [h.get("z_target") for h in hops]
+    neg_for_hop = [None, None]
+    if all(z is not None for z in z_targets):
+        neg_for_hop[0] = z_targets[1].unsqueeze(1)  # hop-1 anchor: s2 pool is the hard neg
+        neg_for_hop[1] = z_targets[0].unsqueeze(1)  # hop-2 anchor: s1 pool is the hard neg
+
+    total = None
+    agg: dict = {}
+    for h, (out, (tids, tpad)) in enumerate(zip(hops, hop_tgt)):
+        wt = hop_weights[h] if h < len(hop_weights) else 1.0
+        loss_h, comps_h = loss_fn(
+            logits=out["logits"],
+            tgt_ids=tids,
+            tgt_pad=tpad,
+            k=out["k"],
+            v_logits=out["v_logits"],
+            p_logits=out["p_logits"],
+            zhat=out["zhat"],
+            z_target=out["z_target"],
+            tau=tau,
+            chain_ids=cids,
+            nce_neg_keys=neg_for_hop[h],
+        )
+        total = wt * loss_h if total is None else total + wt * loss_h
+        # Aggregate components for logging: weighted sums (matching `total`) plus per-hop CE.
+        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce"):
+            agg[key] = agg.get(key, 0.0) + wt * float(comps_h.get(key, 0.0))
+        agg[f"L_token_h{h + 1}"] = float(comps_h.get("L_token", 0.0))
+
+    return total, agg
+
+
+class _TripleHop1View:
+    """Pairs-compatible view of a triple-mode dataset for the v2 diagnostics harness.
+
+    `eval_diagnostics_v2` expects `dataset[idx] -> {src_ids,src_pad,tgt_ids,tgt_pad}`
+    (the v2 pair interface) plus `.tokenizer` and `.chain_ids`. Triple mode stores
+    `s0/s1/s2`, so this thin adapter surfaces the hop-1 pair (s0 -> s1) — the single-step
+    transition the v2 diagnostics were written against. Diagnostics is owned by another
+    task; this adapter lives in the train script so triple-mode runs can still report
+    the same CE-gap / hard-neg-MRR metrics without touching diagnostics.py."""
+
+    def __init__(self, ds):
+        self._ds = ds
+        self.tokenizer = ds.tokenizer
+        self.chain_ids = ds._chain_ids
+
+    def __len__(self):
+        return len(self._ds)
+
+    def __getitem__(self, idx):
+        return {
+            "src_ids": self._ds._s0_ids[idx],
+            "src_pad": self._ds._s0_pad[idx],
+            "tgt_ids": self._ds._s1_ids[idx],
+            "tgt_pad": self._ds._s1_pad[idx],
+        }
+
+
 def maybe_eval_diagnostics(model, dataset, device, cfg, epoch, tokenizer):
     """Run §8 v2 diagnostics if the module is available (import-guarded so training
     survives diagnostics being mid-build)."""
+    # Triple-mode datasets store s0/s1/s2; wrap as the hop-1 (s0->s1) pair view the v2
+    # diagnostics expect.
+    if getattr(dataset, "mode", "pairs") == "triples":
+        dataset = _TripleHop1View(dataset)
     try:
         from twm.jepa.diagnostics import eval_diagnostics_v2
     except Exception as e:
@@ -204,26 +366,48 @@ def train(config_path: str):
     tokenizer = DomainBPETokenizer.load(
         cfg.data.tokenizer, max_length=cfg.data.max_text_tokens
     )
+    mode = getattr(cfg.data, "mode", "pairs")
     dataset = JEPAChainDataset(
         path=cfg.data.path,
         tokenizer=tokenizer,
         max_text_tokens=cfg.data.max_text_tokens,
         append_eos=cfg.data.append_eos,
+        mode=mode,
     )
     n_train = len(dataset)
     if getattr(cfg.data, "max_chains", None):
-        cap = int(cfg.data.max_chains) * 2  # chain len 3 -> 2 adjacent pairs each
-        if cap < n_train:
-            dataset._src_ids = dataset._src_ids[:cap].contiguous()
-            dataset._src_pad = dataset._src_pad[:cap].contiguous()
-            dataset._tgt_ids = dataset._tgt_ids[:cap].contiguous()
-            dataset._tgt_pad = dataset._tgt_pad[:cap].contiguous()
-            dataset._src_texts = dataset._src_texts[:cap]
-            dataset._tgt_texts = dataset._tgt_texts[:cap]
-            # Keep chain_ids aligned with the truncated dataset (design §8.2).
-            dataset._chain_ids = dataset._chain_ids[:cap]
-            n_train = len(dataset)
-    print(f"Dataset: {n_train} pairs (append_eos={cfg.data.append_eos})")
+        n_chains = int(cfg.data.max_chains)
+        if mode == "triples":
+            # Triple mode: one example per chain — cap is the chain count directly.
+            cap = n_chains
+            if cap < n_train:
+                dataset._s0_ids = dataset._s0_ids[:cap].contiguous()
+                dataset._s0_pad = dataset._s0_pad[:cap].contiguous()
+                dataset._s1_ids = dataset._s1_ids[:cap].contiguous()
+                dataset._s1_pad = dataset._s1_pad[:cap].contiguous()
+                dataset._s2_ids = dataset._s2_ids[:cap].contiguous()
+                dataset._s2_pad = dataset._s2_pad[:cap].contiguous()
+                dataset._s0_texts = dataset._s0_texts[:cap]
+                dataset._s1_texts = dataset._s1_texts[:cap]
+                dataset._s2_texts = dataset._s2_texts[:cap]
+                dataset._chain_ids = dataset._chain_ids[:cap]
+                n_train = len(dataset)
+        else:
+            cap = n_chains * 2  # chain len 3 -> 2 adjacent pairs each
+            if cap < n_train:
+                dataset._src_ids = dataset._src_ids[:cap].contiguous()
+                dataset._src_pad = dataset._src_pad[:cap].contiguous()
+                dataset._tgt_ids = dataset._tgt_ids[:cap].contiguous()
+                dataset._tgt_pad = dataset._tgt_pad[:cap].contiguous()
+                dataset._src_texts = dataset._src_texts[:cap]
+                dataset._tgt_texts = dataset._tgt_texts[:cap]
+                # Keep chain_ids aligned with the truncated dataset (design §8.2).
+                dataset._chain_ids = dataset._chain_ids[:cap]
+                n_train = len(dataset)
+    unit = "triples (chains)" if mode == "triples" else "pairs"
+    print(f"Dataset: {n_train} {unit} (mode={mode}, append_eos={cfg.data.append_eos})")
+    if mode == "triples" and getattr(dataset, "n_skipped", 0):
+        print(f"  triple mode skipped {dataset.n_skipped} chains of length < 3")
 
     # ---- model ----
     token_emb = build_token_emb(cfg.data.vocab_size, cfg.model.d_model)
@@ -256,42 +440,44 @@ def train(config_path: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg.save(out_dir / "jepa_v2_config.json")
 
+    # v3 (design §1.5): chain-contiguous batching guarantees same-chain hard negatives
+    # for InfoNCE. It is only needed when InfoNCE is on (w_nce>0) in PAIRS mode; when
+    # w_nce==0 (v2.1) we keep the original `randperm` so the behavior-preservation gate
+    # holds bitwise. In TRIPLE mode the hard negative is per-example (s1 vs s2), so the
+    # ordering does not affect correctness, but we still group by chain for consistency.
+    w_nce = getattr(cfg.loss, "w_nce", 0.0)
+    use_chain_contig = (mode == "triples") or (w_nce > 0)
+    hop_weights = list(getattr(getattr(cfg.loss, "unroll", None), "hop_weights", [1.0, 0.5]))
+
     global_step = 0
     factor = 1.0
     tau = cfg.loss.verb.gumbel_tau_start
     for epoch in range(1, o.epochs + 1):
         model.train()
-        perm = torch.randperm(n_train)
-        ep_total = ep_token = ep_prior = ep_sig = ep_pred = 0.0
+        if use_chain_contig:
+            perm = chain_contiguous_perm(dataset._chain_ids)
+        else:
+            perm = torch.randperm(n_train)
+        ep_total = ep_token = ep_prior = ep_sig = ep_pred = ep_nce = 0.0
+        ep_tok_h1 = ep_tok_h2 = 0.0
         n_batches = 0
 
         for start in range(0, n_train - bs + 1, bs):
             idx = perm[start:start + bs]
-            src_ids, src_pad, tgt_ids, tgt_pad = _get_batch(dataset, idx)
-            src_ids = src_ids.to(device)
-            src_pad = src_pad.to(device)
-            tgt_ids = tgt_ids.to(device)
-            tgt_pad = tgt_pad.to(device)
 
             tau = gumbel_tau_at(global_step, total_steps, cfg.loss.verb)
-
             factor = lr_factor_at(global_step, o.warmup_steps, total_steps)
             for g in optimizer.param_groups:
                 g["lr"] = o.lr * factor
 
-            # Hard ST one-hot posterior action (design §6 L3: bounds future->decoder bits).
-            out = model(src_ids, src_pad, tgt_ids, tgt_pad, tau=tau, hard=True)
-            loss, comps = loss_fn(
-                logits=out["logits"],
-                tgt_ids=tgt_ids,
-                tgt_pad=tgt_pad,
-                k=out["k"],
-                v_logits=out["v_logits"],
-                p_logits=out["p_logits"],
-                zhat=out["zhat"],
-                z_target=out["z_target"],
-                tau=tau,
-            )
+            if mode == "triples":
+                loss, comps = _unroll_step(
+                    model, loss_fn, dataset, idx, device, tau, hop_weights
+                )
+            else:
+                loss, comps = _pair_step(
+                    model, loss_fn, dataset, idx, device, tau, w_nce
+                )
 
             optimizer.zero_grad()
             loss.backward()
@@ -305,16 +491,21 @@ def train(config_path: str):
             ep_prior += float(comps.get("L_prior", 0.0))
             ep_sig += float(comps.get("L_sigreg", 0.0))
             ep_pred += float(comps.get("L_pred", 0.0))
+            ep_nce += float(comps.get("L_nce", 0.0))
+            ep_tok_h1 += float(comps.get("L_token_h1", 0.0))
+            ep_tok_h2 += float(comps.get("L_token_h2", 0.0))
             n_batches += 1
 
         nb = max(1, n_batches)
-        print(
+        line = (
             f"Epoch {epoch:4d} | loss {ep_total/nb:.4f} "
             f"L_token={ep_token/nb:.4f} L_prior={ep_prior/nb:.4f} "
-            f"L_sigreg={ep_sig/nb:.4f} L_pred={ep_pred/nb:.4f} "
-            f"| tau={tau:.3f} lr={o.lr*factor:.2e}",
-            flush=True,
+            f"L_sigreg={ep_sig/nb:.4f} L_pred={ep_pred/nb:.4f} L_nce={ep_nce/nb:.4f} "
         )
+        if mode == "triples":
+            line += f"L_tok_h1={ep_tok_h1/nb:.4f} L_tok_h2={ep_tok_h2/nb:.4f} "
+        line += f"| tau={tau:.3f} lr={o.lr*factor:.2e}"
+        print(line, flush=True)
 
         # Always overwrite the rolling 'latest'; ADDITIONALLY keep a per-eval snapshot.
         save_checkpoint(model, cfg, global_step, epoch, out_dir, tag="latest")

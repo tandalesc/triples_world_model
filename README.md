@@ -1,14 +1,75 @@
 # Triple World Model (TWM)
 
-A minimal world model that learns state dynamics over structured (entity, attribute, value) triples using a small transformer. The dynamics core processes triples in latent space and can be unrolled multiple times for multi-step causal reasoning.
+A small, structured world model that learns **state dynamics** — how a situation changes
+into the next one — over decomposed (entity, attribute, value) triples, using a vanilla
+transformer instead of a giant language model. The bet: a tiny model that represents state
+as structure (not as a sentence embedding) can learn compositional, reversible
+transformations that generalize to novel state combinations — at thousands of transitions
+per second on a laptop.
 
-**Core claim**: a small transformer over decomposed triple tokens can learn compositional state transformations that generalize to novel entity-state combinations — and multi-turn unrolling provides natural regularization without spectral penalties or VAE tricks.
+## The current architecture in one paragraph
 
-## Active Development
+Each entity is a **noun + adjective** pair, and dynamics is a **verb** acting on it. Nouns
+are points in a complex latent space; the adjective is the **modulus profile** — a
+persistent identity that rotations structurally cannot touch. The verb is a **discrete
+latent action** applied as per-block complex multiplication, inferred unsupervised from
+state pairs (no action labels). Because the action is complex multiplication, **persistence
+is structural** (rotation can't change what something *is*), **the inverse is exact
+division** (undo is free, not learned), **composition is angle addition**, and **the future
+enters only through the verb's few bits** — so the model is forced to compress "what
+changed" into a small, discrete, invertible operator. This is the JEPA v2/v2.1 line; the
+older closed-vocab transformer core (below) is the lineage it grew out of.
 
-This project is under active development. For architecture details see [research/architecture.md](research/architecture.md). For experiment logs see [research/](research/).
+## 60-second quickstart
 
-## How It Works
+Requires Python 3.13 and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync
+
+# Smoke-train the latent-action world model (3 epochs, ~2-4 min on CPU/MPS)
+uv run python scripts/train_jepa_v2.py configs/jepa_nano_v2_smoke.json
+```
+
+Watch the `diag_v2[epN]` line each epoch: `ce_true_nats` falls 6.1 → 4.0, the codebook
+starts getting used, and generated GLUCOSE next-state samples + diagnostics land in
+`results/jepa_nano_v2_smoke/`. That's the whole loop — encode a state into noun slots,
+infer the discrete verb that took it to the next state, apply the operator, decode the
+result back to text. For the full 100-epoch run and every other result, see
+[docs/REPRODUCING.md](docs/REPRODUCING.md).
+
+## Key results
+
+| Result | Headline | Where |
+|---|---|---|
+| **Compositional generalization (closed-vocab v1)** | 0.74 F1 on novel entity-state combos; Mini (178K) matches Base | [docs/REPRODUCING.md](docs/REPRODUCING.md) |
+| **Pet-sim demo** | 29K params, 98.9% exact match, runs client-side in 303 KB JS | [demo/](demo/) |
+| **JEPA v2 latent actions** | slot-LOO flips positive (all 8 slots constructive); `ce_gap` 0.166 | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
+| **JEPA v2.1 decoder arm** | bigger decoder cuts teacher-forced CE 1.39 → **0.95 nats**; fluent GLUCOSE | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
+
+**Honest status:** the v2 line has a working structural prior and a clean decoder, but
+three capability gaps persist — next-state retrieval barely beats chance, the discrete
+action carries no recoverable semantics yet, and generations are fluent but generically
+wrong. The relative-representation interface (for mounting this inside an LLM) is *marginal*,
+not yet green-lit. The numbers and the v3 recipe are in the synthesis below.
+
+## Links
+
+- **[docs/REPRODUCING.md](docs/REPRODUCING.md)** — exact commands, data prerequisites,
+  wall-clock, and expected numbers for every result.
+- **[research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md)** — latest
+  synthesis: the experiment matrix, per-arm verdicts, capability gaps, v3 recipe.
+- **[research/jepa_v2_latent_actions.md](research/jepa_v2_latent_actions.md)** +
+  **[research/jepa_v21_polar.md](research/jepa_v21_polar.md)** — the v2 / v2.1 designs.
+- **[docs/AGENTS.md](docs/AGENTS.md)** — agent operating manual (wartable jobs, probes,
+  diagnostics conventions).
+- **[CLAUDE.md](CLAUDE.md)** — the agent surface / project instructions.
+- **[demo/](demo/)** — client-side pet-simulation inference demo.
+
+## How the closed-vocab core works (the lineage)
+
+The JEPA line sits on top of an earlier, simpler idea that still underpins the demo and the
+compositional-generalization results:
 
 ```
 text / triples → Compressor → [mode | bottleneck] → Dynamics → Expander → text / triples
@@ -16,111 +77,27 @@ text / triples → Compressor → [mode | bottleneck] → Dynamics → Expander 
                                                     (unroll N times)
 ```
 
-The **dynamics core** is a transformer that processes triples in latent space. It sees `(B, max_triples × 3, d_model)` tensors regardless of input format. A **mode triple** is prepended to condition the transformation (advance, query, identity). The core uses an **input residual** — it learns deltas, not full outputs.
+The **dynamics core** is a transformer that processes triples in latent space, seeing
+`(B, max_triples × 3, d_model)` tensors regardless of input format. A **mode triple**
+(advance / query / identity) is prepended to condition the transformation, and the core
+uses an **input residual** — it learns deltas, not full outputs. Decomposed triples (each
+entity/attribute/value is its own token) are what give it compositionality. For the full
+file map and diagrams see [research/architecture.md](research/architecture.md).
 
-For multi-turn dynamics, the core is unrolled N times with supervised intermediate states. This forces it to learn composable single-step transformations.
-
-## Quick Start
-
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
-
-```bash
-uv sync
-
-# Small config-driven smoke run
-uv run python scripts/train.py configs/test_snapshot.json
-
-# Multi-turn chain training (GLUCOSE causal chains; historical Sprint 6 config)
-uv run python scripts/convert_glucose.py --annotation general --augment
-uv run python scripts/train_chain.py configs/archive/glucose_chain_v2.json
-```
-
-See [`configs/README.md`](configs/README.md) for training recipes and curriculum design. Larger TextWorld and open-vocab configs expect the remote GPU checkout described in [`AGENTS.md`](AGENTS.md).
-
-## Results
-
-### Multi-Turn Chain Dynamics (Sprint 6, latest)
-
-Multi-turn unrolling replaces all prior regularization (spectral loss, VAE, staged training). A 947K param model learns bidirectional causal reasoning and game state prediction across multiple datasets with zero architecture changes. The dynamics core (104K params) is unrolled N times with loss at each step — deeper chains learn *faster*, not slower.
-
-| Dataset | Chain depth | Modes | Eval tok_acc | Epochs |
-|---------|:----------:|-------|-------------:|-------:|
-| GLUCOSE (causal) | 3-step | adv+qry+id | 88.0% | 45 |
-| GLUCOSE (GPT-2 tok) | 4-step | adv+qry+id | 85.4% | 75 |
-| TextWorld (games) | 6-step | adv+qry+id | 87.1% | 100 |
-
-**Out-of-distribution generalization:** 93% tok_acc on 4-step chains (trained on 3-step only). Correct game command templates on novel TextWorld scenarios. Reverse causal inference (query mode) matches forward accuracy.
-
-**Speed:** 149 state transitions/sec on M5 Pro — 400-2000x faster than LLMs for equivalent output.
-
-Details: [research/sprint6_chain_dynamics.md](research/sprint6_chain_dynamics.md)
-
-### Open-Vocab IO (Sprint 5)
-
-Compressor/expander learns to encode/decode free text through a bottleneck, then the dynamics core learns transformations.
-
-| Stage | Metric | Result |
-|-------|--------|--------|
-| IO (identity reconstruction) | Token accuracy | 99.3% |
-| IO (identity reconstruction) | Exact match | 96.9% |
-| Dynamics (question → answer) | Token accuracy | 36.8% |
-
-Details: [research/sprint5_vae_bottleneck.md](research/sprint5_vae_bottleneck.md)
-
-### Pet Simulator (11K examples, 98.9% exact match)
-
-Client-side JS inference demo — 29K params, 303 KB, no server. Models multi-pet dynamics with conditional cross-state effects.
-
-Try it: `cd demo/pet_simulation && python -m http.server 8080`
-
-<details>
-<summary>Dynamics analysis</summary>
-
-![Dynamics analysis](research/sprint4_figures/dynamics_analysis.png)
-
-**Left**: 3D latent space — per-pet clusters with pre→post flow. **Center**: flow field — displacement arrows show global transport with pet-specific offsets. **Right**: Jacobian eigenspectrum — 305 expansive, 451 contractive directions, confirming nontrivial dynamics.
-
-</details>
-
-### Compositional Generalization (1.4K examples)
-
-Decomposed triples + attention enable compositional generalization. Mini (178K params) matches Base (4.5M) on context-dependent reasoning. Cross-position attention gives +23% F1 over MLP baseline.
-
-<details>
-<summary>Benchmark table</summary>
-
-| Model | Params | Context-Dep F1 | Comp Gen F1 | Seen F1 |
-|-------|-------:|:---:|:---:|:---:|
-| MLP + GloVe | 4.5M | 0.76 | 0.70 | 0.64 |
-| **TWM Base** | **4.5M** | **0.98** | **0.75** | **0.78** |
-| **TWM Mini** | **178K** | **0.98** | **0.71** | **0.78** |
-| TWM Micro | 80K | 0.91 | 0.67 | 0.64 |
-
-</details>
-
-## Inference
+## Inference (closed-vocab)
 
 ```python
 from twm import TextDynamicsModel
 model = TextDynamicsModel.load("results/my_run/")
-# model.compress() → model.forward_dynamics() → model.generate()
+# model.compress() -> model.forward_dynamics() -> model.generate()
 ```
 
-## Project Structure
+## Dynamics analysis
 
-See [`research/architecture.md`](research/architecture.md) for the full file map and architecture diagrams.
-
-## Dynamics Analysis
-
-Tools for understanding how the dynamics core transforms state. Requires: `uv sync --extra viz`.
+Tools for understanding how the dynamics core transforms state. Requires `uv sync --extra viz`.
 
 ```bash
 uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim
 uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --eigenspectrum
 uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --flow-field
-```
-
-```python
-from twm.analysis import dynamics_jacobian, flow_field
-eigenvalues, J = dynamics_jacobian(model, input_ids)
 ```

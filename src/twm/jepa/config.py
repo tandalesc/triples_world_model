@@ -27,6 +27,9 @@ from twm.jepa import (
     TransitionConfig,
     PriorConfig,
     DecoderConfig,
+    NCEConfig,
+    UnrollConfig,
+    GatedMLPConfig,
     LossConfig,
     DataConfig,
     ModelHParams,
@@ -47,7 +50,13 @@ def _build_loss(data: dict) -> LossConfig:
     data = dict(data)
     sigreg = SIGRegConfig(**_only_known(SIGRegConfig, data.pop("sigreg", {})))
     verb = VerbConfig(**_only_known(VerbConfig, data.pop("verb", {})))
-    return LossConfig(sigreg=sigreg, verb=verb, **_only_known(LossConfig, data))
+    # v3 nested blocks (design §1.7/§2.4): loss.nce, loss.unroll. Pop before the flat
+    # overlay so the raw dicts never reach LossConfig(**...) as scalar fields.
+    nce = NCEConfig(**_only_known(NCEConfig, data.pop("nce", {})))
+    unroll = UnrollConfig(**_only_known(UnrollConfig, data.pop("unroll", {})))
+    return LossConfig(
+        sigreg=sigreg, verb=verb, nce=nce, unroll=unroll, **_only_known(LossConfig, data)
+    )
 
 
 def _build_model(profile: str, model_json: dict) -> ModelHParams:
@@ -62,10 +71,14 @@ def _build_model(profile: str, model_json: dict) -> ModelHParams:
     transition = TransitionConfig(**_only_known(TransitionConfig, raw.pop("transition", {})))
     prior = PriorConfig(**_only_known(PriorConfig, raw.pop("prior", {})))
     decoder = DecoderConfig(**_only_known(DecoderConfig, raw.pop("decoder", {})))
+    # v3 black-box baseline sizing (design §4.2): model.gated_mlp, read only when
+    # operator_group=="gated_mlp" by model.py's factory; parsed always so it round-trips.
+    gated_mlp = GatedMLPConfig(**_only_known(GatedMLPConfig, raw.pop("gated_mlp", {})))
     return ModelHParams(
         transition=transition,
         prior=prior,
         decoder=decoder,
+        gated_mlp=gated_mlp,
         **_only_known(ModelHParams, raw),
     )
 
@@ -139,6 +152,9 @@ __all__ = [
     "TransitionConfig",
     "PriorConfig",
     "DecoderConfig",
+    "NCEConfig",
+    "UnrollConfig",
+    "GatedMLPConfig",
     "LossConfig",
     "DataConfig",
     "ModelHParams",

@@ -280,6 +280,111 @@ class JEPAOperatorModelV2(nn.Module):
     # gap and generated-sample paths resolve to the real v2 forward.
     forward_v2 = forward
 
+    # ------------------------------------------------------------------ unroll (v3 §2)
+    def forward_unroll(
+        self,
+        s0_ids: torch.Tensor,
+        s0_pad: torch.Tensor,
+        s1_ids: torch.Tensor,
+        s1_pad: torch.Tensor,
+        s2_ids: torch.Tensor,
+        s2_pad: torch.Tensor,
+        tau: float = 1.0,
+        hard: bool = True,
+    ) -> list[dict]:
+        """Two-hop multi-step unroll over a chain triple (s0, s1, s2). v3 §2.3.
+
+        Composes the operator twice from the SAME start nouns, threading the polar
+        conditioning per hop:
+
+            k0       = encoder(s0).k                       # start nouns
+            v1       = posterior(s0, s1)                   # action s0 -> s1
+            a1       = _apply_action(k0, v1)               # θoff_1 = H(|k0|)  (hop-1 modulus)
+            v2       = posterior(s1, s2)                   # action s1 -> s2
+            a2       = _apply_action(a1, v2)               # θoff_2 = H(|a1|)  (hop-2 modulus, §2.3)
+
+        H reads the modulus of the operator's INPUT at each hop (`|k0|` for hop 1,
+        `|a1|` for hop 2) — the design-mandated state-dependence (jepa_v21_polar §3.3):
+        under a scaling hop-1 verb the modulus changes and the hop-2 offset must shift
+        with it. `_apply_action` already computes `conditioner(<its k arg>)`, so passing
+        `a1` at hop 2 needs no conditioner change — only this loop calling it on `a1`.
+
+        Leakage (v3 §2.5): hop-2's only `s2` channel into the decoder memory `a2` is the
+        discrete `v2` (the posterior's ⌈log₂V⌉ bits). `θoff_2 = H(|a1|)` is a function of
+        `(k0, v1)` only — NO `s2`. So `a2 = f(k0, v1, v2)`; perturbing `s2` moves `a2`
+        ONLY through `v2`. The hop-2 decoder's teacher-forced context is `s2_ids` (the
+        standard AR target — identical to v2's single-hop teacher forcing).
+
+        This method is LOSS-FREE: it returns the raw per-hop outputs and the trainer
+        (Task B) applies the hop weights (1.0/0.5) and assembles the per-hop loss with
+        the cross-hop InfoNCE hard negatives. Keeps model.py (C) and the train loop (B)
+        disjoint.
+
+        Returns a list of TWO per-hop dicts (hop 1, then hop 2), each with the same keys
+        as `forward`:
+            k         (B, M, dn)  the operator INPUT nouns at this hop (k0 / a1)
+            a         (B, M, dn)  a* = operator output (decoder memory)  (a1 / a2)
+            v         (B,)        argmax posterior action
+            v_onehot  (B, V)      hard ST one-hot action
+            v_logits  (B, V)      posterior logits
+            p_logits  (B, V)      prior logits  (distilled from this hop's source pool)
+            logits    (B, T, V)   token decoder logits over the hop target
+            zhat      (B, dn)     L_pred/InfoNCE anchor over a* (None if use_pred=False)
+            z_target  (B, dn)     EMA raw-noun pool of this hop's target, stop-grad (or None)
+        """
+        # --- start nouns: text_t0 only (no future info reaches k0) ---
+        _, k0, _ = self.encoder(s0_ids, s0_pad)  # verb_logits IGNORED
+
+        hops = [
+            (s0_ids, s0_pad, s1_ids, s1_pad),  # hop 1: action s0 -> s1, target s1
+            (s1_ids, s1_pad, s2_ids, s2_pad),  # hop 2: action s1 -> s2, target s2
+        ]
+
+        outs: list[dict] = []
+        k_in = k0
+        for src_ids, src_pad, tgt_ids, tgt_pad in hops:
+            # --- per-hop posterior q(v | src, tgt): own discrete action per hop (§2.2) ---
+            v_onehot, v_logits, pool_src = self.transition(
+                src_ids, src_pad, tgt_ids, tgt_pad, tau, hard
+            )
+            # --- per-hop prior p(v | src) distilled from this hop's source pool (§2.2) ---
+            p_logits = self.prior(pool_src)
+
+            # --- composed application: conditioning reads |k_in| at THIS hop (§2.3) ---
+            a = self._apply_action(k_in, v_onehot)  # θoff = H(|k_in|)
+
+            # --- token decoder: memory = a* ONLY (structural leakage block) ---
+            logits = self.decoder(a, tgt_ids, tgt_pad)
+
+            hop_out = {
+                "k": k_in,
+                "a": a,
+                "v": v_onehot.argmax(dim=-1),
+                "v_onehot": v_onehot,
+                "v_logits": v_logits,
+                "p_logits": p_logits,
+                "logits": logits,
+            }
+            if self.kind_head is not None:
+                hop_out["kind_ids"] = self.kind_head.assign(k_in)
+
+            # --- L_pred / InfoNCE anchor + EMA target for this hop (§2.4) ---
+            if self.use_pred:
+                pooled = self.readout(a)         # (B, dn)
+                zhat = self.predictor(pooled)    # (B, dn)
+                with torch.no_grad():
+                    z = self.ema.pool_raw(tgt_ids, tgt_pad)  # EMA pool of THIS hop's target
+                hop_out["zhat"] = zhat
+                hop_out["z_target"] = z.detach()
+            else:
+                hop_out["zhat"] = None
+                hop_out["z_target"] = None
+
+            outs.append(hop_out)
+            k_in = a  # next hop composes on this hop's output (a2 = B_v2(B_v1 k0))
+
+        return outs
+
     # ------------------------------------------------------------------ inference (§1)
     @torch.no_grad()
     def rollout(
@@ -444,6 +549,10 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         PriorHead,
         TokenDecoder,
     )
+    # GatedMLPTransition lives in baseline_transition.py (this task owns it). Import it
+    # directly from the owning module rather than through the package __getattr__
+    # re-export so this factory does not depend on Task B's __init__.py edit landing first.
+    from twm.jepa.baseline_transition import GatedMLPTransition
 
     m = cfg.model
     encoder = _construct(
@@ -464,8 +573,19 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         "rotation_scale": RotationScaleOperator,
         "rotation": RotationOperator,
         "son_cayley": SOnCayleyOperator,
+        "gated_mlp": GatedMLPTransition,
     }.get(m.operator_group, RotationScaleOperator)
-    operator = _construct(op_cls, n_verbs=m.n_verbs, d_noun=m.d_noun, block=m.block)
+    # GatedMLPTransition (v3 §4.2) reads d_e/d_h from the optional model.gated_mlp block;
+    # _construct kwarg-filters them out for operator classes that don't accept them.
+    gmlp = getattr(m, "gated_mlp", None)
+    operator = _construct(
+        op_cls,
+        n_verbs=m.n_verbs,
+        d_noun=m.d_noun,
+        block=m.block,
+        d_e=getattr(gmlp, "d_e", 4),
+        d_h=getattr(gmlp, "d_h", 8),
+    )
 
     # Posterior + prior action heads share the encoder's bound text trunk (design §2.1):
     # zero new attention params, posterior's view in the noun-building space.

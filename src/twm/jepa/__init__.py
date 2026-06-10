@@ -274,6 +274,17 @@ JEPA_PROFILES: dict[str, dict] = {
         "operator_group": "rotation_scale", "n_steps_T": 1,
         "vocab_size": 512, "max_text_tokens": 64,
     },
+    # v3 (InfoNCE + multi-step unroll + d128/2L decoder). Same nano encoder/operator
+    # shape; the d128/2L decoder, polar flag, mode, loss weights come from the JSON
+    # model/loss/data blocks (design §3.1 keeps the profile minimal). The baseline
+    # family reuses this profile and only flips operator_group="gated_mlp".
+    "jepa_v3": {
+        "d_model": 64, "d_noun": 32, "n_slots": 8, "n_verbs": 8,
+        "block": 2, "n_text_layers": 2, "tie_text_layers": True,
+        "n_heads": 4, "n_slot_iters": 3,
+        "operator_group": "rotation_scale", "n_steps_T": 1,
+        "vocab_size": 512, "max_text_tokens": 64,
+    },
 }
 
 
@@ -295,6 +306,27 @@ class VerbConfig:
 
 
 @dataclass
+class NCEConfig:
+    """InfoNCE next-state contrastive config (v3 design §1.3). loss.nce.
+
+    Field spec owned by Task A (losses.py); declared here (the schema is B-owned,
+    §6) so config.py can parse loss.nce.
+    """
+    temperature: float = 0.1  # τ_nce, fixed (SimCLR/MoCo default, NOT the Gumbel τ)
+
+
+@dataclass
+class UnrollConfig:
+    """Multi-step unroll per-hop loss weights (v3 design §2.4). loss.unroll.
+
+    Field spec owned by Task A; declared here (B-owned schema, §6) for config.py.
+    hop_weights[h] scales the hop-h CE + InfoNCE; default [1.0, 0.5] downweights
+    the harder, noisier hop-2 so it acts as composition pressure, not a destabilizer.
+    """
+    hop_weights: list[float] = field(default_factory=lambda: [1.0, 0.5])
+
+
+@dataclass
 class LossConfig:
     # v1 weights kept on the dataclass so v1 configs still parse; the live loss
     # (losses.JEPALoss / JEPALossV2 alias) ignores w_div/w_scale_reg (design §10).
@@ -305,8 +337,12 @@ class LossConfig:
     # v2 additions (design §5 / §10):
     w_token: float = 1.0   # primary CE grounding loss
     w_prior: float = 0.1   # KL(stopgrad q ‖ p) for autonomous rollout
+    # v3 additions (design §1.7 / §2.4):
+    w_nce: float = 0.0     # InfoNCE next-state weight; v3 sets 0.25 (replaces w_pred)
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
+    nce: NCEConfig = field(default_factory=NCEConfig)
+    unroll: UnrollConfig = field(default_factory=UnrollConfig)
 
 
 @dataclass
@@ -332,12 +368,26 @@ class DecoderConfig:
 
 
 @dataclass
+class GatedMLPConfig:
+    """Black-box GatedMLPTransition baseline sizing (v3 design §4.2). model.gated_mlp.
+
+    Field spec owned by Task C (operator.py); declared here (B-owned schema, §6) so
+    config.py can parse model.gated_mlp and model.py's factory can read d_e/d_h.
+    """
+    d_e: int = 4  # verb embedding width
+    d_h: int = 8  # MLP hidden width
+
+
+@dataclass
 class DataConfig:
     path: str = "data/glucose/chain_general_train.jsonl"
     tokenizer: str = "data/glucose/jepa_bpe_512.json"
     vocab_size: int = 512
     max_text_tokens: int = 64
     pairing: str = "adjacent"
+    # v3 unroll (design §2.1): "pairs" = exactly v2 behavior; "triples" emits one
+    # (s0,s1,s2) example per chain for two-hop unroll. Default keeps v2.1 bitwise.
+    mode: str = "pairs"
     max_chains: int | None = None  # smoke/debug cap on #chains (None = full dataset)
     append_eos: bool = False  # v2: append <eos>=4 to tokenized states (default = v1 behavior)
 
@@ -366,6 +416,9 @@ class ModelHParams:
     transition: TransitionConfig = field(default_factory=TransitionConfig)
     prior: PriorConfig = field(default_factory=PriorConfig)
     decoder: DecoderConfig = field(default_factory=DecoderConfig)
+    # v3 black-box baseline sizing (design §4.2). Only read when
+    # operator_group=="gated_mlp"; ignored otherwise so existing configs are unchanged.
+    gated_mlp: GatedMLPConfig = field(default_factory=GatedMLPConfig)
 
 
 @dataclass
@@ -516,6 +569,9 @@ __all__ = [
     "TransitionConfig",
     "PriorConfig",
     "DecoderConfig",
+    "NCEConfig",
+    "UnrollConfig",
+    "GatedMLPConfig",
     "EMAConfig",
     "OptimConfig",
     "EvalConfig",
