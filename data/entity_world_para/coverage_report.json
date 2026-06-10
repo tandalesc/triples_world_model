@@ -1,0 +1,47 @@
+{
+  "available": true,
+  "bpe_path": "data/glucose/jepa_bpe_512.json",
+  "vocab_size": 512,
+  "max_text_tokens": 64,
+  "per_split": {
+    "train": {
+      "states": 240196,
+      "mean_tokens": 46.87,
+      "p95_tokens": 68,
+      "max_tokens": 80,
+      "pct_over_max": 11.88,
+      "mean_byte_frags": 15.38
+    },
+    "test_iid": {
+      "states": 11974,
+      "mean_tokens": 46.62,
+      "p95_tokens": 68,
+      "max_tokens": 77,
+      "pct_over_max": 11.1,
+      "mean_byte_frags": 15.27
+    },
+    "test_ood_near": {
+      "states": 11913,
+      "mean_tokens": 52.79,
+      "p95_tokens": 73,
+      "max_tokens": 78,
+      "pct_over_max": 37.58,
+      "mean_byte_frags": 18.06
+    },
+    "test_ood_far": {
+      "states": 11993,
+      "mean_tokens": 54.17,
+      "p95_tokens": 75,
+      "max_tokens": 80,
+      "pct_over_max": 39.25,
+      "mean_byte_frags": 18.99
+    }
+  },
+  "overall": {
+    "mean_tokens": 47.43,
+    "mean_byte_frags": 15.65,
+    "pct_over_max": 14.14,
+    "verdict": "POOR -> build dedicated BPE",
+    "poor": true
+  }
+}

@@ -18,11 +18,14 @@ Usage (from repo root, AFTER generate_entity_world.py):
 
 import json
 import statistics
+import sys
 from pathlib import Path
 
 from tokenizers import Tokenizer, models, trainers, pre_tokenizers, processors
 
-DATA_DIR = Path("data/entity_world")
+# Optional CLI arg: the data dir to train the BPE on. Defaults to the campaign
+# single-template dir; pass `data/entity_world_para` to build the v4.3 paraphrase BPE.
+DATA_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/entity_world")
 OUT_PATH = DATA_DIR / "bpe_512.json"
 VOCAB_SIZE = 512
 MAX_TEXT_TOKENS = 64

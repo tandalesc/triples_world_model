@@ -89,6 +89,14 @@ CONFIG = {
     # When on, per-type "stochastic" tables are sampled; oracle_dist is emitted in labeled.
     "stochastic_v2": False,
     "stochastic_p": 0.15,
+    # ---------------------------------------------------------------------------
+    # v4.3 surface-variety (paraphrase mode). See SURFACE-VARIETY block below.
+    # Default OFF -> rendering is byte-identical to the v4.2 campaign output.
+    # When ON, each underlying state renders through one of K>=4 paraphrase
+    # templates per sentence family + a clause-order shuffle. The underlying
+    # state and oracle are UNTOUCHED; paraphrase affects RENDERING only.
+    # ---------------------------------------------------------------------------
+    "surface_variety": False,
 }
 
 # =====================================================================================
@@ -133,6 +141,133 @@ ATTR_COPULA = {
     "hunger": "feel(s)", "energy": "feel(s)", "mood": "feel(s)", "thirst": "feel(s)",
     "cleanliness": "is", "power": "is", "fill": "is", "open": "is",
 }
+
+# =====================================================================================
+# SURFACE-VARIETY (paraphrase mode, v4.3)
+# =====================================================================================
+# HYPOTHESIS under test: single-template data never DEMANDS metric pooled geometry.
+# Many surface forms per underlying state force invariance, and invariance is exactly
+# semantic geometry. So we render the SAME state/oracle/dynamics through many surface
+# forms (variety ACROSS chains/samples) while holding template choice STABLE WITHIN a
+# chain so the masked-diff alignment (data._diff_mask, SequenceMatcher) still isolates
+# the single changed clause rather than diffing the whole text.
+#
+# DESIGN DECISION (critical invariant): the template chosen for a given clause is a
+# deterministic function of (chain_template_seed, entity_index, attribute_key) for state
+# clauses, and (chain_template_seed, entity_index) for the entity's action-verb style /
+# clause order. It is NOT a function of the attribute VALUE. Consequence:
+#   - ACROSS chains/samples: the per-chain seed varies, so the SAME underlying state can
+#     render many different ways (surface entropy gain).
+#   - WITHIN a chain: when an attribute value changes (cat full -> fed) the surrounding
+#     template words are byte-identical between consecutive states, so SequenceMatcher's
+#     LCS alignment marks ONLY the changed value word as the diff span. If template choice
+#     depended on the value, every step would re-template and the diff mask would cover the
+#     whole text -- defeating masked-diff. The clause-order shuffle is likewise fixed per
+#     (chain, entity), so entity order within a state text is stable through the chain.
+#
+# All paraphrase vocabulary REUSES words already in reach (common-English register); a
+# fresh BPE is rebuilt on the paraphrase renderings (build_entity_world_bpe.py) because
+# the campaign's single-template BPE never saw "seems"/"looks"/"now"/etc.
+
+# K>=4 attribute-statement templates. {ent}=display noun phrase, {cop}=copula
+# ("feel(s)"/"is"), {val}=ordinal value word. Each renders ONE attribute clause.
+# Variant 0 is the canonical single-template form ("{ent} {cop} {val}.") so the family
+# always includes the campaign surface form.
+ATTR_TEMPLATES = [
+    "{ent} {cop} {val}.",                  # The cat feel(s) full.
+    "{ent} {cop} {val} now.",              # The cat feel(s) full now.
+    "{ent} {cop} {val} today.",            # The cat feel(s) full today.
+    "{ent} {cop} rather {val}.",           # The cat feel(s) rather full.
+    "{ent} still {cop} {val}.",            # The cat still feel(s) full.
+]
+
+# K>=4 action-sentence templates per action. Variant 0 is the canonical ACTION_TEMPLATES
+# form. We keep one shared schema of "extra" framings and instantiate per action so the
+# verb morphology stays correct. {ent}=display, {a}=action key (used to pick the row).
+# Each list value is a list of >=4 surface strings for that action.
+ACTION_TEMPLATES_VAR = {
+    "feed": [
+        "Someone_A feeds {ent}.",
+        "Someone_A gives {ent} some food.",
+        "{ent} is fed by Someone_A.",
+        "Someone_A feeds {ent} now.",
+    ],
+    "play": [
+        "Someone_A plays with {ent}.",
+        "Someone_A has a play with {ent}.",
+        "{ent} plays with Someone_A.",
+        "Someone_A plays with {ent} now.",
+    ],
+    "wash": [
+        "Someone_A washes {ent}.",
+        "Someone_A gives {ent} a wash.",
+        "{ent} is washed by Someone_A.",
+        "Someone_A washes {ent} now.",
+    ],
+    "rest": [
+        "{ent} rests for a while.",
+        "{ent} takes a rest.",
+        "{ent} rests now.",
+        "{ent} has a rest for a while.",
+    ],
+    "water": [
+        "Someone_A waters {ent}.",
+        "Someone_A gives {ent} some water.",
+        "{ent} is watered by Someone_A.",
+        "Someone_A waters {ent} now.",
+    ],
+    "switch on": [
+        "Someone_A switches on {ent}.",
+        "Someone_A turns on {ent}.",
+        "{ent} is switched on by Someone_A.",
+        "Someone_A switches on {ent} now.",
+    ],
+    "switch off": [
+        "Someone_A switches off {ent}.",
+        "Someone_A turns off {ent}.",
+        "{ent} is switched off by Someone_A.",
+        "Someone_A switches off {ent} now.",
+    ],
+    "fill": [
+        "Someone_A fills {ent}.",
+        "Someone_A tops up {ent}.",
+        "{ent} is filled by Someone_A.",
+        "Someone_A fills {ent} now.",
+    ],
+    "open": [
+        "Someone_A opens {ent}.",
+        "Someone_A pulls open {ent}.",
+        "{ent} is opened by Someone_A.",
+        "Someone_A opens {ent} now.",
+    ],
+    "close": [
+        "Someone_A closes {ent}.",
+        "Someone_A shuts {ent}.",
+        "{ent} is closed by Someone_A.",
+        "Someone_A closes {ent} now.",
+    ],
+    "wait": [
+        "Time passes.",
+        "Some time passes.",
+        "Time goes by.",
+        "A while passes.",
+    ],
+}
+
+
+def _stable_choice(options, *keys):
+    """Deterministic index into `options` from a tuple of hashable keys.
+
+    Pure function of `keys` (no RNG state): the same (chain_template_seed, entity_idx,
+    attr) always selects the same template. Uses a small FNV-1a-style hash over the
+    repr of the key tuple so results are stable across Python runs (Python's builtin
+    hash() is salted per-process and must NOT be used here)."""
+    h = 1469598103934665603  # FNV offset basis (64-bit)
+    for part in keys:
+        for b in repr(part).encode("utf-8"):
+            h ^= b
+            h = (h * 1099511628211) & 0xFFFFFFFFFFFFFFFF  # FNV prime, 64-bit wrap
+    return options[h % len(options)]
 
 # =====================================================================================
 # TYPE LIBRARY
@@ -649,29 +784,78 @@ def _value_clause(ent_display, attr, value):
     return f"{ent_display} {cop} {value}"
 
 
-def render_state(entities):
+def _value_clause_para(ent_display, attr, value, chain_template_seed, entity_idx):
+    """Paraphrase one attribute clause (already capitalized, with trailing period).
+
+    Template choice is a deterministic function of (chain_template_seed, entity_idx,
+    attr) -- NOT of `value`. So within a chain the surrounding words are byte-stable as
+    the value changes (masked-diff isolates the value word); across chains the seed
+    varies so the same (attr, value) renders many ways. Variant 0 reproduces the
+    canonical "{ent} {cop} {val}." form."""
+    cop = ATTR_COPULA[attr]
+    tmpl = _stable_choice(ATTR_TEMPLATES, chain_template_seed, entity_idx, attr)
+    clause = tmpl.format(ent=ent_display, cop=cop, val=value)
+    return _capitalize_sentence(clause)
+
+
+def render_state(entities, surface_variety=False, chain_template_seed=0):
     """Render a multi-entity world state as 2-4 short sentences.
 
     `entities` is a list of (type_name, state_dict). We surface up to two salient
     attributes per entity (the first two in its schema) to keep states at 2-4 sentences.
     Every sentence starts capitalized.
+
+    surface_variety=False reproduces the v4.2 campaign byte-for-byte. surface_variety=True
+    paraphrases each clause and shuffles the ENTITY (clause-group) order via a per-(chain,
+    entity) stable permutation key -- entity order stays fixed within the chain but varies
+    across chains.
     """
-    sentences = []
-    for type_name, state in entities:
+    if not surface_variety:
+        sentences = []
+        for type_name, state in entities:
+            disp = TYPE_LIBRARY[type_name]["display"]
+            schema = TYPE_LIBRARY[type_name]["schema"]
+            salient = schema[:2]
+            clauses = [_value_clause(disp, attr, state[attr]) for attr in salient]
+            # "The dog feel(s) hungry. The dog is messy."
+            sentences.extend(_capitalize_sentence(c) + "." for c in clauses)
+        return " ".join(sentences)
+
+    # Paraphrase path. Render each entity's clause group, then order the GROUPS by a
+    # stable per-entity sort key (clause-order shuffle, fixed within a chain).
+    groups = []  # (sort_key, [sentence, ...])
+    for entity_idx, (type_name, state) in enumerate(entities):
         disp = TYPE_LIBRARY[type_name]["display"]
         schema = TYPE_LIBRARY[type_name]["schema"]
         salient = schema[:2]
-        clauses = [_value_clause(disp, attr, state[attr]) for attr in salient]
-        # "The dog feel(s) hungry. The dog is messy."
-        sentences.extend(_capitalize_sentence(c) + "." for c in clauses)
+        clauses = [
+            _value_clause_para(disp, attr, state[attr], chain_template_seed, entity_idx)
+            for attr in salient
+        ]
+        # Stable order key: hash of (seed, "order", entity_idx) -> reproducible across
+        # the chain's states (independent of value) so the entity order is held fixed.
+        order_key = _stable_choice(list(range(10_000)), chain_template_seed, "order", entity_idx)
+        groups.append(((order_key, entity_idx), clauses))
+    groups.sort(key=lambda g: g[0])
+    sentences = [s for _key, clauses in groups for s in clauses]
     return " ".join(sentences)
 
 
-def render_action(entities, action, actor_idx):
-    """Render the action sentence (applied to entity `actor_idx`)."""
+def render_action(entities, action, actor_idx,
+                  surface_variety=False, chain_template_seed=0):
+    """Render the action sentence (applied to entity `actor_idx`).
+
+    surface_variety=False reproduces ACTION_TEMPLATES[action] exactly. surface_variety=True
+    picks one of the >=4 action-sentence variants via a stable (chain, actor) key, so the
+    SAME entity's action verbs share a framing style through the chain but vary across
+    chains. Variant 0 is the canonical ACTION_TEMPLATES form."""
     type_name, _ = entities[actor_idx]
     disp = TYPE_LIBRARY[type_name]["display"]
-    template = ACTION_TEMPLATES[action]
+    if not surface_variety:
+        template = ACTION_TEMPLATES[action]
+        return template.format(ent=disp)
+    variants = ACTION_TEMPLATES_VAR[action]
+    template = _stable_choice(variants, chain_template_seed, "action", actor_idx)
     return template.format(ent=disp)
 
 
@@ -701,7 +885,8 @@ def _sample_action(rng, type_name, wait_weight):
     return rng.choices(acts, weights=weights, k=1)[0]
 
 
-def generate_chain(rng, type_names, chain_len, wait_weight=0.15):
+def generate_chain(rng, type_names, chain_len, wait_weight=0.15,
+                   surface_variety=False):
     """Generate one chain over the given entity types.
 
     Returns (chain_texts, action_labels) where action_labels[i] is the action applied to
@@ -709,15 +894,19 @@ def generate_chain(rng, type_names, chain_len, wait_weight=0.15):
     label is "<action>@<entity_index>" so action-recovery eval can align actor + verb.
     """
     entities = [(tn, _random_state(rng, tn)) for tn in type_names]
-    texts, actions, _ = _generate_chain_from_entities(rng, entities, chain_len, wait_weight)
+    texts, actions, _ = _generate_chain_from_entities(
+        rng, entities, chain_len, wait_weight, surface_variety=surface_variety)
     return texts, actions
 
 
-def replay_chain(type_names, initial_states, action_labels):
+def replay_chain(type_names, initial_states, action_labels,
+                 surface_variety=False, chain_template_seed=0):
     """Oracle replay: given initial states + action labels, reproduce the state sequence.
 
     Returns list of entity-states snapshots (one per chain step, len == n_actions + 1).
-    Used by the oracle-consistency test.
+    Used by the oracle-consistency test. The (surface_variety, chain_template_seed) args
+    do NOT affect the returned STATE snapshots (the oracle is render-independent); they
+    are accepted so a caller can re-render the snapshots with matching templates.
     """
     entities = [(tn, dict(st)) for tn, st in zip(type_names, initial_states)]
     snapshots = [[dict(st) for _, st in entities]]
@@ -790,6 +979,8 @@ def build_split(rng, allowed_types, n_chains, cfg):
         len_max = cfg["chain_len_max"]
         ent_range = cfg["entities_per_chain"]
 
+    surface_variety = cfg.get("surface_variety", False)
+
     plain, labeled = [], []
     for _ in range(n_chains):
         chain_len = rng.randint(len_min, len_max)
@@ -800,6 +991,7 @@ def build_split(rng, allowed_types, n_chains, cfg):
             rng, entities_init, chain_len,
             cfg.get("wait_weight", 0.15),
             stochastic_v2=stochastic_v2,
+            surface_variety=surface_variety,
         )
         plain.append({"chain": texts})
         rec = {
@@ -816,7 +1008,8 @@ def build_split(rng, allowed_types, n_chains, cfg):
 
 
 def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
-                                   stochastic_v2: bool = False):
+                                   stochastic_v2: bool = False,
+                                   surface_variety: bool = False):
     """Generate a chain starting from the given (mutable) entities list.
 
     Mirrors the body of ``generate_chain`` but accepts pre-constructed entities so
@@ -828,8 +1021,18 @@ def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
     For deterministic steps or stochastic_v2=False the dist has a single entry with prob=1.0.
 
     Mutates ``entities`` in place (same semantics as ``generate_chain``).
+
+    surface_variety=False renders byte-identically to the v4.2 campaign. surface_variety=True
+    draws a per-chain template seed (held fixed for ALL states in this chain) so paraphrase
+    template choices are stable within the chain (masked-diff isolates the changed clause)
+    but vary across chains. The seed draw is GUARDED behind surface_variety so the False-path
+    RNG stream -- and thus the campaign output -- is byte-identical.
     """
-    chain_texts = [render_state(entities)]
+    # Per-chain template seed: stable within the chain, varies across chains. Drawn ONLY
+    # in the paraphrase path so the deterministic campaign RNG stream is untouched.
+    chain_template_seed = rng.getrandbits(63) if surface_variety else 0
+
+    chain_texts = [render_state(entities, surface_variety, chain_template_seed)]
     action_labels = []
     oracle_dists = []
     for _ in range(chain_len - 1):
@@ -841,8 +1044,9 @@ def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
         new_state = apply_action(type_name, entities[actor_idx][1], action, rng,
                                   stochastic_v2=stochastic_v2)
         entities[actor_idx] = (type_name, new_state)
-        action_sentence = render_action(entities, action, actor_idx)
-        state_sentence = render_state(entities)
+        action_sentence = render_action(entities, action, actor_idx,
+                                         surface_variety, chain_template_seed)
+        state_sentence = render_state(entities, surface_variety, chain_template_seed)
         chain_texts.append(f"{action_sentence} {state_sentence}")
         action_labels.append(f"{action}@{actor_idx}")
         oracle_dists.append({"type": type_name, "action": action, "dist": dist})
@@ -944,6 +1148,56 @@ def coverage_report(records_by_split, bpe_path, max_tokens):
 
 
 # =====================================================================================
+# SURFACE-ENTROPY STATS
+# =====================================================================================
+
+def surface_entropy_stats(cfg, allowed_types, n_states=4000):
+    """Measure distinct renderings per underlying state, OFF vs ON.
+
+    Draws `n_states` random single-entity underlying states, then renders each one many
+    times -- ONCE per off-path (template-free) and across many independent chain seeds for
+    the on-path -- and reports the mean number of DISTINCT surface forms per underlying
+    state. OFF is 1.0 by construction (one template); the ratio ON/OFF is the surface
+    entropy gain the paraphrase mode buys.
+
+    Returns a dict with the off/on distinct-rendering counts and the gain ratio.
+    """
+    import math
+
+    rng = random.Random(cfg["seed"] + 777)
+    n_seeds = 32  # independent chain-template seeds per underlying state
+    off_distinct, on_distinct, on_entropy = [], [], []
+    for _ in range(n_states):
+        tn = rng.choice(allowed_types)
+        state = _random_state(rng, tn)
+        entities = [(tn, state)]
+        off = {render_state(entities, surface_variety=False)}
+        renders = []
+        for _ in range(n_seeds):
+            seed = rng.getrandbits(63)
+            renders.append(render_state(entities, surface_variety=True,
+                                        chain_template_seed=seed))
+        uniq = set(renders)
+        off_distinct.append(len(off))
+        on_distinct.append(len(uniq))
+        # Shannon entropy (bits) of the empirical rendering distribution at this state.
+        counts = Counter(renders)
+        tot = len(renders)
+        ent = -sum((c / tot) * math.log2(c / tot) for c in counts.values())
+        on_entropy.append(ent)
+    off_mean = statistics.mean(off_distinct)
+    on_mean = statistics.mean(on_distinct)
+    return {
+        "n_states_sampled": n_states,
+        "n_seeds_per_state": n_seeds,
+        "off_distinct_per_state": round(off_mean, 3),
+        "on_distinct_per_state": round(on_mean, 3),
+        "gain_ratio": round(on_mean / off_mean, 2) if off_mean else None,
+        "on_mean_entropy_bits": round(statistics.mean(on_entropy), 3),
+    }
+
+
+# =====================================================================================
 # MAIN
 # =====================================================================================
 
@@ -963,7 +1217,8 @@ def main():
     print(f"  near-OOD    ({len(near_types)}) : {near_types}")
     print(f"  far-OOD     ({len(far_types)}) : {far_types}")
     print(f"  seed={cfg['seed']} stochastic={cfg.get('stochastic', False)} "
-          f"stochastic_v2={cfg.get('stochastic_v2', False)}")
+          f"stochastic_v2={cfg.get('stochastic_v2', False)} "
+          f"surface_variety={cfg.get('surface_variety', False)}")
     print()
 
     # Determine train chain count (v2 may use n_train_chains_v2).
@@ -1006,6 +1261,17 @@ def main():
         n_actions = sum(len(r["actions"]) for r in labeled)
         mean_len = round(n_states / len(plain), 2)
         print(f"  {name:<16}{len(plain):>8}{n_states:>9}{mean_len:>10}{n_actions:>9}")
+    print()
+
+    # Surface-entropy stats (only meaningful when surface_variety is on; reported always
+    # so the OFF baseline of 1.0 distinct rendering/state is visible).
+    se = surface_entropy_stats(cfg, train_types)
+    with open(out_dir / "surface_entropy.json", "w") as f:
+        json.dump(se, f, indent=2)
+    print("Surface entropy (distinct renderings per underlying state)")
+    print(f"  off={se['off_distinct_per_state']}  on={se['on_distinct_per_state']}  "
+          f"gain={se['gain_ratio']}x  mean_entropy={se['on_mean_entropy_bits']} bits "
+          f"(n={se['n_states_sampled']} states x {se['n_seeds_per_state']} seeds)")
     print()
 
     # Tokenizer coverage
