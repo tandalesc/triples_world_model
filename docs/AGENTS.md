@@ -159,3 +159,19 @@ before/after geometry contrasts.
   Run it locally first; it's a plumbing check, not a capability run.
 - ≥3 seeds before any sub-0.05-nat claim. Shuffle baseline before any "codebook is
   meaningful" claim.
+
+## Shipping script payloads to wartable jobs
+
+The `files` parameter's base64 round-trip has corrupted non-trivial Python payloads twice
+(observed: a `:.3f}` format-spec mangle and a Cyrillic-byte substitution). For anything
+beyond a few lines, **scp the script to the server first** (as `bot.claude`, to a
+world-readable path like `/tmp/<stage>/`), then have the wartable job invoke it by
+absolute path. Byte-exact, verified by diff. Inline-base64-decode-in-command is the
+least reliable option; avoid it.
+
+## Operator norm behavior under verb switching
+
+Rotation+scale verbs compound multiplicatively: long switched-verb rollouts are NOT
+norm-bounded (divergence blowup observed at 16 steps in probe batch 2). Any chain of
+operator applications longer than a few steps needs a log-r budget, periodic re-encode,
+or norm renormalization with scale tracked separately. Fixed-verb orbits are stable.

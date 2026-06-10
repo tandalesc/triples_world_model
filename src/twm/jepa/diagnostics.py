@@ -407,6 +407,488 @@ def _v_ablation_ce_gap(
 # Main entry point
 # ---------------------------------------------------------------------------
 
+# ===========================================================================
+# Entity-world diagnostics (campaign §3): action-recovery NMI, OOD ladder,
+# rollout fidelity. Config-gated under eval.entity_world (Task B).
+# ===========================================================================
+
+# Special token ids (mirrors _decode_ids; data.py / domain_bpe convention).
+_SPECIAL_IDS = (0, 1, 2, 3, 4)  # PAD, MASK, UNK, BOS, EOS
+_PAD_ID = 0
+_EOS_ID = 4
+
+
+def _encode_state(tokenizer, text: str, max_text_tokens: int, append_eos: bool = True):
+    """Tokenize one state -> (ids (T,) long, pad (T,) bool), matching JEPAChainDataset._encode.
+
+    Replicates data.py's 4-line BPE + <eos>-at-first-pad + pad-mask logic so the labeled
+    loader produces tensors bitwise-compatible with the training dataset (campaign §3.1)."""
+    T = max_text_tokens
+    pad_id = getattr(tokenizer, "pad_token_id", _PAD_ID)
+    ids = tokenizer.encode(text, max_length=T)
+    if append_eos:
+        ids = list(ids)
+        if pad_id in ids:
+            ids[ids.index(pad_id)] = _EOS_ID
+        else:
+            ids[-1] = _EOS_ID
+    ids_t = torch.tensor(ids, dtype=torch.long)
+    return ids_t, (ids_t == pad_id)
+
+
+def _load_labeled_split(
+    labeled_dir, split: str, tokenizer, max_text_tokens: int, append_eos: bool = True,
+    max_chains: int | None = None,
+) -> list[dict]:
+    """Load `{split}_labeled.jsonl` -> per-chain dicts (campaign §3.1).
+
+    Each record `{"chain":[...], "actions":["<verb>@<idx>",...], "types":[...]}` becomes
+    `{"chain": [str], "actions": [str], "types": [str], "ids": [(T,) long], "pad": [(T,) bool]}`
+    where ids/pad are the tokenized states (one per chain state) using the SAME encode
+    logic the dataset uses. Used by §3a (NMI) and §3c (rollout fidelity)."""
+    path = Path(labeled_dir) / f"{split}_labeled.jsonl"
+    chains: list[dict] = []
+    with open(path) as f:
+        for line in f:
+            rec = json.loads(line)
+            chain = rec["chain"]
+            ids_list, pad_list = [], []
+            for st in chain:
+                ids, pad = _encode_state(tokenizer, st, max_text_tokens, append_eos)
+                ids_list.append(ids)
+                pad_list.append(pad)
+            chains.append({
+                "chain": chain,
+                "actions": rec.get("actions", []),
+                "types": rec.get("types", []),
+                "ids": ids_list,
+                "pad": pad_list,
+            })
+            if max_chains is not None and len(chains) >= max_chains:
+                break
+    return chains
+
+
+def _load_manifest(labeled_dir) -> dict:
+    """Load manifest.json once (schema/profiles) — best-effort, {} if absent."""
+    path = Path(labeled_dir) / "manifest.json"
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _nmi(labels_a, labels_b) -> float:
+    """Normalized mutual info between two label sequences.
+
+    Uses sklearn if available; else a self-contained NMI from joint counts
+    (campaign §3a: implement the fallback so the GPU env without sklearn still reports it).
+    NMI = I(A;B) / sqrt(H(A)·H(B)), 0 when either has a single cluster (NMI undefined → 0)."""
+    a = np.asarray(labels_a)
+    b = np.asarray(labels_b)
+    if len(a) == 0:
+        return 0.0
+    try:
+        from sklearn.metrics import normalized_mutual_info_score
+        return float(normalized_mutual_info_score(a, b))
+    except Exception:
+        pass
+    # Fallback: factorize labels to dense ints, build the joint histogram.
+    ua = {v: i for i, v in enumerate(sorted(set(a.tolist())))}
+    ub = {v: i for i, v in enumerate(sorted(set(b.tolist())))}
+    na, nb = len(ua), len(ub)
+    if na <= 1 or nb <= 1:
+        return 0.0
+    n = len(a)
+    joint = np.zeros((na, nb), dtype=float)
+    for x, y in zip(a.tolist(), b.tolist()):
+        joint[ua[x], ub[y]] += 1.0
+    joint /= n
+    pa = joint.sum(axis=1)  # (na,)
+    pb = joint.sum(axis=0)  # (nb,)
+    # Mutual information.
+    mi = 0.0
+    for i in range(na):
+        for j in range(nb):
+            if joint[i, j] > 0:
+                mi += joint[i, j] * np.log(joint[i, j] / (pa[i] * pb[j]))
+    # Entropies; normalize by the arithmetic mean of H(A), H(B) to match sklearn's
+    # default `average_method="arithmetic"`.
+    ha = -(pa[pa > 0] * np.log(pa[pa > 0])).sum()
+    hb = -(pb[pb > 0] * np.log(pb[pb > 0])).sum()
+    denom = 0.5 * (ha + hb)
+    return float(mi / denom) if denom > 1e-12 else 0.0
+
+
+@torch.no_grad()
+def _infer_posterior_action(model, src_ids, src_pad, tgt_ids, tgt_pad, device) -> int:
+    """Hard argmax latent action v_hat from the pair posterior q(v|s_t,s_{t+1}) (campaign §3a).
+
+    Returns the argmax verb index (the same `model.transition` call the forward uses with
+    hard=True; we read v_logits argmax for a deterministic cluster id)."""
+    v_onehot, v_logits, _ = model.transition(
+        src_ids.to(device), src_pad.to(device),
+        tgt_ids.to(device), tgt_pad.to(device), tau=1.0, hard=True,
+    )
+    return int(v_logits.squeeze(0).argmax(-1).item())
+
+
+def _op_apply(model, k, v_onehot):
+    """Apply the operator+conditioning for ONE action, robust to the norm-budget contract.
+
+    Reuses model._apply_action (Task A may make it return (a, scale_delta) when the norm
+    budget is on; v3 returns a bare tensor). Returns just the transformed nouns `a` — the
+    entity eval suite does not consume the scale delta (that is the retraction probe, §4)."""
+    out = model._apply_action(k, v_onehot)
+    if isinstance(out, tuple):
+        return out[0]
+    return out
+
+
+def _strip_decode(tokenizer, ids: list[int]) -> str:
+    """Decode ids to text with the v2 special-token strip (shared with _decode_ids)."""
+    return _decode_ids(tokenizer, ids)
+
+
+@torch.no_grad()
+def _action_recovery_nmi(model, chains, device, out_dir, epoch_str) -> dict:
+    """(§3a) Action-recovery NMI vs oracle labels + shuffle baseline.
+
+    For each adjacent (s_t, s_{t+1}) pair in every chain, get the hard argmax posterior
+    latent action v_hat, and align it against the oracle label `actions[i]`:
+      - verb_only: strip @<idx> (which action?)
+      - verb_entity: full "<verb>@<idx>" (which action AND which entity moved?)
+    Report NMI(v_hat; verb_only), NMI(v_hat; verb_entity), and a shuffle baseline."""
+    v_hats: list[int] = []
+    verb_only: list[str] = []
+    verb_entity: list[str] = []
+
+    for ch in chains:
+        ids, pad, actions = ch["ids"], ch["pad"], ch["actions"]
+        n_pairs = min(len(ids) - 1, len(actions))
+        for i in range(n_pairs):
+            v_hat = _infer_posterior_action(
+                model,
+                ids[i].unsqueeze(0), pad[i].unsqueeze(0),
+                ids[i + 1].unsqueeze(0), pad[i + 1].unsqueeze(0),
+                device,
+            )
+            v_hats.append(v_hat)
+            lab = actions[i]
+            verb_entity.append(lab)
+            verb_only.append(lab.split("@", 1)[0])
+
+    metrics: dict = {}
+    if not v_hats:
+        return {"ent_action_nmi_verb": float("nan"),
+                "ent_action_nmi_verb_entity": float("nan"),
+                "ent_action_nmi_shuffle": float("nan"),
+                "ent_action_nmi_verb_pass": False}
+
+    nmi_verb = _nmi(v_hats, verb_only)
+    nmi_ve = _nmi(v_hats, verb_entity)
+
+    # Shuffle baseline: permute v_hat (destroys alignment) and recompute vs verb_only.
+    rng = np.random.RandomState(0)
+    shuffled = list(v_hats)
+    rng.shuffle(shuffled)
+    nmi_shuffle = _nmi(shuffled, verb_only)
+
+    metrics["ent_action_nmi_verb"] = nmi_verb
+    metrics["ent_action_nmi_verb_entity"] = nmi_ve
+    metrics["ent_action_nmi_shuffle"] = nmi_shuffle
+    # Pre-registered bar: >= 0.2 AND comfortably above shuffle.
+    metrics["ent_action_nmi_verb_pass"] = bool(nmi_verb >= 0.2 and nmi_verb > nmi_shuffle)
+    metrics["ent_action_n_pairs"] = len(v_hats)
+
+    # Cluster -> verb contingency artifact.
+    if out_dir is not None:
+        contingency: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for vh, verb in zip(v_hats, verb_only):
+            contingency[str(vh)][verb] += 1
+        with open(out_dir / f"action_nmi_contingency_{epoch_str}.json", "w") as f:
+            json.dump({k: dict(v) for k, v in contingency.items()}, f, indent=2)
+
+    return metrics
+
+
+@torch.no_grad()
+def _ood_ladder(model, tokenizer, labeled_dir, splits, subsample, device,
+                max_text_tokens, append_eos, out_dir, epoch_str,
+                hard_nn_per_query: int = 40) -> dict:
+    """(§3b) OOD ladder: CE + hard-MRR + chrF per split on subsampled adjacent pairs.
+
+    Reuses the existing v2 machinery (token_ce, _compute_retrieval_mrr, _chrf, decoder.generate)
+    on the FIRST `subsample` adjacent pairs flattened from each split's chains (deterministic)."""
+    metrics: dict = {}
+    mrr_by_split: dict[str, float] = {}
+
+    for split in splits:
+        chains = _load_labeled_split(labeled_dir, split, tokenizer, max_text_tokens, append_eos)
+        # Flatten to adjacent pairs (deterministic order), with originating chain id.
+        pairs = []  # (src_ids, src_pad, tgt_ids, tgt_pad, chain_idx)
+        for ci, ch in enumerate(chains):
+            ids, pad = ch["ids"], ch["pad"]
+            for i in range(len(ids) - 1):
+                pairs.append((ids[i], pad[i], ids[i + 1], pad[i + 1], ci))
+                if len(pairs) >= subsample:
+                    break
+            if len(pairs) >= subsample:
+                break
+
+        if not pairs:
+            continue
+
+        ce_vals: list[float] = []
+        chrf_vals: list[float] = []
+        all_zhat, all_z, chain_ids = [], [], []
+        samples = []
+
+        for (si, sp, ti, tp, cid) in pairs:
+            si_b = si.unsqueeze(0).to(device)
+            sp_b = sp.unsqueeze(0).to(device)
+            ti_b = ti.unsqueeze(0).to(device)
+            tp_b = tp.unsqueeze(0).to(device)
+            out = model.forward_v2(si_b, sp_b, ti_b, tp_b, tau=1.0, hard=True)
+
+            logits = out.get("logits")
+            if logits is not None:
+                ce_vals.append(token_ce(logits, ti_b, pad_id=_PAD_ID).item())
+
+            zhat, z_tgt = out.get("zhat"), out.get("z_target")
+            if zhat is not None and z_tgt is not None:
+                all_zhat.append(zhat.squeeze(0).cpu())
+                all_z.append(z_tgt.squeeze(0).cpu())
+                chain_ids.append(cid)
+
+            # chrF on greedy-decoded a*.
+            a = out.get("a")
+            if a is not None and hasattr(model, "decoder"):
+                gen_ids = model.decoder.generate(a, max_tokens=max_text_tokens, temperature=0.0)
+                gen_text = _strip_decode(tokenizer, gen_ids[0].tolist())
+                gold_text = _strip_decode(tokenizer, ti.tolist())
+                chrf_vals.append(_chrf(gen_text, gold_text))
+                if len(samples) < 16:
+                    samples.append({
+                        "text_t": _strip_decode(tokenizer, si.tolist()),
+                        "gold_t1": gold_text, "gen_greedy": gen_text,
+                    })
+
+        if ce_vals:
+            metrics[f"ent_{split}_ce"] = float(np.mean(ce_vals))
+        if chrf_vals:
+            metrics[f"ent_{split}_chrf"] = float(np.mean(chrf_vals))
+        if len(all_zhat) >= 2:
+            Zhat = torch.stack(all_zhat)
+            Z = torch.stack(all_z)
+            mrr = _compute_retrieval_mrr(Zhat, Z, chain_ids, hard_nn_per_query=hard_nn_per_query)
+            metrics[f"ent_{split}_hard_mrr"] = mrr["hard_mrr"]
+            mrr_by_split[split] = mrr["hard_mrr"]
+
+        if out_dir is not None and samples:
+            with open(out_dir / f"entity_samples_{split}_{epoch_str}.json", "w") as f:
+                json.dump(samples, f, indent=2)
+
+    # Ladder monotonicity (iid >= near > far) on hard-MRR.
+    ladder = ["test_iid", "test_ood_near", "test_ood_far"]
+    seq = [mrr_by_split[s] for s in ladder if s in mrr_by_split]
+    if len(seq) >= 2:
+        metrics["ent_ladder_monotone_mrr"] = bool(
+            all(seq[i] >= seq[i + 1] - 1e-9 for i in range(len(seq) - 1))
+        )
+    return metrics
+
+
+@torch.no_grad()
+def _rollout_fidelity(model, tokenizer, chains, max_depth, device,
+                      max_text_tokens, out_dir, epoch_str) -> dict:
+    """(§3c) Rollout fidelity depth 1..D, teacher-forced AND prior-sampled actions.
+
+    For each chain (length >= max_depth+1 so depth D has a gold target):
+      1. encode s0 -> k0.
+      2. TF: action from pair posterior q(v|s_{h-1},s_h) on GOLD states.
+         PR: action from prior p(v|pooled current latent), current latent = ROLLED state.
+      3. apply operators stepwise from k0 (threading conditioning + norm budget via _op_apply).
+      4. at each depth d greedy-decode decoder.generate(a_d) -> exact-match + chrF vs gold chain[d].
+
+    Depth-1 teacher-forced reduces to the standard forward (single apply on k0 with the
+    posterior action) — the test asserts this equivalence."""
+    usable = [ch for ch in chains if len(ch["ids"]) >= max_depth + 1 and len(ch["actions"]) >= max_depth]
+    n_skipped = len(chains) - len(usable)
+
+    # Accumulators: depth -> list of exact/chrf for each source.
+    acc = {src: {d: {"exact": [], "chrf": []} for d in range(1, max_depth + 1)}
+           for src in ("tf", "pr")}
+    transcripts = []
+
+    for ch in usable:
+        ids, pad, gold = ch["ids"], ch["pad"], ch["chain"]
+        # Encode s0 -> k0 (start nouns).
+        _, k0, _ = model.encoder(ids[0].unsqueeze(0).to(device), pad[0].unsqueeze(0).to(device))
+
+        row = {"types": ch["types"], "tf": {}, "pr": {}}
+        for src in ("tf", "pr"):
+            k = k0
+            for d in range(1, max_depth + 1):
+                if src == "tf":
+                    # Posterior on gold (s_{d-1}, s_d).
+                    v_onehot, v_logits, _ = model.transition(
+                        ids[d - 1].unsqueeze(0).to(device), pad[d - 1].unsqueeze(0).to(device),
+                        ids[d].unsqueeze(0).to(device), pad[d].unsqueeze(0).to(device),
+                        tau=1.0, hard=True,
+                    )
+                    v = int(v_logits.squeeze(0).argmax(-1).item())
+                else:
+                    # Prior on the ROLLED current latent's source pool. The prior reads the
+                    # encoder pool of the current *text*; in autonomous rollout the canonical
+                    # source is the decoded current state. We approximate with the prior over
+                    # the rolled state's decode (greedy), matching model.rollout's prior path.
+                    if d == 1:
+                        pool = model._prior_pool(
+                            ids[0].unsqueeze(0).to(device), pad[0].unsqueeze(0).to(device)
+                        )
+                    else:
+                        pool = model._prior_pool(prev_gen_ids, prev_gen_pad)
+                    p_logits = model.prior(pool)
+                    v = int(p_logits.squeeze(0).argmax(-1).item())
+
+                v_oh = F.one_hot(
+                    torch.tensor([v], device=device), num_classes=model.n_verbs
+                ).to(k.dtype)
+                a = _op_apply(model, k, v_oh)
+                gen_ids = model.decoder.generate(a, max_tokens=max_text_tokens, temperature=0.0)
+                gen_text = _strip_decode(tokenizer, gen_ids[0].tolist())
+                gold_text = gold[d]
+                acc[src][d]["exact"].append(float(gen_text.strip() == gold_text.strip()))
+                acc[src][d]["chrf"].append(_chrf(gen_text, gold_text))
+                row[src][f"d{d}"] = gen_text
+                # next hop composes on this hop's rolled output.
+                k = a
+                if src == "pr":
+                    # Re-encode the generated text for the next prior pool (autonomous).
+                    gen_full = gen_ids[0].tolist()
+                    gi, gp = _pad_gen_ids(gen_full, max_text_tokens)
+                    prev_gen_ids = gi.unsqueeze(0).to(device)
+                    prev_gen_pad = gp.unsqueeze(0).to(device)
+        if len(transcripts) < 16:
+            for d in range(1, max_depth + 1):
+                row.setdefault("gold", {})[f"d{d}"] = gold[d]
+            transcripts.append(row)
+
+    metrics: dict = {}
+    for src in ("tf", "pr"):
+        for d in range(1, max_depth + 1):
+            ex = acc[src][d]["exact"]
+            cf = acc[src][d]["chrf"]
+            metrics[f"ent_rollout_{src}_exact_d{d}"] = float(np.mean(ex)) if ex else float("nan")
+            metrics[f"ent_rollout_{src}_chrf_d{d}"] = float(np.mean(cf)) if cf else float("nan")
+    metrics["ent_rollout_n_chains"] = len(usable)
+    metrics["ent_rollout_n_skipped"] = n_skipped
+
+    if out_dir is not None and transcripts:
+        with open(out_dir / f"entity_rollout_{epoch_str}.json", "w") as f:
+            json.dump(transcripts, f, indent=2)
+    return metrics
+
+
+def _pad_gen_ids(gen_ids: list[int], max_text_tokens: int):
+    """Pad/truncate a generated id list to (T,) long + (T,) bool pad mask.
+
+    Trims everything from the first <eos> onward (the decoded current state) and pads with
+    PAD so the prior's encoder pool sees a clean re-encode (campaign §3c PR path)."""
+    ids = list(gen_ids)
+    if _EOS_ID in ids:
+        ids = ids[: ids.index(_EOS_ID)]
+    ids = ids[:max_text_tokens]
+    ids = ids + [_PAD_ID] * (max_text_tokens - len(ids))
+    t = torch.tensor(ids, dtype=torch.long)
+    return t, (t == _PAD_ID)
+
+
+@torch.no_grad()
+def eval_entity_world(model, ew_cfg, device, tokenizer, max_text_tokens: int = 64,
+                      out_dir=None, epoch: int | None = None,
+                      append_eos: bool = True) -> dict:
+    """Entity-world diagnostics entry point (campaign §3). Returns a flat dict of `ent_*`
+    scalars; saves per-family artifact JSON to out_dir.
+
+    Three metric families:
+      (a) action-recovery NMI vs oracle labels + shuffle  [§3a]
+      (b) OOD ladder CE + hard-MRR + chrF per split        [§3b]
+      (c) rollout fidelity depth 1..D, TF + PR             [§3c]
+
+    Robust to a black-box model (gated MLP operator): rollout still runs via _op_apply,
+    which unpacks the norm-budget tuple contract if present."""
+    device = torch.device(device)
+    model = model.to(device)
+    model.eval()
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+    epoch_str = f"epoch{epoch}" if epoch is not None else "latest"
+
+    labeled_dir = ew_cfg.labeled_dir
+    splits = list(ew_cfg.splits)
+    subsample = ew_cfg.subsample
+    n_rollout = ew_cfg.n_rollout_chains
+    max_depth = ew_cfg.rollout_max_depth
+    nmi_split = ew_cfg.action_recovery_split
+
+    _load_manifest(labeled_dir)  # warm/validate (schema unused by this suite directly)
+    metrics: dict = {}
+
+    # (a) action-recovery NMI — uses the nmi split's labeled twin.
+    try:
+        nmi_chains = _load_labeled_split(
+            labeled_dir, nmi_split, tokenizer, max_text_tokens, append_eos,
+            max_chains=max(subsample, 64),
+        )
+        metrics.update(_action_recovery_nmi(model, nmi_chains, device, out_dir, epoch_str))
+    except Exception as exc:
+        metrics["_ent_action_nmi_error"] = str(exc)
+
+    # (b) OOD ladder.
+    try:
+        metrics.update(_ood_ladder(
+            model, tokenizer, labeled_dir, splits, subsample, device,
+            max_text_tokens, append_eos, out_dir, epoch_str,
+        ))
+    except Exception as exc:
+        metrics["_ent_ladder_error"] = str(exc)
+
+    # (c) rollout fidelity — from test_iid chains long enough for depth D.
+    try:
+        roll_chains = _load_labeled_split(
+            labeled_dir, "test_iid", tokenizer, max_text_tokens, append_eos,
+            max_chains=n_rollout * 4,  # over-read; filter to length >= D+1, cap below
+        )
+        # Keep only chains long enough, then cap to n_rollout.
+        roll_chains = [c for c in roll_chains if len(c["ids"]) >= max_depth + 1][:n_rollout]
+        metrics.update(_rollout_fidelity(
+            model, tokenizer, roll_chains, max_depth, device,
+            max_text_tokens, out_dir, epoch_str,
+        ))
+    except Exception as exc:
+        metrics["_ent_rollout_error"] = str(exc)
+
+    # Normalise scalars to Python primitives (mirror eval_diagnostics_v2 tail).
+    out: dict = {}
+    for km, vm in metrics.items():
+        if isinstance(vm, (bool, np.bool_)):
+            out[km] = bool(vm)
+        elif isinstance(vm, (int, np.integer)):
+            out[km] = int(vm)
+        elif isinstance(vm, str):
+            out[km] = vm
+        else:
+            try:
+                out[km] = float(vm)
+            except (TypeError, ValueError):
+                out[km] = vm
+    return out
+
+
 def eval_diagnostics_v2(
     model,
     dataset,

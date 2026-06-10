@@ -411,6 +411,11 @@ class ModelHParams:
     use_polar_conditioning: bool = False  # master switch for the H phase-offset path
     use_kind_head: bool = False           # §7 diagnostic kind readout; default off
     kind_codebook_size: int = 16          # K, only read when use_kind_head=True
+    # entity-campaign norm budget (entity §1.5). DEFAULT FALSE ⟹ the operator returns a
+    # bare tensor, _apply_action returns a bare tensor, no scale_readout_proj is built, no
+    # s_acc is threaded — BITWISE v3 GLUCOSE behavior. Entity (structured) configs flip it
+    # true; the model only constructs scale_readout_proj when it is on (entity §1.0/§1.5).
+    use_norm_budget: bool = False
     # v2 nested heads (design §10). default_factory so v1 configs without these blocks
     # still construct a valid ModelHParams.
     transition: TransitionConfig = field(default_factory=TransitionConfig)
@@ -438,6 +443,25 @@ class OptimConfig:
 
 
 @dataclass
+class EntityWorldEvalConfig:
+    """Entity-world diagnostics block (campaign §3.0). eval.entity_world.
+
+    Config-gated (default DISABLED) so a plain GLUCOSE config runs the v3 diagnostics
+    exactly as today. Entity configs flip `enabled=true` and point at the labeled
+    splits. Owned by Task B (the eval suite).
+    """
+    enabled: bool = False
+    labeled_dir: str = "data/entity_world"  # holds {split}_labeled.jsonl + manifest.json
+    splits: list[str] = field(
+        default_factory=lambda: ["test_iid", "test_ood_near", "test_ood_far"]
+    )
+    subsample: int = 512                      # per-split cap for the ladder (§3b)
+    n_rollout_chains: int = 128               # §3c rollout fidelity
+    rollout_max_depth: int = 4                # depth 1..4 greedy decode vs gold
+    action_recovery_split: str = "test_iid"   # §3a NMI split (uses its _labeled twin)
+
+
+@dataclass
 class EvalConfig:
     every_epochs: int = 5
     n_examples: int = 512
@@ -445,6 +469,8 @@ class EvalConfig:
     # v2 generated-text diagnostics (design §8 / §10):
     n_text_samples: int = 16
     temperatures: list[float] = field(default_factory=lambda: [0.7, 1.0])
+    # entity-world campaign diagnostics (campaign §3); absent/disabled ⟹ no entity metrics.
+    entity_world: EntityWorldEvalConfig = field(default_factory=EntityWorldEvalConfig)
 
 
 @dataclass
@@ -575,6 +601,7 @@ __all__ = [
     "EMAConfig",
     "OptimConfig",
     "EvalConfig",
+    "EntityWorldEvalConfig",
     "OperatorFitPass2Config",
     # Concrete classes (lazily re-exported once their modules land)
     "RotationScaleOperator",

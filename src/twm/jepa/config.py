@@ -36,6 +36,7 @@ from twm.jepa import (
     EMAConfig,
     OptimConfig,
     EvalConfig,
+    EntityWorldEvalConfig,
     OperatorFitPass2Config,
 )
 
@@ -57,6 +58,19 @@ def _build_loss(data: dict) -> LossConfig:
     return LossConfig(
         sigreg=sigreg, verb=verb, nce=nce, unroll=unroll, **_only_known(LossConfig, data)
     )
+
+
+def _build_eval(data: dict) -> EvalConfig:
+    """Parse the eval block, including the nested eval.entity_world block (campaign §3.0).
+
+    Mirrors `_build_loss`: pop the nested dict before the flat overlay so the raw dict
+    never reaches EvalConfig(**...) as a scalar field. Absent ⟹ a disabled default
+    EntityWorldEvalConfig (back-compat: a GLUCOSE config has no entity metrics)."""
+    data = dict(data)
+    entity_world = EntityWorldEvalConfig(
+        **_only_known(EntityWorldEvalConfig, data.pop("entity_world", {}))
+    )
+    return EvalConfig(entity_world=entity_world, **_only_known(EvalConfig, data))
 
 
 def _build_model(profile: str, model_json: dict) -> ModelHParams:
@@ -128,7 +142,7 @@ class JEPAConfig:
             loss=_build_loss(data.get("loss", {})),
             ema=EMAConfig(**_only_known(EMAConfig, data.get("ema", {}))),
             optim=OptimConfig(**_only_known(OptimConfig, data.get("optim", {}))),
-            eval=EvalConfig(**_only_known(EvalConfig, data.get("eval", {}))),
+            eval=_build_eval(data.get("eval", {})),
             operator_fit_pass2=OperatorFitPass2Config(
                 **_only_known(
                     OperatorFitPass2Config, data.get("operator_fit_pass2", {})
@@ -161,5 +175,6 @@ __all__ = [
     "EMAConfig",
     "OptimConfig",
     "EvalConfig",
+    "EntityWorldEvalConfig",
     "OperatorFitPass2Config",
 ]

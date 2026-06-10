@@ -138,6 +138,7 @@ class JEPAOperatorModelV2(nn.Module):
         use_polar_conditioning: bool = False,
         use_kind_head: bool = False,
         kind_codebook_size: int = 16,
+        use_norm_budget: bool = False,
     ):
         super().__init__()
         self.encoder = encoder
@@ -182,8 +183,24 @@ class JEPAOperatorModelV2(nn.Module):
         if hasattr(self.encoder, "token_emb") and hasattr(self.ema.encoder, "token_emb"):
             self.ema.encoder.token_emb = self.encoder.token_emb
 
+        # entity-campaign norm budget (entity §1.0–§1.2). When ON, the operator
+        # renormalizes each slot's modulus profile to its pre-step norm and returns the
+        # extracted per-slot log-scale; the model accumulates it as `s_acc (B, M)` and
+        # makes it visible to the anchor/readout (InfoNCE/decoder-conditioning) geometry —
+        # NOT the decoder memory (the leakage invariant is unchanged; the decoder still
+        # sees only `a*`). The augmented slot `concat[a, s_acc] (B, M, dn+1)` is projected
+        # back to dn by `scale_readout_proj` (the ONLY new trainable param the budget adds:
+        # (dn+1)*dn) before the existing Readout, so Readout is untouched and the pooled
+        # InfoNCE vector now carries the irreversibility scalar. Built ONLY when on
+        # (default off ⟹ bitwise v3: no extra param, no scale threading).
+        self.use_norm_budget = use_norm_budget
+        if use_norm_budget:
+            self.scale_readout_proj = nn.Linear(d_noun + 1, d_noun)
+        else:
+            self.scale_readout_proj = None
+
     # ------------------------------------------------------------------ action path
-    def _apply_action(self, k: torch.Tensor, v_onehot: torch.Tensor) -> torch.Tensor:
+    def _apply_action(self, k: torch.Tensor, v_onehot: torch.Tensor):
         """a* = B_v k for ONE sequence-level action per pair (design §2.3).
 
         v_onehot: (B, V) hard straight-through one-hot. Broadcast to (B, M, V) so the
@@ -195,13 +212,40 @@ class JEPAOperatorModelV2(nn.Module):
         `θ_eff = θ_v + H(|k|)`. The offset is computed from the PRE-step modulus (with
         gradient, design §3.1) and passed to the operator. Zero-init H ⟹ offset == 0 at
         step 0 ⟹ identical to v2.0.
+
+        Return contract (entity §1.3):
+          - norm budget OFF (default): returns the bare `a (B, M, dn)` — BITWISE v2/v3.
+          - norm budget ON: passes `norm_budget=True` to the operator and returns
+            `(a, scale_delta)` where `scale_delta (B, M)` is this step's per-slot
+            log-scale (the structured operator's `log_rho`; the black-box's zeros).
+            `self.use_norm_budget` drives the branch, so this stays operator-agnostic.
         """
         B, M, _ = k.shape
         v_slots = v_onehot.unsqueeze(1).expand(B, M, -1)  # (B, M, V)
-        if self.conditioner is not None:
-            theta_offset = self.conditioner(k)            # (B, M, nb), zero at init
+        theta_offset = self.conditioner(k) if self.conditioner is not None else None
+        if self.use_norm_budget:
+            return self.operator.apply(
+                k, v_slots, theta_offset=theta_offset, norm_budget=True
+            )  # (a, scale_delta)
+        if theta_offset is not None:
             return self.operator.apply(k, v_slots, theta_offset=theta_offset)
         return self.operator.apply(k, v_slots)            # (B, M, dn)
+
+    # ------------------------------------------------------------------ readout helper
+    def _anchor_pool(self, a: torch.Tensor, s_acc: torch.Tensor | None) -> torch.Tensor:
+        """Pooled readout over `a*` for the InfoNCE/L_pred anchor (entity §1.1).
+
+        When the norm budget is on, the accumulated per-slot log-scale `s_acc (B, M)` is
+        concatenated as an extra channel (`a_aug = concat[a, s_acc] (B, M, dn+1)`) and
+        projected back to dn by `scale_readout_proj` BEFORE the existing Readout, so the
+        irreversibility scalar enters the anchor/readout geometry. The decoder memory
+        stays `a` (the leakage invariant is unchanged — `s_acc` never reaches the
+        decoder). Budget off ⟹ this is exactly `self.readout(a)` (bitwise v3).
+        """
+        if self.scale_readout_proj is not None and s_acc is not None:
+            a_aug = torch.cat([a, s_acc.unsqueeze(-1).to(a.dtype)], dim=-1)  # (B,M,dn+1)
+            a = self.scale_readout_proj(a_aug)                              # (B,M,dn)
+        return self.readout(a)
 
     # ------------------------------------------------------------------ forward
     def forward(
@@ -241,7 +285,15 @@ class JEPAOperatorModelV2(nn.Module):
         p_logits = self.prior(pool_t)
 
         # --- operator-transformed nouns: the ONLY decoder conditioning channel ---
-        a = self._apply_action(k, v_onehot)  # (B, M, dn)
+        # entity §1.3: with the budget on, _apply_action returns (a, scale_delta); the
+        # single-hop accumulator s_acc == scale_delta (s starts at 0). Off ⟹ bare a.
+        if self.use_norm_budget:
+            a, scale_delta = self._apply_action(k, v_onehot)  # (B,M,dn), (B,M)
+            s_acc = scale_delta
+        else:
+            a = self._apply_action(k, v_onehot)               # (B, M, dn)
+            scale_delta = None
+            s_acc = None
 
         # --- token decoder: memory = a* ONLY (structural leakage block) ---
         logits = self.decoder(a, tgt_ids, tgt_pad)  # (B, T, V)
@@ -254,6 +306,10 @@ class JEPAOperatorModelV2(nn.Module):
             "v_logits": v_logits,
             "p_logits": p_logits,
             "logits": logits,
+            # entity §1.3: scale_delta / s_acc are None when the budget is off (back-compat;
+            # downstream guards on `is not None`).
+            "scale_delta": scale_delta,
+            "s_acc": s_acc,
         }
 
         # v2.1 optional kind readout (design §7): diagnostic label only, never routes.
@@ -262,7 +318,7 @@ class JEPAOperatorModelV2(nn.Module):
 
         # --- L_pred aux branch (optional; design §5) ---
         if self.use_pred:
-            pooled = self.readout(a)        # (B, dn)
+            pooled = self._anchor_pool(a, s_acc)  # (B, dn) — carries s_acc when budget on
             zhat = self.predictor(pooled)   # (B, dn)
             with torch.no_grad():
                 z = self.ema.pool_raw(tgt_ids, tgt_pad)  # (B, dn) raw-noun pool of t+1
@@ -331,6 +387,15 @@ class JEPAOperatorModelV2(nn.Module):
             logits    (B, T, V)   token decoder logits over the hop target
             zhat      (B, dn)     L_pred/InfoNCE anchor over a* (None if use_pred=False)
             z_target  (B, dn)     EMA raw-noun pool of this hop's target, stop-grad (or None)
+            scale_delta (B, M)    this hop's per-slot log_rho (entity §1.3; None if budget off)
+            s_acc     (B, M)      accumulated log-scale AFTER this hop (None if budget off)
+
+        Norm budget (entity §1.3): with `use_norm_budget` on, the loop additionally
+        threads a per-slot log-scale accumulator `s_acc (B, M)` (zero at start) and stores
+        each hop's `scale_delta` for the retraction probe's exact inverse. The anchor pool
+        sees the accumulated `s_acc` through `scale_readout_proj` (irreversibility enters
+        the InfoNCE geometry); the decoder memory stays `a` (leakage unchanged). Both keys
+        are None when the budget is off (back-compat; downstream guards on `is not None`).
         """
         # --- start nouns: text_t0 only (no future info reaches k0) ---
         _, k0, _ = self.encoder(s0_ids, s0_pad)  # verb_logits IGNORED
@@ -342,6 +407,9 @@ class JEPAOperatorModelV2(nn.Module):
 
         outs: list[dict] = []
         k_in = k0
+        # entity §1.3: per-slot log-scale accumulator, scale=1.0 (log 0) at start. Only
+        # threaded when the budget is on; otherwise stays None (bitwise v3).
+        s_acc = torch.zeros(k0.shape[0], k0.shape[1], device=k0.device) if self.use_norm_budget else None
         for src_ids, src_pad, tgt_ids, tgt_pad in hops:
             # --- per-hop posterior q(v | src, tgt): own discrete action per hop (§2.2) ---
             v_onehot, v_logits, pool_src = self.transition(
@@ -351,7 +419,12 @@ class JEPAOperatorModelV2(nn.Module):
             p_logits = self.prior(pool_src)
 
             # --- composed application: conditioning reads |k_in| at THIS hop (§2.3) ---
-            a = self._apply_action(k_in, v_onehot)  # θoff = H(|k_in|)
+            if self.use_norm_budget:
+                a, scale_delta = self._apply_action(k_in, v_onehot)  # (B,M,dn), (B,M)
+                s_acc = s_acc + scale_delta                          # log-domain accumulate
+            else:
+                a = self._apply_action(k_in, v_onehot)  # θoff = H(|k_in|)
+                scale_delta = None
 
             # --- token decoder: memory = a* ONLY (structural leakage block) ---
             logits = self.decoder(a, tgt_ids, tgt_pad)
@@ -364,13 +437,15 @@ class JEPAOperatorModelV2(nn.Module):
                 "v_logits": v_logits,
                 "p_logits": p_logits,
                 "logits": logits,
+                "scale_delta": scale_delta,
+                "s_acc": s_acc if self.use_norm_budget else None,
             }
             if self.kind_head is not None:
                 hop_out["kind_ids"] = self.kind_head.assign(k_in)
 
             # --- L_pred / InfoNCE anchor + EMA target for this hop (§2.4) ---
             if self.use_pred:
-                pooled = self.readout(a)         # (B, dn)
+                pooled = self._anchor_pool(a, hop_out["s_acc"])  # carries s_acc when on
                 zhat = self.predictor(pooled)    # (B, dn)
                 with torch.no_grad():
                     z = self.ema.pool_raw(tgt_ids, tgt_pad)  # EMA pool of THIS hop's target
@@ -432,9 +507,16 @@ class JEPAOperatorModelV2(nn.Module):
                 v = p_logits.argmax(dim=-1)  # (B,)
 
         v_onehot = F.one_hot(v, num_classes=self.n_verbs).to(k.dtype)  # (B, V)
-        a = self._apply_action(k, v_onehot)  # (B, M, dn)
+        # entity §1.3: _apply_action returns (a, scale_delta) when the budget is on; the
+        # decoder generates from `a` only (leakage unchanged). scale_delta surfaces in the
+        # rollout dict so callers (rollout-fidelity eval, retraction probe) can thread it.
+        if self.use_norm_budget:
+            a, scale_delta = self._apply_action(k, v_onehot)  # (B,M,dn), (B,M)
+        else:
+            a = self._apply_action(k, v_onehot)  # (B, M, dn)
+            scale_delta = None
         gen_ids = self.decoder.generate(a, max_tokens=max_tokens, temperature=temperature)
-        return {"v": v, "a": a, "gen_ids": gen_ids}
+        return {"v": v, "a": a, "gen_ids": gen_ids, "scale_delta": scale_delta}
 
     def _prior_pool(self, src_ids, src_pad) -> torch.Tensor:
         """Masked-mean pool of text_t through the (shared) trunk, for the prior at
@@ -457,15 +539,27 @@ class JEPAOperatorModelV2(nn.Module):
         PRE-step modulus) back to `undo_latent` for an exact inverse — the offset must
         never be recomputed from the post-step noun under a scaling verb (§3.3). When
         conditioning is off, returns just `a` (v2.0 signature preserved).
+
+        entity §1.3: when the norm budget is on, `step_latent` ALSO returns the per-slot
+        `scale_delta` (the operator's `log_rho`) so the caller threads it back to
+        `undo_latent(scale_delta=...)` for an EXACT inverse (the budget renormalizes the
+        radius, so the undo needs the stored scale). The return is then
+        `(a, theta_offset, scale_delta)` (theta_offset is None if no conditioner) —
+        threaded exactly like theta_offset is today.
         """
         v_slots = self._verb_to_slots(k, verb_idx)
-        if self.conditioner is not None:
-            theta_offset = self.conditioner(k)
+        theta_offset = self.conditioner(k) if self.conditioner is not None else None
+        if self.use_norm_budget:
+            a, scale_delta = self.operator.apply(
+                k, v_slots, theta_offset=theta_offset, norm_budget=True
+            )
+            return a, theta_offset, scale_delta
+        if theta_offset is not None:
             a = self.operator.apply(k, v_slots, theta_offset=theta_offset)
             return a, theta_offset
         return self.operator.apply(k, v_slots)
 
-    def undo_latent(self, a: torch.Tensor, verb_idx, theta_offset=None) -> torch.Tensor:
+    def undo_latent(self, a: torch.Tensor, verb_idx, theta_offset=None, scale_delta=None) -> torch.Tensor:
         """Exact undo: k = B_v^{-1} a (structural inverse from the operator).
 
         v2.1 (design §4.2): pass the `theta_offset` returned by `step_latent` for an
@@ -473,8 +567,20 @@ class JEPAOperatorModelV2(nn.Module):
         recomputed from `|a|` — EXACT for pure-rotation verbs (modulus preserved, so
         `H(|a|) == H(|k|)`, design §3.3) but only approximate under a scaling verb. The
         identity-persistence diagnostic (§8.1) asserts the pure-rotation case.
+
+        entity §1.3: when the norm budget is on, pass the `scale_delta` returned by
+        `step_latent` so the inverse re-applies the renormalized radius BEFORE inverting
+        — the round-trip is then exact including the tracked scale. The budget undo
+        REQUIRES `scale_delta` (the operator asserts it).
         """
         v_slots = self._verb_to_slots(a, verb_idx)
+        if self.use_norm_budget:
+            if self.conditioner is not None and theta_offset is None:
+                theta_offset = self.conditioner(a)
+            return self.operator.inverse_apply(
+                a, v_slots, theta_offset=theta_offset,
+                norm_budget=True, scale_delta=scale_delta,
+            )
         if self.conditioner is not None:
             if theta_offset is None:
                 theta_offset = self.conditioner(a)
@@ -628,6 +734,7 @@ def build_jepa_model_v2(cfg, token_emb: nn.Module):
         use_polar_conditioning=getattr(m, "use_polar_conditioning", False),
         use_kind_head=getattr(m, "use_kind_head", False),
         kind_codebook_size=getattr(m, "kind_codebook_size", 16),
+        use_norm_budget=getattr(m, "use_norm_budget", False),
     )
 
 

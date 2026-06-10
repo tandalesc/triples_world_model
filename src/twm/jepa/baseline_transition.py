@@ -26,11 +26,15 @@ gotcha (GELU/sigmoid are bf16-unstable at large magnitude).
 
 from __future__ import annotations
 
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from . import Operator
+
+_LOG = logging.getLogger(__name__)
 
 
 def _autocast_off(device_type: str):
@@ -62,6 +66,7 @@ class GatedMLPTransition(Operator):
     """
 
     GATE_INIT = -4.0  # sigmoid(-4) ≈ 0.018 ⟹ near-identity transition at init (§4.2)
+    _warned_norm_budget = False  # class-level: one warning per process, not per step
 
     def __init__(
         self,
@@ -126,14 +131,31 @@ class GatedMLPTransition(Operator):
         k: torch.Tensor,
         v: torch.Tensor,
         theta_offset: torch.Tensor | None = None,
+        *,
+        norm_budget: bool = False,
     ) -> torch.Tensor:
         """a* = k + sigmoid(gate[v]) ⊙ W2(GELU(W1([k ; e_v]))).
 
         v hard (B,M) long OR soft (B,M,V) float. `theta_offset` is ACCEPTED for
         signature parity with the polar call site and IGNORED (the gated MLP has no
         phase split — §4.1). fp32 under autocast-off (numerics gotcha).
+
+        norm_budget (entity §1.4): the black-box has no modulus/phase split and no
+        scale notion, so the flag is ACCEPTED-AND-IGNORED (signature parity with the
+        structured operator, exactly like `theta_offset`). It logs a ONE-TIME warning
+        (guarded by the class-level `_warned_norm_budget`) and, to keep
+        `model._apply_action` branch-free across operator families, returns the SAME
+        `(a, scale_delta)` arity as the structured operator with `scale_delta =
+        zeros(B, M)` (log-scale 0 ⟹ scale 1.0 — "this transition exposes no scale").
         """
         del theta_offset  # accepted-and-ignored (signature parity with the polar call site)
+        if norm_budget and not type(self)._warned_norm_budget:
+            type(self)._warned_norm_budget = True
+            _LOG.warning(
+                "GatedMLPTransition received norm_budget=True but has no modulus/phase "
+                "split or scale notion (entity §1.4): the flag is ignored and the "
+                "tracked scale stays 0 (the black-box exposes no irreversibility scalar)."
+            )
         with _autocast_off(k.device.type):
             kf = k.float()
             e, g = self._gather_verb(v)                     # (...,d_e), (...,dn)
@@ -142,13 +164,21 @@ class GatedMLPTransition(Operator):
             h = F.gelu(self.W1(inp))                        # (..., d_h)
             delta = self.W2(h)                              # (..., dn)
             out = kf + torch.sigmoid(g.float()) * delta     # residual + per-verb gate
-        return out.to(k.dtype)
+        out = out.to(k.dtype)
+        if norm_budget:
+            B, M = k.shape[0], k.shape[1]
+            scale_delta = torch.zeros(B, M, dtype=k.dtype, device=k.device)
+            return out, scale_delta                         # (a, zeros) — branch-free arity
+        return out
 
     def inverse_apply(
         self,
         a: torch.Tensor,
         v: torch.Tensor,
         theta_offset: torch.Tensor | None = None,
+        *,
+        norm_budget: bool = False,
+        scale_delta: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """NO INVERSE — black-box transition (engram-wm baseline). RAISES.
 
@@ -156,6 +186,11 @@ class GatedMLPTransition(Operator):
         baseline deliberately has none (that is the point of the contrast).
         `model.undo_latent` / the pet-demo path is not used in v3 training, so this never
         executes in the train loop.
+
+        `norm_budget`/`scale_delta` are ACCEPTED for signature parity with the structured
+        operator but change NOTHING — there is no inverse regardless (entity §1.4). The
+        retraction probe (§4) relies on this raise: the structured operator can retract an
+        event, the black-box cannot, and that asymmetry IS the experiment.
         """
         raise NotImplementedError(
             "GatedMLPTransition is a black-box transition with no structural inverse "

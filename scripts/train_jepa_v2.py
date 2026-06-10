@@ -326,7 +326,28 @@ def maybe_eval_diagnostics(model, dataset, device, cfg, epoch, tokenizer):
             accepted = {n for n in sig.parameters}
             candidate = {k: v for k, v in candidate.items() if k in accepted}
         metrics = eval_diagnostics_v2(**candidate)
-        if isinstance(metrics, dict):
+        if not isinstance(metrics, dict):
+            metrics = {}
+
+        # Entity-world diagnostics hook (campaign §3.5): only when enabled. The labeled
+        # splits are loaded directly by eval_entity_world (not the train dataset), so this
+        # uses `cfg` + the real tokenizer rather than the wrapped hop-1 view above.
+        ew_cfg = getattr(cfg.eval, "entity_world", None)
+        if ew_cfg is not None and getattr(ew_cfg, "enabled", False):
+            try:
+                from twm.jepa.diagnostics import eval_entity_world
+
+                ent_metrics = eval_entity_world(
+                    model, ew_cfg, device, tokenizer,
+                    max_text_tokens=cfg.data.max_text_tokens,
+                    out_dir=str(out_dir), epoch=epoch,
+                    append_eos=getattr(cfg.data, "append_eos", True),
+                )
+                metrics.update(ent_metrics)
+            except Exception as e:
+                print(f"  [entity_world eval error: {e}]", flush=True)
+
+        if metrics:
             flat = " ".join(
                 f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}"
                 for k, v in metrics.items()

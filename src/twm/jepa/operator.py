@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import Operator
+from .conditioning import block_modulus
 
 
 def _autocast_off(device_type: str):
@@ -179,6 +180,8 @@ class RotationScaleOperator(Operator):
         k: torch.Tensor,
         v: torch.Tensor,
         theta_offset: torch.Tensor | None = None,
+        *,
+        norm_budget: bool = False,
     ) -> torch.Tensor:
         """a* = B_v k.  RoPE-style, no matrix materialized. fp32 under autocast.
 
@@ -191,6 +194,16 @@ class RotationScaleOperator(Operator):
         preserved under pure rotation, design §2/§3.2). When `theta_offset is None`
         this method is bitwise-identical to the v2.0 path (the fast `_gather_blocks`
         coefficients route); the offset branch is only taken when explicitly provided.
+
+        norm_budget (entity-campaign §1.1, default False): when False this returns the
+        bare `a*` tensor and is BITWISE the v2/v3 path above (the behavior-preservation
+        gate). When True, it RENORMALIZES each slot's modulus profile back to its
+        pre-application norm and returns `(a, log_rho)` where `log_rho (B, M)` is the
+        per-slot extracted log-scale (the irreversibility scalar that the inverse
+        replays). The renormalization preserves the inter-block modulus-profile SHAPE
+        (only the uniform per-slot radius is factored out) so the polar conditioner H
+        still keys on a meaningfully varying, state-dependent modulus across hops while
+        the identity profile stays radius-stable.
         """
         with _autocast_off(k.device.type):
             if theta_offset is None:
@@ -200,14 +213,32 @@ class RotationScaleOperator(Operator):
                 theta_eff = theta + theta_offset.to(theta.dtype)  # phase add (design §4.1)
                 a = r * torch.cos(theta_eff)
                 b = r * torch.sin(theta_eff)
-            out = self._apply_blocks(k, a, b)
-        return out.to(k.dtype)
+            a_raw = self._apply_blocks(k, a, b)                  # (B, M, dn) fp32
+
+            if not norm_budget:
+                return a_raw.to(k.dtype)                          # bitwise v2/v3 path
+
+            # --- norm-budget path (entity §1.1): renormalize-and-track ---
+            eps = 1e-8
+            m_pre = block_modulus(k.float())                     # (B, M, nb) pre-app moduli
+            m_post = block_modulus(a_raw)                        # (B, M, nb) post-app moduli
+            norm_post = m_post.norm(dim=-1)                      # (B, M)
+            norm_pre = m_pre.norm(dim=-1).clamp_min(eps)         # (B, M)
+            rho = (norm_post / norm_pre).clamp_min(eps)          # (B, M) per-slot scale
+            log_rho = rho.log()                                  # (B, M) scale_delta (log)
+            # Divide the whole noun by ρ_i (broadcast over dn): restores ‖m‖ to its
+            # pre-step value while KEEPING the inter-block shape the rotation+scale made.
+            a = a_raw / rho.unsqueeze(-1).clamp_min(eps)         # (B, M, dn)
+        return a.to(k.dtype), log_rho.to(k.dtype)
 
     def inverse_apply(
         self,
         a: torch.Tensor,
         v: torch.Tensor,
         theta_offset: torch.Tensor | None = None,
+        *,
+        norm_budget: bool = False,
+        scale_delta: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """k = B_v^{-1} a = diag_blocks(R(θ)ᵀ / r) a.  STRUCTURAL — exact undo.
 
@@ -221,8 +252,25 @@ class RotationScaleOperator(Operator):
         PRE-step modulus), never recomputed from the post-step noun (the offset is an
         explicit argument precisely so the inverse is exact). When `theta_offset is None`
         this is bitwise-identical to the v2.0 inverse.
+
+        norm_budget (entity §1.1, default False): when True, the forward `apply`
+        RENORMALIZED `a` by dividing out the per-slot scale ρ = exp(scale_delta); this
+        undo first re-applies that scale (`a_raw = a · ρ`, restoring the pre-renorm
+        radius) and THEN runs the exact structural inverse, so the round-trip
+        `inverse_apply(apply(k, v, norm_budget=True), scale_delta=log_rho) == k` is exact
+        to fp32 eps. `scale_delta (B, M)` is the per-slot `log_rho` returned by the
+        forward; it MUST be supplied (the budget inverse cannot reconstruct the radius
+        without it). When `norm_budget is False` this is bitwise-identical to today.
         """
+        out_dtype = a.dtype
         with _autocast_off(a.device.type):
+            if norm_budget:
+                assert scale_delta is not None, (
+                    "norm-budget inverse needs the stored per-slot log_rho (scale_delta)"
+                )
+                # Re-apply the tracked scale BEFORE inverting (undo the renormalization).
+                rho = scale_delta.float().exp().unsqueeze(-1)   # (B, M, 1)
+                a = a.float() * rho                             # restore pre-renorm radius
             theta = self.theta.float()
             log_r = self.log_r.float()
             if theta_offset is None:
@@ -246,7 +294,7 @@ class RotationScaleOperator(Operator):
                 acoef = inv_r * torch.cos(theta_eff)              # cos(θ_eff)/r
                 bcoef = -inv_r * torch.sin(theta_eff)             # −sin(θ_eff)/r
             out = self._apply_blocks(a, acoef, bcoef)
-        return out.to(a.dtype)
+        return out.to(out_dtype)
 
     def velocity(self, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         """Generator action for the T-step seam (§1.6).  v1: static block generator.
