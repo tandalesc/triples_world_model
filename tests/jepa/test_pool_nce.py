@@ -345,8 +345,10 @@ def test_v41_config_parses_pool_nce_fields():
     assert math.isclose(cfg.loss.w_pool_nce, 0.5)
     assert math.isclose(cfg.loss.tau_pool, 0.1)
     assert cfg.loss.n_pool_negs == 16
-    # The hardened margin from v4.0.1 must be preserved.
-    assert math.isclose(cfg.loss.w_margin, 1.0)
+    # v4.2 poison-pill fix: the hardened margin (w_margin=1.0) was found to CORRODE
+    # grounding tonight, so v4.1 launches with w_margin=0.0 (margin term OFF). The
+    # `margin` scalar is preserved for documentation but unused while w_margin=0.
+    assert math.isclose(cfg.loss.w_margin, 0.0)
     assert math.isclose(cfg.loss.margin, 2.0)
 
 

@@ -346,6 +346,11 @@ class LossConfig:
     w_margin: float = 0.0     # token-level hard-negative hinge (§3); 0.0 ⟹ off
     margin: float = 0.5       # hinge margin in nats (§3); read only when w_margin>0
     w_mask_prior: float = 0.0  # KL(stopgrad posterior-mask ‖ prior-mask) (§1.3); 0.0 ⟹ off
+    # v4.2 masked-diff prediction (trad-JEPA masked reconstruction, focused by causality):
+    # mask the CHANGED span in the decoder INPUT, CE only at masked positions (100%
+    # discriminative). Default 0.0 ⟹ bitwise-neutral (term skipped, no extra decoder pass,
+    # diff masks not even computed at load), so every existing config parses identically.
+    w_masked_diff: float = 0.0  # masked-diff CE weight (v4.2); 0.0 ⟹ off
     # v4.1 escalation (jepa_v4_design §C5): pooled-space hard-negative InfoNCE that trains
     # DIRECTLY on the separation-AUC geometry. ALL default to the v4.0-bitwise neutral value
     # (w_pool_nce=0.0 ⟹ term off / not computed), so every existing v4 config parses and

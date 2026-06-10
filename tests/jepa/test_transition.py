@@ -162,12 +162,20 @@ def test_posterior_soft_path_is_distribution():
 
 def test_gradient_reaches_v_logits_through_hard_st():
     """Hard straight-through must still pass gradient to v_logits (and the head)."""
+    # Seed for determinism: this test's loss must depend ANALYTICALLY on the sample, not
+    # on fp roundoff. `v_onehot.sum()` has zero gradient wrt logits (each row sums to 1,
+    # so ∂/∂logits of a sum-to-1 softmax is exactly 0); the only nonzero values observed
+    # there are float-cancellation noise that flips to exactly 0.0 on some RNG states.
+    # A per-verb-weighted reduction makes the ST gradient analytically nonzero.
+    torch.manual_seed(0)
     _, post = _make_posterior()
     src_ids, src_pad, tgt_ids, tgt_pad = _batch(B=8)
     v_onehot, v_logits, _ = post(src_ids, src_pad, tgt_ids, tgt_pad, tau=1.0, hard=True)
-    # A scalar that depends on the (ST) sample. The ST estimator routes grad from
-    # v_onehot back through the soft sample into v_logits.
-    loss = v_onehot.sum()
+    # A scalar that depends on the (ST) sample. Weighting each verb column differently
+    # gives a non-constant objective, so the ST estimator routes a real (analytic, not
+    # roundoff) gradient from v_onehot back through the soft sample into v_logits.
+    w = torch.arange(1, v_onehot.shape[-1] + 1, dtype=v_onehot.dtype)
+    loss = (v_onehot * w).sum()
     loss.backward()
     # fc2 produces v_logits; its weight/bias must receive gradient.
     assert post.fc2.weight.grad is not None

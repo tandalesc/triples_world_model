@@ -113,6 +113,9 @@ def build_loss_v2(cfg, operator):
         w_margin=getattr(lc, "w_margin", 0.0),
         margin=getattr(lc, "margin", 0.5),
         w_mask_prior=getattr(lc, "w_mask_prior", 0.0),
+        # v4.2 masked-diff prediction. Default 0.0 ⟹ bitwise-neutral (the loss skips the
+        # term and the trainer skips the extra mask-corrupted decoder pass).
+        w_masked_diff=getattr(lc, "w_masked_diff", 0.0),
         # v4.1 §C5: pooled-space hard-negative InfoNCE. Defaults (w_pool_nce=0.0) reproduce
         # v4.0 bitwise — the loss skips the term (and the trainer skips the extra online
         # encoder forward) when w_pool_nce==0.
@@ -192,7 +195,7 @@ def chain_contiguous_perm(chain_ids: list[int], generator=None) -> torch.Tensor:
     return torch.tensor(flat, dtype=torch.long)
 
 
-def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
+def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1):
     """One v2 pairs-mode training step. When w_nce==0 this is BITWISE the v2.1 step
     (no chain_ids passed → loss skips InfoNCE). When w_nce>0, same-chain negatives are
     enabled via the batch's chain_ids (the in-batch (B,B) matrix already holds the hard
@@ -249,6 +252,17 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
                 [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long, device=device
             )
 
+    # v4.2: masked-diff prediction. Mask the CHANGED span in the decoder's INPUT (sever the
+    # copy path) and run a SECOND decoder pass on the SAME a* memory; the loss scores CE only
+    # at the masked positions vs the ORIGINAL gold ids. Only when active AND the dataset
+    # carries the diff mask (compute_diff_mask was set ⟹ w_masked_diff>0).
+    masked_diff_logits = diff_mask = None
+    if getattr(loss_fn, "w_masked_diff", 0.0) > 0 and getattr(dataset, "_tgt_diff_mask", None) is not None:
+        from twm.jepa.losses import corrupt_masked_input
+        diff_mask = dataset._tgt_diff_mask[idx].to(device)
+        corrupt_ids = corrupt_masked_input(tgt_ids, diff_mask, mask_token_id)
+        masked_diff_logits = model.decoder(out["a"], corrupt_ids, tgt_pad)
+
     loss, comps = loss_fn(
         logits=out["logits"],
         tgt_ids=tgt_ids,
@@ -266,11 +280,13 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce):
         g_logits=out.get("g_logits"),
         g_prior_logits=out.get("g_prior_logits"),
         z_pool_pos=z_pool_pos,
+        masked_diff_logits=masked_diff_logits,
+        diff_mask=diff_mask,
     )
     return loss, comps
 
 
-def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
+def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_token_id=1):
     """One v3 triple-mode two-hop unroll step (design §2.3/§2.4).
 
     Calls model.forward_unroll (Task C) to get per-hop outputs, then assembles the total
@@ -298,6 +314,16 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
         ]
     else:
         hop_weights_tok = [None, None]
+
+    # v4.2: per-hop changed-span diff masks (hop-1 masks the s0→s1 diff in s1, hop-2 the
+    # s1→s2 diff in s2). Only present when masked-diff is on (compute_diff_mask was set).
+    if getattr(loss_fn, "w_masked_diff", 0.0) > 0 and getattr(dataset, "_s1_diff_mask", None) is not None:
+        hop_diff_mask = [
+            dataset._s1_diff_mask[idx].to(device),
+            dataset._s2_diff_mask[idx].to(device),
+        ]
+    else:
+        hop_diff_mask = [None, None]
 
     # Cross-hop hard negatives: hop h's negative is the OTHER hop's z_target (the EMA pool
     # of the sibling future), shaped (B, 1, dn). Only available when use_pred built the EMA
@@ -329,6 +355,16 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
         if getattr(loss_fn, "w_pool_nce", 0.0) > 0:
             z_pool_pos = model._online_bundle.pool_raw(tids, tpad)  # (B, dn) with gradient
 
+        # v4.2: masked-diff pass for THIS hop — mask the changed span in the hop's target
+        # input and run a second decoder pass on THIS hop's a* memory; the loss scores CE
+        # only at the masked positions vs the original hop target ids.
+        masked_diff_logits = None
+        diff_mask_h = hop_diff_mask[h] if h < len(hop_diff_mask) else None
+        if getattr(loss_fn, "w_masked_diff", 0.0) > 0 and diff_mask_h is not None:
+            from twm.jepa.losses import corrupt_masked_input
+            corrupt_ids = corrupt_masked_input(tids, diff_mask_h, mask_token_id)
+            masked_diff_logits = model.decoder(out["a"], corrupt_ids, tpad)
+
         loss_h, comps_h = loss_fn(
             logits=out["logits"],
             tgt_ids=tids,
@@ -347,10 +383,12 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights):
             g_logits=out.get("g_logits"),
             g_prior_logits=out.get("g_prior_logits"),
             z_pool_pos=z_pool_pos,
+            masked_diff_logits=masked_diff_logits,
+            diff_mask=diff_mask_h,
         )
         total = wt * loss_h if total is None else total + wt * loss_h
         # Aggregate components for logging: weighted sums (matching `total`) plus per-hop CE.
-        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior", "L_pool_nce"):
+        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior", "L_masked_diff", "L_pool_nce"):
             agg[key] = agg.get(key, 0.0) + wt * float(comps_h.get(key, 0.0))
         agg[f"L_token_h{h + 1}"] = float(comps_h.get("L_token", 0.0))
 
@@ -481,6 +519,10 @@ def train(config_path: str):
     mode = getattr(cfg.data, "mode", "pairs")
     # v4 §2.2: w_diff is baked into the dataset's per-token diff weights at load. Default
     # 1.0 ⟹ all-ones over non-pad ⟹ v3-bitwise uniform CE; entity configs set w_diff>1.
+    # v4.2: compute per-target diff masks ONLY when masked-diff prediction is on; the masks
+    # are extra (N,T) bool tensors + an O(T²) alignment per pair, gated so v3/v4.0/v4.1 pay
+    # nothing. The mask-token id is the BPE's reserved <mask> special (id 1 in entity-world).
+    w_masked_diff = getattr(cfg.loss, "w_masked_diff", 0.0)
     dataset = JEPAChainDataset(
         path=cfg.data.path,
         tokenizer=tokenizer,
@@ -488,7 +530,9 @@ def train(config_path: str):
         append_eos=cfg.data.append_eos,
         mode=mode,
         w_diff=getattr(cfg.loss, "w_diff", 1.0),
+        compute_diff_mask=(w_masked_diff > 0),
     )
+    mask_token_id = getattr(tokenizer, "mask_token_id", 1)
     n_train = len(dataset)
     if getattr(cfg.data, "max_chains", None):
         n_chains = int(cfg.data.max_chains)
@@ -505,6 +549,10 @@ def train(config_path: str):
                 # v4 §2.2: keep the per-hop diff-weight tensors aligned with the cap.
                 dataset._s1_diff_w = dataset._s1_diff_w[:cap].contiguous()
                 dataset._s2_diff_w = dataset._s2_diff_w[:cap].contiguous()
+                # v4.2: keep the per-hop diff masks aligned with the cap (when built).
+                if dataset._s1_diff_mask is not None:
+                    dataset._s1_diff_mask = dataset._s1_diff_mask[:cap].contiguous()
+                    dataset._s2_diff_mask = dataset._s2_diff_mask[:cap].contiguous()
                 dataset._s0_texts = dataset._s0_texts[:cap]
                 dataset._s1_texts = dataset._s1_texts[:cap]
                 dataset._s2_texts = dataset._s2_texts[:cap]
@@ -519,6 +567,9 @@ def train(config_path: str):
                 dataset._tgt_pad = dataset._tgt_pad[:cap].contiguous()
                 # v4 §2.2: keep the diff-weight tensor aligned with the cap.
                 dataset._tgt_diff_w = dataset._tgt_diff_w[:cap].contiguous()
+                # v4.2: keep the diff mask aligned with the cap (when built).
+                if dataset._tgt_diff_mask is not None:
+                    dataset._tgt_diff_mask = dataset._tgt_diff_mask[:cap].contiguous()
                 dataset._src_texts = dataset._src_texts[:cap]
                 dataset._tgt_texts = dataset._tgt_texts[:cap]
                 # Keep chain_ids aligned with the truncated dataset (design §8.2).
@@ -580,6 +631,7 @@ def train(config_path: str):
             perm = torch.randperm(n_train)
         ep_total = ep_token = ep_prior = ep_sig = ep_pred = ep_nce = 0.0
         ep_margin = ep_mask_prior = ep_pool_nce = 0.0
+        ep_masked_diff = 0.0
         ep_tok_h1 = ep_tok_h2 = 0.0
         n_batches = 0
 
@@ -593,11 +645,13 @@ def train(config_path: str):
 
             if mode == "triples":
                 loss, comps = _unroll_step(
-                    model, loss_fn, dataset, idx, device, tau, hop_weights
+                    model, loss_fn, dataset, idx, device, tau, hop_weights,
+                    mask_token_id=mask_token_id,
                 )
             else:
                 loss, comps = _pair_step(
-                    model, loss_fn, dataset, idx, device, tau, w_nce
+                    model, loss_fn, dataset, idx, device, tau, w_nce,
+                    mask_token_id=mask_token_id,
                 )
 
             optimizer.zero_grad()
@@ -615,6 +669,7 @@ def train(config_path: str):
             ep_nce += float(comps.get("L_nce", 0.0))
             ep_margin += float(comps.get("L_margin", 0.0))
             ep_mask_prior += float(comps.get("L_mask_prior", 0.0))
+            ep_masked_diff += float(comps.get("L_masked_diff", 0.0))
             ep_pool_nce += float(comps.get("L_pool_nce", 0.0))
             ep_tok_h1 += float(comps.get("L_token_h1", 0.0))
             ep_tok_h2 += float(comps.get("L_token_h2", 0.0))
@@ -626,6 +681,7 @@ def train(config_path: str):
             f"L_token={ep_token/nb:.4f} L_prior={ep_prior/nb:.4f} "
             f"L_sigreg={ep_sig/nb:.4f} L_pred={ep_pred/nb:.4f} L_nce={ep_nce/nb:.4f} "
             f"L_margin={ep_margin/nb:.4f} L_mask_prior={ep_mask_prior/nb:.4f} "
+            f"L_masked_diff={ep_masked_diff/nb:.4f} "
             f"L_pool_nce={ep_pool_nce/nb:.4f} "
         )
         if mode == "triples":

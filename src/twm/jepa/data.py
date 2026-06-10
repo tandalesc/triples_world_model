@@ -20,6 +20,62 @@ from torch import Tensor
 from ..domain_bpe import DomainBPETokenizer
 
 
+def _diff_mask(
+    src_ids: list[int],
+    tgt_ids: list[int],
+    pad_id: int,
+    T: int,
+) -> Tensor:
+    """Per-token boolean diff mask for masked-diff prediction (v4.2, trad-JEPA masking).
+
+    Aligns the two token-id sequences with the SAME SequenceMatcher (LCS) alignment
+    `_diff_weights` uses, and marks TRUE the TARGET positions that are part of the
+    s_t→s_{t+1} diff (the `replace`/`insert` opcodes — the CHANGED span). `equal`
+    (boilerplate) and `delete` (source-only) positions stay FALSE. Pad positions
+    (>= len(tgt) real tokens) stay FALSE.
+
+    This is the CHANGED span the masked-diff objective focuses on: the decoder's
+    teacher-forcing INPUT is corrupted (replaced with the mask id) at these positions,
+    and the CE is computed ONLY here — 100% discriminative tokens, no boilerplate.
+
+    ALL-EQUAL edge case (identity-ish pairs, no `replace`/`insert` op): the mask is
+    all-FALSE. The masked-diff loss for such a pair contributes ZERO (no masked
+    positions ⟹ the per-pair CE denominator is empty ⟹ excluded). This is the
+    documented choice: SKIP the masked-diff loss for an all-equal pair rather than
+    fabricate a random span — a genuinely-unchanged pair has no causal diff to predict,
+    so masking a random boilerplate token would teach surface infilling, exactly the
+    failure mode v4.2 is built to avoid. (The full-reconstruction L_token still trains
+    on these pairs, so generation health is unaffected.)
+
+    Args:
+        src_ids: state_t token ids (post-encode, may include trailing pad).
+        tgt_ids: state_{t+1} token ids (the CE target; its positions are masked/scored).
+        pad_id:  padding id (trailing pad in either list is stripped before alignment).
+        T:       output length (== max_text_tokens).
+
+    Returns:
+        (T,) bool mask, TRUE at the changed target span, FALSE on boilerplate/pad.
+    """
+    n_tgt = len(tgt_ids)
+    while n_tgt > 0 and tgt_ids[n_tgt - 1] == pad_id:
+        n_tgt -= 1
+    n_src = len(src_ids)
+    while n_src > 0 and src_ids[n_src - 1] == pad_id:
+        n_src -= 1
+    src_real = src_ids[:n_src]
+    tgt_real = tgt_ids[:n_tgt]
+
+    mask = torch.zeros(T, dtype=torch.bool)
+    sm = SequenceMatcher(a=src_real, b=tgt_real, autojunk=False)
+    for tag, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "insert"):          # target tokens j1:j2 ARE the diff
+            hi = min(j2, T)
+            for j in range(j1, hi):
+                mask[j] = True
+        # "delete" (src-only) has no target position; "equal" stays False.
+    return mask
+
+
 def _diff_weights(
     src_ids: list[int],
     tgt_ids: list[int],
@@ -101,6 +157,7 @@ class JEPAChainDataset:
         append_eos: bool = False,
         mode: str = "pairs",
         w_diff: float = 1.0,
+        compute_diff_mask: bool = False,
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
@@ -113,6 +170,11 @@ class JEPAChainDataset:
         # without a data rebuild. w_diff=1.0 (default) ⟹ all-ones over non-pad ⟹ v3
         # bitwise uniform CE. The weights live in _*_diff_w tensors (built below).
         self.w_diff = w_diff
+        # Masked-diff prediction (v4.2 §1): per-target boolean diff masks (the CHANGED
+        # span). Computed ONLY when enabled (the extra (N,T) bool tensors cost memory and
+        # an O(T²) alignment per pair; gated so v3/v4.0/v4.1 runs pay nothing). The trainer
+        # sets compute_diff_mask=True iff loss.w_masked_diff>0.
+        self.compute_diff_mask = compute_diff_mask
         pad_id = tokenizer.pad_token_id  # 0 per domain_bpe.py convention
         # <eos>=4 per the GLUCOSE BPE artifact (design v2 §7). Only used when
         # append_eos=True so the AR token decoder learns to stop.
@@ -176,6 +238,13 @@ class JEPAChainDataset:
         # all-ones (over non-pad) when w_diff==1.0 ⟹ v3-bitwise uniform CE.
         self._tgt_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
 
+        # Masked-diff prediction (v4.2 §1): boolean mask over the changed tgt span. Only
+        # built when compute_diff_mask is set (else stays a None placeholder so the
+        # __getitem__/get_batch keys are absent and the trainer skips the masked pass).
+        self._tgt_diff_mask: Tensor | None = (
+            torch.zeros((n, T), dtype=torch.bool) if self.compute_diff_mask else None
+        )
+
         pad_id = self.tokenizer.pad_token_id
         for i, (src, tgt) in enumerate(zip(src_texts, tgt_texts)):
             self._src_ids[i], self._src_pad[i] = _encode(src)
@@ -184,6 +253,10 @@ class JEPAChainDataset:
                 self._src_ids[i].tolist(), self._tgt_ids[i].tolist(),
                 self.w_diff, pad_id, T,
             )
+            if self._tgt_diff_mask is not None:
+                self._tgt_diff_mask[i] = _diff_mask(
+                    self._src_ids[i].tolist(), self._tgt_ids[i].tolist(), pad_id, T,
+                )
 
         # Keep the raw texts for iter_text_pairs() (operator-fit pass-2 §7).
         self._src_texts: list[str] = src_texts
@@ -235,6 +308,17 @@ class JEPAChainDataset:
         self._s1_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
         self._s2_diff_w: Tensor = torch.zeros((n, T), dtype=torch.float32)
 
+        # Masked-diff prediction (v4.2 §1), per hop: _s1_diff_mask marks the changed s0→s1
+        # span (hop-1 target s1), _s2_diff_mask the s1→s2 span (hop-2 target s2). Only built
+        # when compute_diff_mask is set (else None placeholders ⟹ keys absent, masked pass
+        # skipped — bitwise-neutral when w_masked_diff=0).
+        self._s1_diff_mask: Tensor | None = (
+            torch.zeros((n, T), dtype=torch.bool) if self.compute_diff_mask else None
+        )
+        self._s2_diff_mask: Tensor | None = (
+            torch.zeros((n, T), dtype=torch.bool) if self.compute_diff_mask else None
+        )
+
         pad_id = self.tokenizer.pad_token_id
         for i in range(n):
             self._s0_ids[i], self._s0_pad[i] = _encode(s0_texts[i])
@@ -248,6 +332,13 @@ class JEPAChainDataset:
                 self._s1_ids[i].tolist(), self._s2_ids[i].tolist(),
                 self.w_diff, pad_id, T,
             )
+            if self._s1_diff_mask is not None:
+                self._s1_diff_mask[i] = _diff_mask(
+                    self._s0_ids[i].tolist(), self._s1_ids[i].tolist(), pad_id, T,
+                )
+                self._s2_diff_mask[i] = _diff_mask(
+                    self._s1_ids[i].tolist(), self._s2_ids[i].tolist(), pad_id, T,
+                )
 
         self._s0_texts: list[str] = s0_texts
         self._s1_texts: list[str] = s1_texts
@@ -287,7 +378,7 @@ class JEPAChainDataset:
             plus chain_id (the originating chain index).
         """
         if self.mode == "triples":
-            return {
+            out = {
                 "s0_ids": self._s0_ids[idx],
                 "s0_pad": self._s0_pad[idx],
                 "s1_ids": self._s1_ids[idx],
@@ -298,13 +389,20 @@ class JEPAChainDataset:
                 "s2_diff_w": self._s2_diff_w[idx],
                 "chain_id": self._chain_ids[idx],
             }
-        return {
+            if self._s1_diff_mask is not None:
+                out["s1_diff_mask"] = self._s1_diff_mask[idx]
+                out["s2_diff_mask"] = self._s2_diff_mask[idx]
+            return out
+        out = {
             "src_ids": self._src_ids[idx],
             "src_pad": self._src_pad[idx],
             "tgt_ids": self._tgt_ids[idx],
             "tgt_pad": self._tgt_pad[idx],
             "tgt_diff_w": self._tgt_diff_w[idx],
         }
+        if self._tgt_diff_mask is not None:
+            out["tgt_diff_mask"] = self._tgt_diff_mask[idx]
+        return out
 
     def get_batch(self, indices) -> dict:
         """Return a batch of items for the given indices (list or Tensor).
@@ -316,7 +414,7 @@ class JEPAChainDataset:
         if isinstance(indices, Tensor):
             indices = indices.tolist()
         if self.mode == "triples":
-            return {
+            out = {
                 "s0_ids": self._s0_ids[indices],
                 "s0_pad": self._s0_pad[indices],
                 "s1_ids": self._s1_ids[indices],
@@ -329,13 +427,20 @@ class JEPAChainDataset:
                     [self._chain_ids[i] for i in indices], dtype=torch.long
                 ),
             }
-        return {
+            if self._s1_diff_mask is not None:
+                out["s1_diff_mask"] = self._s1_diff_mask[indices]
+                out["s2_diff_mask"] = self._s2_diff_mask[indices]
+            return out
+        out = {
             "src_ids": self._src_ids[indices],
             "src_pad": self._src_pad[indices],
             "tgt_ids": self._tgt_ids[indices],
             "tgt_pad": self._tgt_pad[indices],
             "tgt_diff_w": self._tgt_diff_w[indices],
         }
+        if self._tgt_diff_mask is not None:
+            out["tgt_diff_mask"] = self._tgt_diff_mask[indices]
+        return out
 
     # ------------------------------------------------------------------
     # Operator-fit pass-2 interface (spec §7)

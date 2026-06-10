@@ -230,6 +230,77 @@ def token_ce(
 
 
 # ---------------------------------------------------------------------------
+# masked-diff prediction: trad-JEPA masked reconstruction, focused by causality (v4.2)
+# ---------------------------------------------------------------------------
+
+def corrupt_masked_input(
+    tgt_ids: torch.Tensor,    # (B, T) gold target ids (the decoder's teacher-forcing input)
+    diff_mask: torch.Tensor,  # (B, T) bool — True at the changed span to mask
+    mask_id: int,             # the <mask> token id (a reserved BPE special, in-vocab)
+) -> torch.Tensor:
+    """Replace the CHANGED-span token ids in the decoder's teacher-forcing INPUT with the
+    mask id, leaving boilerplate and pad positions untouched (v4.2 §2).
+
+    This is what severs the copy path: the decoder is fed the visible context but the
+    answer (the changed clause) is masked out of its INPUT, so it cannot satisfy the loss
+    by surface-copying the gold token from the teacher-forcing stream — it must infer the
+    masked value from `a*` (the latent state transition). The CE targets remain the
+    ORIGINAL gold ids; only the INPUT is corrupted.
+
+    Args:
+        tgt_ids:   (B, T) gold target ids.
+        diff_mask: (B, T) bool, True where the input should be masked (the changed span).
+        mask_id:   the mask token id (tokenizer.mask_token_id; id 1 in entity-world BPE).
+
+    Returns:
+        (B, T) corrupted INPUT ids: tgt_ids with masked positions overwritten by mask_id.
+    """
+    return torch.where(diff_mask, torch.full_like(tgt_ids, mask_id), tgt_ids)
+
+
+def masked_diff_ce(
+    logits_masked: torch.Tensor,  # (B, T, V) decoder on the MASK-CORRUPTED input + a* memory
+    tgt_ids: torch.Tensor,        # (B, T) ORIGINAL gold target ids (the CE targets)
+    diff_mask: torch.Tensor,      # (B, T) bool — True at the changed (masked) span
+    pad_id: int = 0,
+) -> torch.Tensor:
+    """Masked-diff CE: cross-entropy computed ONLY at the masked (changed-span) positions
+    (v4.2 §3 — trad-JEPA-style masked reconstruction, focused by causality).
+
+    The decoder is run on the mask-corrupted teacher-forcing input (the changed span
+    replaced by the mask id) conditioned on `a*` as usual; `logits_masked` are those
+    logits. The loss is the mean CE at the masked positions against the ORIGINAL gold ids
+    — 100% discriminative tokens, ZERO boilerplate weight. There is no degrade-the-neighbor
+    direction (pure infilling) and no copy path (the answer is masked out of the input).
+
+    Pad positions are excluded defensively (a pad position should never be in diff_mask,
+    but mask & non-pad is enforced so the denominator is the count of real masked tokens).
+    When a row has NO masked positions (all-equal/identity pair), it contributes 0 to both
+    numerator and denominator — the per-pair masked loss is simply skipped for it (v4.2 §1
+    all-equal edge case). When the WHOLE batch has no masked positions, the loss is 0.0
+    (clamped denominator) — bitwise-neutral.
+
+    Args:
+        logits_masked: (B, T, V) decoder logits on the mask-corrupted input.
+        tgt_ids:       (B, T) original gold target ids (the CE targets).
+        diff_mask:     (B, T) bool, True at the masked changed span.
+        pad_id:        padding id (excluded from the masked CE).
+
+    Returns:
+        scalar mean CE over masked non-pad positions (≥ 0; 0.0 if no masked positions).
+    """
+    B, T, V = logits_masked.shape
+    ce = F.cross_entropy(
+        logits_masked.reshape(B * T, V),
+        tgt_ids.reshape(B * T),
+        ignore_index=pad_id,
+        reduction="none",
+    ).reshape(B, T)                                   # (B, T) — 0 at pad positions
+    m = (diff_mask & (tgt_ids != pad_id)).to(ce.dtype)  # (B, T) masked AND non-pad
+    return (ce * m).sum() / m.sum().clamp_min(1.0)
+
+
+# ---------------------------------------------------------------------------
 # token_margin: token-level hard-negative contrastive (the encoder-AIM fix, §3)
 # ---------------------------------------------------------------------------
 
@@ -576,6 +647,10 @@ class JEPALossV2(nn.Module):
         w_margin: float = 0.0,
         margin: float = 0.5,
         w_mask_prior: float = 0.0,
+        # v4.2 masked-diff prediction (trad-JEPA masked reconstruction, focused by
+        # causality). Default 0.0 ⟹ bitwise-neutral: the term is skipped AND the trainer
+        # skips the extra mask-corrupted decoder pass, so v3/v4.0/v4.1 runs pay nothing.
+        w_masked_diff: float = 0.0,
         # v4.1 escalation (design §C5): pooled-space hard-negative InfoNCE that trains
         # DIRECTLY on the separation-AUC geometry. Defaults reproduce v4.0 bitwise
         # (w_pool_nce=0.0 ⟹ term not computed, no extra forward passes when off).
@@ -606,6 +681,10 @@ class JEPALossV2(nn.Module):
         # v4 §1.3: targeted-mask prior KL. w_mask_prior=0.0 ⟹ off (v3 bitwise); skipped
         # entirely when the model does not emit prior-mask logits (targeting off).
         self.w_mask_prior = w_mask_prior
+        # v4.2: masked-diff prediction. w_masked_diff=0.0 ⟹ off (bitwise-neutral); the term
+        # is computed ONLY when the trainer supplies the mask-corrupted decoder logits + the
+        # diff mask (so no extra decoder pass runs at the default).
+        self.w_masked_diff = w_masked_diff
         # v4.1 §C5: pooled-space hard-negative InfoNCE. w_pool_nce=0.0 ⟹ off (v4.0 bitwise);
         # the term is computed ONLY when w_pool_nce>0 AND the trainer supplies the online
         # positive pool, so v4.0 configs pay zero cost (no extra encoder forward).
@@ -641,6 +720,8 @@ class JEPALossV2(nn.Module):
         g_logits: torch.Tensor | None = None,         # (B, M) posterior mask logits (§1.3)
         g_prior_logits: torch.Tensor | None = None,   # (B, M) prior mask logits (§1.3)
         z_pool_pos: torch.Tensor | None = None,       # (B, dn) ONLINE pooled true next state (§C5)
+        masked_diff_logits: torch.Tensor | None = None,  # (B, T, V) decoder on mask-corrupted input (v4.2)
+        diff_mask: torch.Tensor | None = None,        # (B, T) bool changed-span mask (v4.2)
     ) -> tuple[torch.Tensor, dict]:
         """Compute total loss and per-term components.
 
@@ -708,6 +789,17 @@ class JEPALossV2(nn.Module):
         else:
             l_mask_prior = None
 
+        # L_masked_diff: masked-diff prediction (v4.2). Computed ONLY when active AND the
+        # trainer supplies the mask-corrupted decoder logits + the changed-span mask. The CE
+        # is at the masked positions only (100% discriminative). When w_masked_diff=0.0 (or
+        # the masked pass is absent) it is skipped ⟹ bitwise-neutral total.
+        if self.w_masked_diff > 0 and masked_diff_logits is not None and diff_mask is not None:
+            l_masked_diff = masked_diff_ce(
+                masked_diff_logits, tgt_ids, diff_mask, pad_id=self.pad_id,
+            )
+        else:
+            l_masked_diff = None
+
         # L_pool_nce: pooled-space hard-negative InfoNCE on the separation-AUC geometry
         # (v4.1 §C5). Computed ONLY when active AND the trainer supplies the online positive
         # pool `z_pool_pos` (the AUC's `online` candidate path, where gradients reach). The
@@ -737,6 +829,8 @@ class JEPALossV2(nn.Module):
             total = total + self.w_margin * l_margin
         if l_mask_prior is not None:
             total = total + self.w_mask_prior * l_mask_prior
+        if l_masked_diff is not None:
+            total = total + self.w_masked_diff * l_masked_diff
         if l_pool_nce is not None:
             total = total + self.w_pool_nce * l_pool_nce
 
@@ -749,6 +843,7 @@ class JEPALossV2(nn.Module):
             "L_nce":      (l_nce.item() if l_nce is not None else 0.0),
             "L_margin":   (l_margin.item() if l_margin is not None else 0.0),
             "L_mask_prior": (l_mask_prior.item() if l_mask_prior is not None else 0.0),
+            "L_masked_diff": (l_masked_diff.item() if l_masked_diff is not None else 0.0),
             "L_pool_nce": (l_pool_nce.item() if l_pool_nce is not None else 0.0),
             "gumbel_tau": float(tau),
             # weights logged for interpretability
@@ -759,6 +854,7 @@ class JEPALossV2(nn.Module):
             "w_nce":      float(self.w_nce),
             "w_margin":   float(self.w_margin),
             "w_mask_prior": float(self.w_mask_prior),
+            "w_masked_diff": float(self.w_masked_diff),
             "w_pool_nce": float(self.w_pool_nce),
         }
         return total, components

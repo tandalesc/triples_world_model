@@ -51,7 +51,7 @@
     "w_pred": 0.0,
     "w_nce": 0.25,
     "w_diff": 4.0,
-    "w_margin": 1.0,
+    "w_margin": 0.0,
     "margin": 2.0,
     "w_mask_prior": 0.02,
     "sigreg": {

@@ -284,14 +284,22 @@ def test_build_manifest_v1_omits_v2_types(gen):
 # ---------------------------------------------------------------------------
 
 def test_v4_configs_parse():
-    """All 12 v4 JSON configs must parse cleanly."""
+    """All v4-family JSON configs must parse cleanly.
+
+    The v4.0 family is the 8 `jepa_v4_*` configs ({v4,v4_blackbox}×{s0,s1,s2}+smokes);
+    later campaigns (v4.0.1, v4.1, v4.2) add more `jepa_v4*` configs over time, so we
+    assert the v4.0 set is present AND that EVERY matched v4-family config parses, rather
+    than a brittle exact count that grows each campaign.
+    """
     from twm.jepa.config import JEPAConfig
     configs_dir = REPO / "configs" / "jepa"
+    # The frozen v4.0 set (exactly 8) must always exist.
+    v40 = sorted(configs_dir.glob("jepa_v4_*.json"))
+    assert len(v40) == 8, f"expected 8 v4.0 configs, found {len(v40)}: {[c.name for c in v40]}"
+    # Every v4-family config (v4.0, v4.0.1, v4.1, v4.2, ...) must parse cleanly.
     v4_configs = sorted(configs_dir.glob("jepa_v4*.json"))
-    assert len(v4_configs) == 8, f"expected 8 v4 configs, found {len(v4_configs)}: {[c.name for c in v4_configs]}"
     for p in v4_configs:
         cfg = JEPAConfig.from_json(str(p))
-        # The config should parse without error.
         assert cfg is not None, f"config {p.name} failed to parse"
 
 
