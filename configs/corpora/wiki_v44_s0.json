@@ -89,7 +89,7 @@
   "optim": {
     "lr": 0.0003,
     "weight_decay": 0.01,
-    "batch_size": 128,
+    "batch_size": 24,
     "epochs": 60,
     "grad_clip": 1.0,
     "warmup_steps": 500
