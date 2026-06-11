@@ -420,6 +420,11 @@ class DataConfig:
     mode: str = "pairs"
     max_chains: int | None = None  # smoke/debug cap on #chains (None = full dataset)
     append_eos: bool = False  # v2: append <eos>=4 to tokenized states (default = v1 behavior)
+    # v4.4 masked-reconstruction mode. "diff" (default) = the v4.2 causal s_t→s_{t+1}
+    # changed span (bitwise-unchanged). "random_span" = 1-3 contiguous spans over 20-35%
+    # of the non-pad target tokens, for free-form corpora (Wikipedia) where there is no
+    # causal diff. Only consumed when loss.w_masked_diff > 0; "diff" leaves v4.2 bitwise.
+    mask_mode: str = "diff"
 
 
 @dataclass

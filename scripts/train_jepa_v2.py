@@ -531,6 +531,10 @@ def train(config_path: str):
         mode=mode,
         w_diff=getattr(cfg.loss, "w_diff", 1.0),
         compute_diff_mask=(w_masked_diff > 0),
+        # v4.4: "diff" (default) keeps the v4.2 causal span; "random_span" masks 1-3
+        # contiguous spans for free-form corpora (Wikipedia). Seeded by cfg.seed for repro.
+        mask_mode=getattr(cfg.data, "mask_mode", "diff"),
+        mask_seed=cfg.seed,
     )
     mask_token_id = getattr(tokenizer, "mask_token_id", 1)
     n_train = len(dataset)

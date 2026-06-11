@@ -1,0 +1,23 @@
+{
+  "corpus": "wikipedia",
+  "vocab_size": 8192,
+  "bpe_path": "data/wikipedia/bpe_8192.json",
+  "recommended_max_text_tokens": 80,
+  "recommendation": "p99=76 -> max_text_tokens=80 covers >=99% of states; current candidate 96 drops 0.146%.",
+  "reports": [
+    {
+      "label": "wikipedia",
+      "states": 58315,
+      "vocab_size": 8192,
+      "mean_tokens": 32.35,
+      "p50": 30,
+      "p90": 53,
+      "p95": 61,
+      "p99": 76,
+      "max": 219,
+      "max_text_tokens": 96,
+      "n_over_max": 85,
+      "pct_over_max": 0.146
+    }
+  ]
+}

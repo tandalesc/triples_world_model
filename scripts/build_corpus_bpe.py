@@ -124,7 +124,7 @@ def recommend_max(rep: dict) -> tuple[int, str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--corpus", choices=["wikihow", "commitpack", "gharchive", "shared"], required=True)
+    ap.add_argument("--corpus", choices=["wikihow", "commitpack", "gharchive", "wikipedia", "shared"], required=True)
     ap.add_argument("--data-dir", required=True,
                     help="data dir (comma-separated for --corpus shared)")
     ap.add_argument("--vocab-size", type=int, default=8192)

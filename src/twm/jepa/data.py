@@ -10,6 +10,7 @@ Storage: contiguous CPU tensors, direct index slicing (no DataLoader).
 """
 
 import json
+import random
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Iterator
@@ -73,6 +74,103 @@ def _diff_mask(
             for j in range(j1, hi):
                 mask[j] = True
         # "delete" (src-only) has no target position; "equal" stays False.
+    return mask
+
+
+def _random_span_mask(
+    tgt_ids: list[int],
+    pad_id: int,
+    T: int,
+    rng: random.Random,
+    min_spans: int = 1,
+    max_spans: int = 3,
+    min_cov: float = 0.20,
+    max_cov: float = 0.35,
+) -> Tensor:
+    """Per-token boolean span mask for v4.4 random-span masked reconstruction.
+
+    Surface-diversity reframing (Wikipedia, v4.4): there is NO s_t→s_{t+1} diff to focus
+    on (a chain is just adjacent prose sentences, not a state transition). Instead of the
+    causal diff span, we mask 1-3 CONTIGUOUS spans covering 20-35% of the target's REAL
+    (non-pad) tokens — the standard span-corruption masked-LM recipe (SpanBERT/T5 style),
+    re-used through the SAME <mask>-input-corruption + masked-positions-only CE path as the
+    diff objective.
+
+    Sampling (per call, driven by `rng`):
+      1. n_real = count of non-pad tokens (pad is stripped — pad is never masked).
+      2. coverage fraction c ~ U[min_cov, max_cov]; n_mask = round(c · n_real),
+         clamped to [1, n_real] (a 1-token target masks its single token).
+      3. n_spans ~ randint(min_spans, max_spans), capped at n_mask (cannot have more
+         spans than masked tokens) and at the count that fits without overlap.
+      4. Partition n_mask masked tokens into `n_spans` span LENGTHS (each >= 1), then
+         place the spans left-to-right into the n_real positions with the leftover gap
+         budget distributed BEFORE/BETWEEN/AFTER the spans (seeded), so the spans are
+         contiguous, non-overlapping, and stay within the real (non-pad) region.
+
+    Determinism: WHEN this is computed (per-load, see JEPAChainDataset) the spans are
+    sampled once with a seeded `rng` — NOT resampled per epoch. This is the documented
+    choice: the trainer precomputes all per-example mask tensors at load (no DataLoader,
+    direct index slicing — data.py module docstring), so a per-epoch resample would mean
+    rebuilding (N,T) bool tensors every epoch. A fixed seeded mask per example is the
+    cheap, reproducible option; coverage is still drawn per-example so the corpus sees a
+    spread of mask rates. Pad positions stay FALSE; an empty/all-pad target ⟹ all-FALSE
+    (the masked-diff CE skips it, exactly the diff-mode all-equal edge case).
+
+    Args:
+        tgt_ids: state token ids (the CE target; its positions are masked/scored).
+        pad_id:  padding id (trailing pad is stripped; pad is never masked).
+        T:       output length (== max_text_tokens).
+        rng:     seeded random.Random for reproducible span sampling.
+        min_spans/max_spans: number of contiguous spans (default 1-3).
+        min_cov/max_cov:     fraction of real tokens to mask (default 0.20-0.35).
+
+    Returns:
+        (T,) bool mask, TRUE at the masked spans, FALSE on unmasked/pad positions.
+    """
+    n_real = len(tgt_ids)
+    while n_real > 0 and tgt_ids[n_real - 1] == pad_id:
+        n_real -= 1
+
+    mask = torch.zeros(T, dtype=torch.bool)
+    if n_real == 0:
+        return mask
+
+    cov = rng.uniform(min_cov, max_cov)
+    n_mask = max(1, min(n_real, round(cov * n_real)))
+    n_spans = rng.randint(min_spans, max_spans)
+    n_spans = max(1, min(n_spans, n_mask))
+
+    # Partition n_mask into n_spans positive integer lengths (each >= 1).
+    # Start at all-ones, distribute the remaining (n_mask - n_spans) one at a time.
+    span_lens = [1] * n_spans
+    for _ in range(n_mask - n_spans):
+        span_lens[rng.randrange(n_spans)] += 1
+
+    # Gap budget = real positions not masked, distributed into n_spans+1 gaps
+    # (before / between / after). Each "between" gap is >= 1 so spans don't merge
+    # into one contiguous block (keeps them distinct spans); before/after may be 0.
+    total_gap = n_real - n_mask
+    n_gaps = n_spans + 1
+    # Reserve one slot per internal gap so adjacent spans are separated (when budget
+    # allows); if budget is too tight, spans may abut (acceptable — still <= max_spans).
+    internal = n_spans - 1
+    reserved = min(internal, total_gap)
+    free_gap = total_gap - reserved
+    gaps = [0] * n_gaps
+    for g in range(1, n_spans):  # internal gaps get their reserved 1
+        if reserved > 0:
+            gaps[g] = 1
+            reserved -= 1
+    for _ in range(free_gap):
+        gaps[rng.randrange(n_gaps)] += 1
+
+    # Lay spans out left to right.
+    pos = gaps[0]
+    for s in range(n_spans):
+        hi = min(pos + span_lens[s], n_real, T)
+        for j in range(pos, hi):
+            mask[j] = True
+        pos = hi + gaps[s + 1]
     return mask
 
 
@@ -158,13 +256,27 @@ class JEPAChainDataset:
         mode: str = "pairs",
         w_diff: float = 1.0,
         compute_diff_mask: bool = False,
+        mask_mode: str = "diff",
+        mask_seed: int = 0,
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
+        if mask_mode not in ("diff", "random_span"):
+            raise ValueError(
+                f"mask_mode must be 'diff' or 'random_span', got {mask_mode!r}"
+            )
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
         self.append_eos = append_eos
         self.mode = mode
+        # v4.4 masked-reconstruction mode selector. "diff" (default) = the v4.2 causal
+        # diff span (bitwise-unchanged). "random_span" = 1-3 contiguous spans covering
+        # 20-35% of the target's non-pad tokens, sampled once per example at load with a
+        # seeded RNG (see _random_span_mask for the per-load-vs-per-epoch rationale).
+        self.mask_mode = mask_mode
+        # Per-load RNG for reproducible random-span masks. Only consumed when
+        # mask_mode == "random_span" AND compute_diff_mask is set.
+        self._mask_rng = random.Random(mask_seed)
         # Diff-weighted CE (v4 §2): per-token weights on the s_t→s_{t+1} token diff.
         # ALWAYS computed (cheap; runs once at load), so the trainer can flip w_diff
         # without a data rebuild. w_diff=1.0 (default) ⟹ all-ones over non-pad ⟹ v3
@@ -205,6 +317,18 @@ class JEPAChainDataset:
             self._build_pairs(path, _encode, T)
         else:
             self._build_triples(path, _encode, T)
+
+    def _make_mask(self, src_ids: list[int], tgt_ids: list[int], pad_id: int, T: int) -> Tensor:
+        """Build the per-target masked-reconstruction mask for the active `mask_mode`.
+
+        - "diff" (v4.2): the causal s_t→s_{t+1} changed span (_diff_mask). Bitwise-unchanged.
+        - "random_span" (v4.4): 1-3 contiguous spans over 20-35% of the non-pad target
+          tokens (_random_span_mask), independent of `src_ids` — there is no causal diff on
+          adjacent prose, so the source is ignored and a seeded random span is masked.
+        """
+        if self.mask_mode == "random_span":
+            return _random_span_mask(tgt_ids, pad_id, T, self._mask_rng)
+        return _diff_mask(src_ids, tgt_ids, pad_id, T)
 
     # ------------------------------------------------------------------
     # Build helpers (mode-specific; one populates _src/_tgt, the other _s0/_s1/_s2)
@@ -254,7 +378,7 @@ class JEPAChainDataset:
                 self.w_diff, pad_id, T,
             )
             if self._tgt_diff_mask is not None:
-                self._tgt_diff_mask[i] = _diff_mask(
+                self._tgt_diff_mask[i] = self._make_mask(
                     self._src_ids[i].tolist(), self._tgt_ids[i].tolist(), pad_id, T,
                 )
 
@@ -333,10 +457,10 @@ class JEPAChainDataset:
                 self.w_diff, pad_id, T,
             )
             if self._s1_diff_mask is not None:
-                self._s1_diff_mask[i] = _diff_mask(
+                self._s1_diff_mask[i] = self._make_mask(
                     self._s0_ids[i].tolist(), self._s1_ids[i].tolist(), pad_id, T,
                 )
-                self._s2_diff_mask[i] = _diff_mask(
+                self._s2_diff_mask[i] = self._make_mask(
                     self._s1_ids[i].tolist(), self._s2_ids[i].tolist(), pad_id, T,
                 )
 

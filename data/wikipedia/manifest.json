@@ -1,0 +1,48 @@
+{
+  "corpus": "wikipedia",
+  "source": "wikimedia/wikipedia",
+  "hf_config": "20231101.en",
+  "license": "cc-by-sa-4.0",
+  "license_note": "Wikipedia text: CC BY-SA 4.0 + GFDL. Attribution + share-alike.",
+  "world_state_reading": "v4.4 reframing: NO action/world-state. A chain is a window of 2-4 consecutive sentences from one article paragraph; the training signal is masked reconstruction of adjacent diverse prose (data-pressure limit case).",
+  "labeled_twin": false,
+  "labeled_twin_note": "No action labels (Wikipedia sentences carry no action). Eval degrades gracefully: entity-oracle metrics skipped, separation-AUC runs off plain chains.",
+  "seed": 7,
+  "limit_articles": 0,
+  "min_len": 2,
+  "max_len": 4,
+  "min_sent_words": 4,
+  "max_sent_words": 48,
+  "min_article_chars": 600,
+  "splits": {
+    "train": {
+      "chains": 20000
+    },
+    "test": {
+      "chains": 2000
+    }
+  },
+  "build_stats": {
+    "articles_seen": 382,
+    "dropped_stub_articles": 2,
+    "paragraphs_seen": 24460,
+    "chains_built": 22000,
+    "min_len": 2,
+    "max_len": 4,
+    "min_sent_words": 4,
+    "max_sent_words": 48,
+    "mean_chain_len": 2.65,
+    "mean_sent_words": 20.76,
+    "sent_words_p50": 20,
+    "sent_words_p90": 34,
+    "sent_words_p99": 46,
+    "sent_words_max": 48,
+    "n_word_tokens": 1210530,
+    "n_word_types": 117274,
+    "type_token_ratio": 0.09688
+  },
+  "files": [
+    "train.jsonl",
+    "test.jsonl"
+  ]
+}

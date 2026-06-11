@@ -439,14 +439,26 @@ def _encode_state(tokenizer, text: str, max_text_tokens: int, append_eos: bool =
 def _load_labeled_split(
     labeled_dir, split: str, tokenizer, max_text_tokens: int, append_eos: bool = True,
     max_chains: int | None = None,
+    allow_plain_fallback: bool = False,
 ) -> list[dict]:
     """Load `{split}_labeled.jsonl` -> per-chain dicts (campaign §3.1).
 
     Each record `{"chain":[...], "actions":["<verb>@<idx>",...], "types":[...]}` becomes
     `{"chain": [str], "actions": [str], "types": [str], "ids": [(T,) long], "pad": [(T,) bool]}`
     where ids/pad are the tokenized states (one per chain state) using the SAME encode
-    logic the dataset uses. Used by §3a (NMI) and §3c (rollout fidelity)."""
+    logic the dataset uses. Used by §3a (NMI) and §3c (rollout fidelity).
+
+    v4.4 graceful degradation: when `allow_plain_fallback` is set AND the `_labeled` twin
+    does not exist (a free-form corpus like Wikipedia emits NO action labels), fall back to
+    the PLAIN `{split}.jsonl` chains with empty `actions`/`types`. Label-dependent metrics
+    (action-NMI, OOD ladder, rollout) leave this False and SKIP gracefully on the missing
+    file; only label-FREE metrics (separation-AUC, which needs ids/pad/chain structure) opt
+    in. Callers that do NOT pass the flag keep the original FileNotFoundError behavior."""
     path = Path(labeled_dir) / f"{split}_labeled.jsonl"
+    if allow_plain_fallback and not path.exists():
+        plain = Path(labeled_dir) / f"{split}.jsonl"
+        if plain.exists():
+            path = plain  # plain chains have no "actions"/"types"; rec.get() handles it
     chains: list[dict] = []
     with open(path) as f:
         for line in f:
@@ -884,10 +896,14 @@ def eval_entity_world(model, ew_cfg, device, tokenizer, max_text_tokens: int = 6
             metrics["_ent_target_recovery_error"] = str(exc)
 
     # (e) separation AUC (v4 §C5) — every-N-epochs metric, the v4 success criterion.
+    # v4.4: this is the ONLY label-FREE entity metric, so it opts into the plain-chain
+    # fallback — on a free-form corpus (Wikipedia) with no `_labeled` twin it runs off the
+    # plain `{split}.jsonl` chains. The label-dependent metrics above (NMI/ladder/rollout)
+    # do NOT pass the flag and SKIP gracefully (their try/except catches the missing file).
     try:
         sep_chains = _load_labeled_split(
             labeled_dir, nmi_split, tokenizer, max_text_tokens, append_eos,
-            max_chains=max(subsample, 64),
+            max_chains=max(subsample, 64), allow_plain_fallback=True,
         )
         metrics.update(_separation_auc(model, sep_chains, device))
     except Exception as exc:
