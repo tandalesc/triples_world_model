@@ -473,6 +473,7 @@ def _load_labeled_split(
                 "chain": chain,
                 "actions": rec.get("actions", []),
                 "types": rec.get("types", []),
+                "initial_states": rec.get("initial_states", []),  # oracle start state (probe 1)
                 "ids": ids_list,
                 "pad": pad_list,
             })
@@ -909,6 +910,67 @@ def eval_entity_world(model, ew_cfg, device, tokenizer, max_text_tokens: int = 6
     except Exception as exc:
         metrics["_ent_separation_auc_error"] = str(exc)
 
+    # ---- Geometry probes (new-probe-designs.md). Each try/except-guarded like above. ----
+    manifest = _load_manifest(labeled_dir)
+    gen_mod = None
+    try:
+        import importlib
+        gen_mod = importlib.import_module("scripts.generate_entity_world")
+    except Exception:
+        try:
+            import importlib.util as _ilu
+            from pathlib import Path as _P
+            _spec = _ilu.spec_from_file_location(
+                "generate_entity_world",
+                _P(__file__).resolve().parents[3] / "scripts" / "generate_entity_world.py",
+            )
+            gen_mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(gen_mod)
+        except Exception as exc:
+            metrics["_ent_geometry_oracle_import_error"] = str(exc)
+
+    probe_chains = None
+    try:
+        probe_chains = _load_labeled_split(
+            labeled_dir, nmi_split, tokenizer, max_text_tokens, append_eos,
+            max_chains=max(subsample, 96),
+        )
+    except Exception as exc:
+        metrics["_ent_probe_load_error"] = str(exc)
+
+    # (probe 1) counterfactual locality
+    if gen_mod is not None and probe_chains is not None and manifest:
+        try:
+            metrics.update(_counterfactual_locality(
+                model, tokenizer, probe_chains, device, gen_mod, manifest,
+                max_text_tokens, append_eos,
+            ))
+        except Exception as exc:
+            metrics["_ent_cf_locality_error"] = str(exc)
+
+    # (probe 2) latent-NN purity
+    if probe_chains is not None and manifest:
+        try:
+            metrics.update(_latent_nn_purity(model, probe_chains, device, manifest))
+        except Exception as exc:
+            metrics["_ent_latent_nn_purity_error"] = str(exc)
+
+    # (probe 3) discriminative-variance ratio
+    if gen_mod is not None and probe_chains is not None and manifest:
+        try:
+            metrics.update(_discriminative_variance_ratio(
+                model, probe_chains, device, gen_mod, manifest,
+            ))
+        except Exception as exc:
+            metrics["_ent_disc_var_ratio_error"] = str(exc)
+
+    # (probe 4) slot occupancy
+    if probe_chains is not None:
+        try:
+            metrics.update(_slot_occupancy(model, probe_chains, device))
+        except Exception as exc:
+            metrics["_ent_slot_occupancy_error"] = str(exc)
+
     # Normalise scalars to Python primitives (mirror eval_diagnostics_v2 tail).
     out: dict = {}
     for km, vm in metrics.items():
@@ -1260,6 +1322,480 @@ def _separation_auc(model, chains, device) -> dict:
         "ent_separation_auc_slot_mean": float(auc_slot),
         # v4 success criterion: AUC moving from 0.53 toward > 0.7
         "ent_separation_auc_pass":      bool(best_auc > 0.7),
+    }
+
+
+# ===========================================================================
+# Geometry probes (new-probe-designs.md): counterfactual locality, latent-NN
+# purity, discriminative-variance ratio, slot occupancy. All frozen, CPU/MPS,
+# no optimizer / no .backward(). Each returns ent_* scalars and slots into
+# eval_entity_world like _target_recovery / _separation_auc.
+# ===========================================================================
+
+
+def _text_to_state(text: str, types: list[str], manifest: dict) -> dict:
+    """Parse a rendered state text -> {(entity_idx, attr): value} using the fixed
+    grammar "{display} {cop} {val}." (render_state, surface_variety=False).
+
+    `types` gives the per-entity type names (manifest display+schema disambiguate which
+    entity a clause belongs to). Only surfaced attributes (schema[:2]) ever appear, so the
+    parse covers exactly the text-visible attributes. Robust to a leading action sentence
+    (any clause that does not match the "display cop value" template is skipped).
+
+    Returns a dict keyed by (entity_idx, attr) -> value word. Multiple entities of the same
+    type are disambiguated by clause ORDER (render_state emits entities in `types` order)."""
+    tdefs = manifest.get("types", {})
+    pool = manifest.get("attribute_pool", {})
+    cops = manifest.get("attr_copula", {})
+    # Per entity: (idx, display_lower, [(attr, cop)...] for surfaced attrs).
+    ent_specs = []
+    for idx, tn in enumerate(types):
+        td = tdefs.get(tn, {})
+        disp = td.get("display", "")
+        schema = td.get("schema", [])[:2]  # only the first two are surfaced
+        ent_specs.append((idx, disp.lower(), [(a, cops.get(a, "")) for a in schema]))
+
+    state: dict = {}
+    # Split on '.' into clauses; render_state joins with ". " and capitalizes each.
+    for raw in text.split("."):
+        clause = raw.strip().lower()
+        if not clause:
+            continue
+        # Match against each entity's surfaced (display, cop, attr-ladder).
+        for idx, disp, attrs in ent_specs:
+            if not disp or not clause.startswith(disp):
+                continue
+            rest = clause[len(disp):].strip()
+            matched = False
+            for attr, cop in attrs:
+                cop_l = cop.lower()
+                if cop_l and rest.startswith(cop_l):
+                    val = rest[len(cop_l):].strip()
+                    # Snap to the nearest ladder value (exact membership; the grammar emits
+                    # the value word verbatim, possibly with trailing punctuation removed).
+                    ladder = pool.get(attr, [])
+                    if val in ladder:
+                        state[(idx, attr)] = val
+                        matched = True
+                        break
+                    # multi-word values ("worn out", "wide open"): prefix match.
+                    for lv in ladder:
+                        if val == lv or val.startswith(lv):
+                            state[(idx, attr)] = lv
+                            matched = True
+                            break
+                    if matched:
+                        break
+            if matched:
+                break
+    return state
+
+
+def _oracle_state_str(entities) -> str:
+    """Canonical hashable string of an oracle entities list [(type, {attr:val}), ...]."""
+    parts = []
+    for tn, st in entities:
+        attrs = ",".join(f"{a}={st[a]}" for a in sorted(st))
+        parts.append(f"{tn}({attrs})")
+    return "|".join(parts)
+
+
+@torch.no_grad()
+def _counterfactual_locality(model, tokenizer, chains, device, gen_mod, manifest,
+                             max_text_tokens, append_eos, max_chains: int = 96) -> dict:
+    """(probe 1) Counterfactual locality: does a single surfaced-attribute intervention
+    propagate ONLY to its oracle causal cone, or does the model rewrite unrelated state?
+
+    For each chain: take the oracle start state + first action. Flip ONE surfaced (schema
+    index < 2) attribute of the actor one ladder rung -> counterfactual start. The oracle
+    on-target set = (entity,attr) cells whose oracle next-value differs between factual and
+    counterfactual rollouts; off-target = all other surfaced cells. The model encodes both
+    starts, applies the SAME latent action (posterior argmax of the factual pair) one hop,
+    greedy-decodes both, and we compute the model's changed-cell set.
+
+    Reports leakage_ratio (off/on changes, good~0) + locality precision/recall/F1."""
+    apply_action = gen_mod.apply_action
+    render_state = gen_mod.render_state
+    TYPE_LIBRARY = gen_mod.TYPE_LIBRARY
+
+    leak_num = leak_den = 0
+    tp = fp = fn = 0
+    n_used = 0
+
+    for ch in chains:
+        if n_used >= max_chains:
+            break
+        types = ch.get("types", [])
+        inits = ch.get("initial_states", [])
+        actions = ch.get("actions", [])
+        if not types or not inits or not actions or len(ch["ids"]) < 2:
+            continue
+        try:
+            verb, actor_idx = actions[0].rsplit("@", 1)
+            actor_idx = int(actor_idx)
+        except (ValueError, IndexError):
+            continue
+        if actor_idx >= len(types) or actor_idx >= len(inits):
+            continue
+
+        entities = [(tn, dict(st)) for tn, st in zip(types, inits)]
+        actor_type = types[actor_idx]
+        schema = TYPE_LIBRARY.get(actor_type, {}).get("schema", [])
+        surfaced = schema[:2]  # ONLY these render to text (spec hard constraint)
+        if not surfaced:
+            continue
+
+        # Pick a surfaced attr of the actor to flip one rung (down if possible, else up).
+        flip_attr = None
+        for a in surfaced:
+            ladder = manifest.get("attribute_pool", {}).get(a, [])
+            cur = entities[actor_idx][1].get(a)
+            if cur in ladder and len(ladder) > 1:
+                flip_attr = a
+                break
+        if flip_attr is None:
+            continue
+        ladder = manifest["attribute_pool"][flip_attr]
+        cur_i = ladder.index(entities[actor_idx][1][flip_attr])
+        new_i = cur_i + 1 if cur_i + 1 < len(ladder) else cur_i - 1
+        cf_entities = [(tn, dict(st)) for tn, st in entities]
+        cf_entities[actor_idx][1][flip_attr] = ladder[new_i]
+
+        # Oracle next-states for factual and counterfactual starts under the same action.
+        def _oracle_next(ents):
+            out = [(tn, dict(st)) for tn, st in ents]
+            tn = out[actor_idx][0]
+            out[actor_idx] = (tn, apply_action(tn, out[actor_idx][1], verb))
+            return out
+        f_next = _oracle_next(entities)
+        cf_next = _oracle_next(cf_entities)
+
+        # On-target = surfaced cells whose oracle next-value differs between f and cf.
+        on_target, off_target = set(), set()
+        for ei, tn in enumerate(types):
+            for a in TYPE_LIBRARY.get(tn, {}).get("schema", [])[:2]:
+                fv = f_next[ei][1].get(a)
+                cv = cf_next[ei][1].get(a)
+                if fv != cv:
+                    on_target.add((ei, a))
+                else:
+                    off_target.add((ei, a))
+
+        # Model: encode factual & counterfactual start texts, apply the SAME latent action.
+        x0 = render_state(entities, surface_variety=False)
+        x0_cf = render_state(cf_entities, surface_variety=False)
+        fi, fp_ = _encode_state(tokenizer, x0, max_text_tokens, append_eos)
+        ci, cp_ = _encode_state(tokenizer, x0_cf, max_text_tokens, append_eos)
+        fi_b, fp_b = fi.unsqueeze(0).to(device), fp_.unsqueeze(0).to(device)
+        ci_b, cp_b = ci.unsqueeze(0).to(device), cp_.unsqueeze(0).to(device)
+
+        # Same latent action: posterior argmax of the FACTUAL (s_t, s_{t+1}) pair.
+        ti, tp_ = ch["ids"][1].unsqueeze(0).to(device), ch["pad"][1].unsqueeze(0).to(device)
+        _, v_logits, _ = model.transition(fi_b, fp_b, ti, tp_, tau=1.0, hard=True)
+        v = int(v_logits.squeeze(0).argmax(-1).item())
+        v_oh = F.one_hot(torch.tensor([v], device=device), num_classes=model.n_verbs)
+
+        _, kf, _ = model.encoder(fi_b, fp_b)
+        _, kc, _ = model.encoder(ci_b, cp_b)
+        af = _op_apply(model, kf, v_oh.to(kf.dtype))
+        ac = _op_apply(model, kc, v_oh.to(kc.dtype))
+        gf = model.decoder.generate(af, max_tokens=max_text_tokens, temperature=0.0)
+        gc = model.decoder.generate(ac, max_tokens=max_text_tokens, temperature=0.0)
+        sf = _text_to_state(_strip_decode(tokenizer, gf[0].tolist()), types, manifest)
+        sc = _text_to_state(_strip_decode(tokenizer, gc[0].tolist()), types, manifest)
+
+        # changed_model = surfaced cells where the model's factual vs counterfactual differ.
+        cells = on_target | off_target
+        changed_model = set()
+        for cell in cells:
+            if sf.get(cell) != sc.get(cell):
+                changed_model.add(cell)
+
+        leak_num += len(changed_model & off_target)
+        leak_den += len(changed_model & on_target)
+        tp += len(changed_model & on_target)
+        fp += len(changed_model - on_target)
+        fn += len(on_target - changed_model)
+        n_used += 1
+
+    if n_used == 0:
+        return {"ent_cf_locality_leakage_ratio": float("nan"),
+                "ent_cf_locality_f1": float("nan"),
+                "ent_cf_locality_precision": float("nan"),
+                "ent_cf_locality_recall": float("nan"),
+                "ent_cf_locality_pass": False,
+                "ent_cf_locality_n": 0}
+
+    leakage_ratio = leak_num / max(leak_den, 1)
+    prec = tp / max(tp + fp, 1)
+    rec = tp / max(tp + fn, 1)
+    f1 = 2 * prec * rec / max(prec + rec, 1e-12)
+    return {
+        "ent_cf_locality_leakage_ratio": float(leakage_ratio),
+        "ent_cf_locality_f1": float(f1),
+        "ent_cf_locality_precision": float(prec),
+        "ent_cf_locality_recall": float(rec),
+        "ent_cf_locality_pass": bool(leakage_ratio < 0.25 and f1 > 0.6),
+        "ent_cf_locality_n": int(n_used),
+    }
+
+
+@torch.no_grad()
+def _latent_nn_purity(model, chains, device, manifest,
+                      hard_nn_per_query: int = 40, max_pairs: int = 256) -> dict:
+    """(probe 2) Latent-NN purity: pure latent-space recall@1 with semantic-equivalence
+    credit. For each query pair, the nearest neighbour of zhat in a HARD pool of z_target
+    candidates must be the gold target OR a candidate whose oracle next-state is identical.
+
+    No decoder, no likelihood — strictly harder than hard_mrr (top-1 vs rank-MRR) but with
+    semantic credit for genuine state collisions. Good -> 1.0; chance ~ 1/pool_size."""
+    # Flatten adjacent pairs with originating chain id + the rendered s_{t+1} text (for the
+    # oracle state-equality credit). We parse the already-rendered next text — no re-rollout.
+    zhat_list, z_list, cid_list, next_state_str = [], [], [], []
+    for ci, ch in enumerate(chains):
+        ids, pad, chain = ch["ids"], ch["pad"], ch["chain"]
+        types = ch.get("types", [])
+        for i in range(len(ids) - 1):
+            si = ids[i].unsqueeze(0).to(device)
+            sp = pad[i].unsqueeze(0).to(device)
+            ti = ids[i + 1].unsqueeze(0).to(device)
+            tp_ = pad[i + 1].unsqueeze(0).to(device)
+            out = model.forward_v2(si, sp, ti, tp_, tau=1.0, hard=True)
+            zhat, z_tgt = out.get("zhat"), out.get("z_target")
+            if zhat is None or z_tgt is None:
+                return {"ent_latent_nn_purity": float("nan"),
+                        "ent_latent_nn_purity_chance": float("nan"),
+                        "ent_latent_nn_purity_n": 0}
+            zhat_list.append(zhat.squeeze(0).cpu())
+            z_list.append(z_tgt.squeeze(0).cpu())
+            cid_list.append(ci)
+            # Canonical next-state string from the rendered s_{t+1} text (surfaced cells).
+            parsed = _text_to_state(chain[i + 1], types, manifest)
+            next_state_str.append("|".join(f"{c}={parsed[c]}" for c in sorted(parsed)))
+            if len(zhat_list) >= max_pairs:
+                break
+        if len(zhat_list) >= max_pairs:
+            break
+
+    N = len(zhat_list)
+    if N < 2:
+        return {"ent_latent_nn_purity": float("nan"),
+                "ent_latent_nn_purity_chance": float("nan"),
+                "ent_latent_nn_purity_n": N}
+
+    Zhat = torch.stack(zhat_list)
+    Z = torch.stack(z_list)
+    chain_ids = np.array(cid_list)
+
+    # Hard pools (gold at index 0 + same-chain distractors + cosine-NN of the target),
+    # exactly mirroring _compute_retrieval_mrr.
+    same_chain = defaultdict(list)
+    for i, cid in enumerate(chain_ids):
+        for j, cid2 in enumerate(chain_ids):
+            if j != i and cid2 == cid:
+                same_chain[i].append(j)
+    zt_n = F.normalize(Z.float(), dim=-1)
+    sims_mat = (zt_n @ zt_n.T).numpy()
+    pools = []
+    for i in range(N):
+        base = [i] + same_chain[i]
+        baseset = set(base)
+        order = np.argsort(-sims_mat[i])
+        nn = [int(j) for j in order if j not in baseset][:hard_nn_per_query]
+        pools.append(base + nn)
+
+    zhat_n = F.normalize(Zhat.float(), dim=-1)
+    correct = 0
+    pool_sizes = []
+    for i, pool in enumerate(pools):
+        cand = zt_n[pool]                      # (P, dn)
+        sims = cand @ zhat_n[i]                # (P,)
+        nn_local = int(sims.argmax().item())
+        nn_global = pool[nn_local]
+        # Correct iff the single nearest neighbour is the gold OR a state-equivalent target.
+        if nn_global == i or next_state_str[nn_global] == next_state_str[i]:
+            correct += 1
+        pool_sizes.append(len(pool))
+
+    recall1 = correct / N
+    chance = float(np.mean([1.0 / p for p in pool_sizes]))
+    return {
+        "ent_latent_nn_purity": float(recall1),
+        "ent_latent_nn_purity_chance": chance,
+        "ent_latent_nn_purity_n": int(N),
+    }
+
+
+@torch.no_grad()
+def _discriminative_variance_ratio(model, chains, device, gen_mod, manifest,
+                                   max_pairs: int = 512) -> dict:
+    """(probe 3) Discriminative-vs-reconstructive variance ratio of the noun latent.
+
+    Pools the start nouns to n_i = readout(k_i). Groups queries by oracle start-state. Within
+    a fixed start-state the next-state varies only by the applied action, so the within-group
+    variance is the discriminative ("what-changed") component and the between-group variance
+    is the start-state boilerplate. Reports rho = V_within / V_total. Also fits a ridge probe
+    predicting the oracle delta (changed (attr,direction) one-hot) from standardized n -> R^2."""
+    apply_action = gen_mod.apply_action
+    TYPE_LIBRARY = gen_mod.TYPE_LIBRARY
+
+    n_vecs, start_keys, delta_keys = [], [], []
+    for ch in chains:
+        ids, pad = ch["ids"], ch["pad"]
+        types = ch.get("types", [])
+        inits = ch.get("initial_states", [])
+        actions = ch.get("actions", [])
+        if not types or not inits:
+            continue
+        # Replay oracle states stepwise so each pair has its own start state + delta.
+        entities = [(tn, dict(st)) for tn, st in zip(types, inits)]
+        n_pairs = min(len(ids) - 1, len(actions))
+        for i in range(n_pairs):
+            si = ids[i].unsqueeze(0).to(device)
+            sp = pad[i].unsqueeze(0).to(device)
+            _, k, _ = model.encoder(si, sp)
+            n_vec = model.readout(k).squeeze(0).cpu().numpy()  # (dn,)
+            start_keys.append(_oracle_state_str(entities))
+            # Oracle next state to derive the changed (attr, direction) for this entity.
+            try:
+                verb, actor_idx = actions[i].rsplit("@", 1)
+                actor_idx = int(actor_idx)
+            except (ValueError, IndexError):
+                actor_idx, verb = 0, ""
+            delta_lab = "noop"
+            if actor_idx < len(entities):
+                tn = entities[actor_idx][0]
+                prev = dict(entities[actor_idx][1])
+                nxt = apply_action(tn, prev, verb)
+                changed = [a for a in nxt if nxt[a] != prev.get(a)]
+                if changed:
+                    a0 = changed[0]
+                    ladder = manifest.get("attribute_pool", {}).get(a0, [])
+                    direction = "?"
+                    if prev.get(a0) in ladder and nxt[a0] in ladder:
+                        direction = "up" if ladder.index(nxt[a0]) < ladder.index(prev[a0]) else "down"
+                    delta_lab = f"{a0}:{direction}"
+                entities[actor_idx] = (tn, nxt)
+            n_vecs.append(n_vec)
+            delta_keys.append(delta_lab)
+            if len(n_vecs) >= max_pairs:
+                break
+        if len(n_vecs) >= max_pairs:
+            break
+
+    N = len(n_vecs)
+    if N < 4:
+        return {"ent_disc_var_ratio": float("nan"),
+                "ent_disc_delta_r2": float("nan"),
+                "ent_disc_n": N}
+
+    Nmat = np.stack(n_vecs).astype(np.float64)        # (N, dn)
+    V_total = float(np.var(Nmat, axis=0, ddof=0).sum())
+
+    # Within-group variance: mean over start-state groups of trace(Cov(n | group)).
+    groups = defaultdict(list)
+    for i, sk in enumerate(start_keys):
+        groups[sk].append(i)
+    within_num = 0.0
+    within_cnt = 0
+    for sk, idxs in groups.items():
+        if len(idxs) < 2:
+            continue
+        sub = Nmat[idxs]
+        within_num += float(np.var(sub, axis=0, ddof=0).sum()) * len(idxs)
+        within_cnt += len(idxs)
+    V_within = within_num / within_cnt if within_cnt > 0 else float("nan")
+    rho = (V_within / V_total) if (V_total > 1e-12 and within_cnt > 0) else float("nan")
+
+    # Ridge probe: predict the oracle delta one-hot from standardized n (closed-form).
+    delta_r2 = float("nan")
+    uniq = sorted(set(delta_keys))
+    if len(uniq) >= 2:
+        lab2i = {l: i for i, l in enumerate(uniq)}
+        Y = np.zeros((N, len(uniq)), dtype=np.float64)
+        for i, dl in enumerate(delta_keys):
+            Y[i, lab2i[dl]] = 1.0
+        mu = Nmat.mean(0, keepdims=True)
+        std = Nmat.std(0, keepdims=True) + 1e-8
+        X = (Nmat - mu) / std
+        rng = np.random.default_rng(0)
+        perm = rng.permutation(N)
+        X, Y = X[perm], Y[perm]
+        split = max(int(0.8 * N), 1)
+        Xtr, Xte = X[:split], X[split:]
+        Ytr, Yte = Y[:split], Y[split:]
+        if len(Xte) >= 1 and len(Xtr) >= 2:
+            lam = 1.0
+            Xb = np.concatenate([Xtr, np.ones((len(Xtr), 1))], axis=1)
+            d = Xb.shape[1]
+            reg = lam * np.eye(d); reg[-1, -1] = 0.0
+            W = np.linalg.lstsq(Xb.T @ Xb + reg, Xb.T @ Ytr, rcond=None)[0]
+            Xteb = np.concatenate([Xte, np.ones((len(Xte), 1))], axis=1)
+            Yhat = Xteb @ W
+            ss_res = float(((Yte - Yhat) ** 2).sum())
+            ss_tot = float(((Yte - Yte.mean(0, keepdims=True)) ** 2).sum())
+            delta_r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else float("nan")
+
+    return {
+        "ent_disc_var_ratio": float(rho),
+        "ent_disc_delta_r2": float(delta_r2),
+        "ent_disc_n": int(N),
+        "ent_disc_n_start_groups": int(sum(1 for v in groups.values() if len(v) >= 2)),
+    }
+
+
+@torch.no_grad()
+def _slot_occupancy(model, chains, device, max_pairs: int = 512) -> dict:
+    """(probe 4) Slot occupancy: participation ratio of per-slot energy. Label-free.
+
+    e_m = per-slot variance across examples summed over dn. N_eff = (Σ e_m)^2 / Σ e_m^2
+    (inverse-Simpson PR) = M when energy is uniform, 1 when one slot carries everything.
+    Cross-checks: eff-rank of the mean-slot covariance + slot-norm Gini."""
+    K_list = []
+    for ch in chains:
+        ids, pad = ch["ids"], ch["pad"]
+        for i in range(len(ids)):
+            si = ids[i].unsqueeze(0).to(device)
+            sp = pad[i].unsqueeze(0).to(device)
+            _, k, _ = model.encoder(si, sp)        # (1, M, dn)
+            K_list.append(k.squeeze(0).cpu())
+            if len(K_list) >= max_pairs:
+                break
+        if len(K_list) >= max_pairs:
+            break
+
+    if len(K_list) < 2:
+        return {"ent_slot_occupancy": float("nan"),
+                "ent_slot_occupancy_frac": float("nan"),
+                "ent_slot_occupancy_pass": False,
+                "ent_slot_occupancy_n": len(K_list)}
+
+    K = torch.stack(K_list).numpy()                 # (N, M, dn)
+    N, M, dn = K.shape
+    # Per-slot energy: variance across examples, summed over dn (reuse the Section-9 proxy).
+    e = K.var(axis=0).sum(axis=-1)                  # (M,)
+    e = np.maximum(e, 0.0)
+    denom = float((e ** 2).sum())
+    n_eff = float((e.sum() ** 2) / denom) if denom > 1e-12 else 1.0
+
+    # Cross-check: eff-rank of the mean-slot (M, dn) covariance over examples.
+    slot_means = K.mean(axis=0)                     # (M, dn)
+    Sc = slot_means - slot_means.mean(0, keepdims=True)
+    Cs = Sc @ Sc.T / max(M - 1, 1)                  # (M, M)
+    slot_eff_rank = _effective_rank(Cs)
+
+    # Slot-norm Gini over per-slot energy.
+    es = np.sort(e)
+    cum = np.cumsum(es)
+    gini = float((M + 1 - 2 * (cum / cum[-1]).sum()) / M) if cum[-1] > 1e-12 else 0.0
+
+    return {
+        "ent_slot_occupancy": float(n_eff),
+        "ent_slot_occupancy_frac": float(n_eff / M),
+        "ent_slot_occupancy_eff_rank": float(slot_eff_rank),
+        "ent_slot_occupancy_gini": gini,
+        "ent_slot_occupancy_pass": bool(n_eff >= M / 2),
+        "ent_slot_occupancy_n": int(N),
     }
 
 
