@@ -603,6 +603,10 @@ def train(config_path: str):
         mask_mode=getattr(cfg.data, "mask_mode", "diff"),
         mask_seed=cfg.seed,
         attach_labels=attach_labels,
+        # v5fix: L_sep grouping label. "joint" (default) = full canonical next-state string
+        # (bitwise-unchanged); "changed_attr" = entity-agnostic changed-attribute delta (the
+        # coarse, frequent label that gives L_sep a healthy positive-coverage regime).
+        sep_label=getattr(cfg.loss, "sep_label", "joint"),
     )
     if attach_labels and not getattr(dataset, "has_labels", False):
         print(

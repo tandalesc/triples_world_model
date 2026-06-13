@@ -368,6 +368,14 @@ class LossConfig:
     w_sep: float = 0.0              # sibling-contrastive next-state SupCon weight (Term 2); 0.0 ⟹ off
     sep_temperature: float = 0.1    # τ for the L_sep SupCon (cosine-sim divisor)
     sep_hard_neg_weight: float = 2.0  # ω for same-chain sibling hard negatives in L_sep
+    # v5fix: which oracle label L_sep's SupCon positives group on. DEFAULT "joint" ⟹ the
+    # current full joint multi-entity canonical NEXT-STATE string (bitwise-unchanged for every
+    # existing config, incl. v5_s0). "changed_attr" ⟹ the entity-agnostic CHANGED-ATTRIBUTE
+    # DELTA (sorted multiset of (attribute, direction) pairs) — a coarse, FREQUENT label (tens
+    # of classes) so most in-batch anchors get a positive, fixing the ~97%-inactive L_sep. The
+    # dataset reads this and hashes the chosen string into the SAME _canon_id* tensors; the loss
+    # path is identical (only the grouping label changes). Read only when w_sep > 0.
+    sep_label: str = "joint"
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
     nce: NCEConfig = field(default_factory=NCEConfig)

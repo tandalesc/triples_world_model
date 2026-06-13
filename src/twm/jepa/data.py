@@ -259,12 +259,17 @@ class JEPAChainDataset:
         mask_mode: str = "diff",
         mask_seed: int = 0,
         attach_labels: bool = False,
+        sep_label: str = "joint",
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
         if mask_mode not in ("diff", "random_span"):
             raise ValueError(
                 f"mask_mode must be 'diff' or 'random_span', got {mask_mode!r}"
+            )
+        if sep_label not in ("joint", "changed_attr"):
+            raise ValueError(
+                f"sep_label must be 'joint' or 'changed_attr', got {sep_label!r}"
             )
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
@@ -279,6 +284,17 @@ class JEPAChainDataset:
         # actual availability in `self.has_labels` after the build (False if the twin is missing).
         self.attach_labels = attach_labels
         self.has_labels = False
+        # v5fix: which oracle label L_sep groups on for its SupCon positives.
+        #   "joint" (default)        — the full joint multi-entity canonical NEXT-STATE string
+        #                              (current behavior; ~33K classes, 78% singletons ⟹ L_sep
+        #                              ~97% inactive at batch 64). BITWISE-UNCHANGED path.
+        #   "changed_attr"           — the entity-agnostic CHANGED-ATTRIBUTE DELTA: the sorted
+        #                              multiset of (attribute, direction) pairs of the transition
+        #                              (tens of classes ⟹ most anchors get an in-batch positive,
+        #                              the verb-anchor coverage that already works). The id still
+        #                              flows through the SAME _canon_id* tensors / loss path; only
+        #                              the STRING the registry hashes changes (see _chain_labels).
+        self.sep_label = sep_label
         # v4.4 masked-reconstruction mode selector. "diff" (default) = the v4.2 causal
         # diff span (bitwise-unchanged). "random_span" = 1-3 contiguous spans covering
         # 20-35% of the target's non-pad tokens, sampled once per example at load with a
@@ -374,7 +390,11 @@ class JEPAChainDataset:
         (no twin, or this record lacks the fields) every entry is -1 — the loss treats
         -1 as ignore (verb CE ignore_index) / excludes it from L_sep positives.
         """
-        from .entity_labels import verb_to_id, replay_canonical_states
+        from .entity_labels import (
+            verb_to_id,
+            replay_canonical_states,
+            replay_changed_attr_labels,
+        )
 
         n_trans = max(0, n_states - 1)
         verb_ids = [-1] * n_trans
@@ -390,14 +410,24 @@ class JEPAChainDataset:
             from .entity_labels import parse_action_label
             verb, _ = parse_action_label(actions[i])
             verb_ids[i] = verb_to_id(verb)
-        # Canonical next-state ids from an oracle replay (one canonical string per state).
-        canon_strs = replay_canonical_states(types, inits, actions)
-        if canon_strs is not None:
-            for i in range(n_trans):
-                # transition i targets state_{i+1} -> canon string at index i+1.
-                ci = i + 1
-                if ci < len(canon_strs):
-                    canon_ids[i] = self._canon_registry.get(canon_strs[ci])
+        # L_sep grouping label (canon_ids). The registry maps whichever STRING we hash to a
+        # stable int; only the string differs between sep_label modes (the loss path is shared).
+        if self.sep_label == "changed_attr":
+            # Entity-agnostic changed-attribute delta, ONE label PER TRANSITION (not per state):
+            # entry i is already aligned to transition i (state_i -> state_{i+1}).
+            delta_strs = replay_changed_attr_labels(types, inits, actions)
+            if delta_strs is not None:
+                for i in range(min(n_trans, len(delta_strs))):
+                    canon_ids[i] = self._canon_registry.get(delta_strs[i])
+        else:
+            # "joint" (default): canonical next-state string, ONE per state — transition i
+            # targets state_{i+1}, so we read the canon string at index i+1.
+            canon_strs = replay_canonical_states(types, inits, actions)
+            if canon_strs is not None:
+                for i in range(n_trans):
+                    ci = i + 1
+                    if ci < len(canon_strs):
+                        canon_ids[i] = self._canon_registry.get(canon_strs[ci])
         return verb_ids, canon_ids
 
     # ------------------------------------------------------------------

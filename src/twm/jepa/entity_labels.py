@@ -98,6 +98,21 @@ def replay_canonical_states(types, initial_states, actions):
     Returns None if the oracle is unavailable or the labeled fields are missing
     (the caller then leaves canonical_next_state_id = -1).
     """
+    states = _replay_entity_states(types, initial_states, actions)
+    if states is None:
+        return None
+    return [_canonical_state_str(entities) for entities in states]
+
+
+def _replay_entity_states(types, initial_states, actions):
+    """Replay a chain through the oracle -> list of STRUCTURED entity states.
+
+    Like `replay_canonical_states` but returns, per state in the chain, the structured
+    entity list `[(type_name, {attr: value}), ...]` (len == len(actions)+1) instead of a
+    canonical string. Used by the changed-attribute delta label, which needs the per-attr
+    values (not just the rendered string) to diff a transition. Returns None when the
+    oracle is unavailable or the labeled fields are missing.
+    """
     if not types or not initial_states:
         return None
     try:
@@ -106,18 +121,121 @@ def replay_canonical_states(types, initial_states, actions):
         return None
     apply_action = gen.apply_action
     entities = [(tn, dict(st)) for tn, st in zip(types, initial_states)]
-    canon = [_canonical_state_str(entities)]
+    states = [[(tn, dict(st)) for tn, st in entities]]
     for label in actions:
         verb, actor_idx = parse_action_label(label)
         if actor_idx < 0 or actor_idx >= len(entities):
-            # Malformed actor — record current canonical (no transition) and continue.
-            canon.append(_canonical_state_str(entities))
+            # Malformed actor — record current state (no transition) and continue.
+            states.append([(tn, dict(st)) for tn, st in entities])
             continue
         type_name = entities[actor_idx][0]
         new_state = apply_action(type_name, entities[actor_idx][1], verb)
         entities[actor_idx] = (type_name, new_state)
-        canon.append(_canonical_state_str(entities))
-    return canon
+        states.append([(tn, dict(st)) for tn, st in entities])
+    return states
+
+
+_ATTR_LADDERS = None
+
+
+def _attr_ladders() -> dict | None:
+    """Return the oracle ATTRIBUTE_POOL ordinal ladders (cached), or None if unavailable.
+
+    Each ladder is an ordered list of values, index 0 = best, last = worst. Used to assign
+    a DIRECTION ("up" = toward index 0 / better, "down" = toward the end / worse) to a
+    changed attribute by comparing the before/after ordinal positions.
+    """
+    global _ATTR_LADDERS
+    if _ATTR_LADDERS is not None:
+        return _ATTR_LADDERS
+    try:
+        gen = _load_oracle_module()
+    except Exception:
+        return None
+    _ATTR_LADDERS = dict(gen.ATTRIBUTE_POOL)
+    return _ATTR_LADDERS
+
+
+def _attr_direction(attr: str, old_val, new_val) -> str:
+    """Direction of an attribute change via its ordinal ladder.
+
+    "up" = moved toward index 0 (better), "down" = moved toward the end (worse). Falls back
+    to a stable string-comparison label ("set" prefix) when the ladder or value is unknown,
+    so an off-ladder value still yields a deterministic, entity-agnostic token rather than
+    crashing.
+    """
+    ladders = _attr_ladders()
+    ladder = ladders.get(attr) if ladders else None
+    if ladder and old_val in ladder and new_val in ladder:
+        oi, ni = ladder.index(old_val), ladder.index(new_val)
+        if ni < oi:
+            return "up"
+        if ni > oi:
+            return "down"
+        return "same"  # unreachable (values differ ⟹ indices differ), defensive
+    # Unknown ladder/value: fall back to the destination value so the label is still stable.
+    return f"set:{new_val}"
+
+
+def changed_attr_label(prev_entities, next_entities) -> str:
+    """Entity-agnostic canonical label of the CHANGED-ATTRIBUTE DELTA of one transition.
+
+    Diffs the previous vs next structured entity states (`[(type_name, {attr: value}), ...]`)
+    and produces a stable canonical string of the MULTISET of changed `(attribute, direction)`
+    pairs — ENTITY-AGNOSTIC: which entity changed is dropped, so "hunger decreased" is the
+    SAME class no matter which entity it happened to (and regardless of entity order). This is
+    deliberately COARSER than the joint next-state string: it collapses the 33K-class joint
+    label (78% singletons) down to the tens-of-classes space of "what kind of change happened",
+    so most in-batch anchors find a positive (the verb-anchor coverage that already works).
+
+    Why (attribute, direction) and not (entity, attribute, value): the oracle changes 1-2
+    attributes per action by a single ordinal step, so the *kind* of change ("hunger up",
+    "cleanliness down") recurs across thousands of transitions while the full joint state is
+    near-unique. Keeping the direction (not just the attribute) preserves the semantic content
+    L_sep needs — "fed" (hunger up) and "starved" (hunger down) stay distinct sub-manifolds —
+    while staying frequent. Using a MULTISET (sorted, with counts) keeps two-attribute actions
+    (e.g. "feed" raising hunger AND mood) as their own class, distinct from either single change.
+
+    No-op (nothing changed — e.g. an action with no in-schema effect, or a clamped value at
+    a ladder boundary) maps to the dedicated "no_change" token, its own class.
+
+    Args:
+        prev_entities: structured state BEFORE the transition (list of (type, {attr:val})).
+        next_entities: structured state AFTER  the transition (same shape, same entity order).
+
+    Returns:
+        a stable canonical string, e.g. "hunger:up" or "hunger:up,mood:up" or "no_change".
+    """
+    changed: list[str] = []
+    n = min(len(prev_entities), len(next_entities))
+    for i in range(n):
+        _, prev_state = prev_entities[i]
+        _, next_state = next_entities[i]
+        for attr in sorted(set(prev_state) | set(next_state)):
+            ov = prev_state.get(attr)
+            nv = next_state.get(attr)
+            if ov != nv:
+                changed.append(f"{attr}:{_attr_direction(attr, ov, nv)}")
+    if not changed:
+        return "no_change"
+    # Sorted multiset (counts preserved by the sort over the per-pair tokens) ⟹ stable,
+    # entity-agnostic, order-independent. Comma-join the sorted pair tokens.
+    return ",".join(sorted(changed))
+
+
+def replay_changed_attr_labels(types, initial_states, actions):
+    """Replay a chain -> list of changed-attribute delta labels, one PER TRANSITION.
+
+    Returns a list of length len(actions): entry i is the changed_attr_label of transition i
+    (state_i -> state_{i+1}). Returns None when the oracle/labeled fields are unavailable (the
+    caller then leaves the changed-attr id = -1, mirroring replay_canonical_states).
+    """
+    states = _replay_entity_states(types, initial_states, actions)
+    if states is None:
+        return None
+    return [
+        changed_attr_label(states[i], states[i + 1]) for i in range(len(states) - 1)
+    ]
 
 
 class CanonicalStateRegistry:
