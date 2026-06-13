@@ -181,12 +181,24 @@ class TransitionEncoder(nn.Module):
         h = self.norm(self.act(self.fc1(pair)))
         v_logits = self.fc2(h)                  # (B, V)
 
+        # v5 Step-1a: stash the pre-logits pair features `h` (mlp_hidden width) so the model
+        # can hand them to the training-only verb-anchor aux head WITHOUT a second trunk pass.
+        # Detached read happens in the model only when L_verb_anchor is active; storing here is
+        # free and does not change the returned tuple (the frozen §11 forward signature).
+        self._last_pair_features = h
+
         # Gumbel-softmax sample in fp32 under autocast-off (mirror operator gotcha).
         with _autocast_off(v_logits.device.type):
             v_onehot = gumbel_softmax_sample(v_logits.float(), tau=tau, hard=hard)
         v_onehot = v_onehot.to(v_logits.dtype)
 
         return v_onehot, v_logits, pool_t
+
+    @property
+    def pair_features_dim(self) -> int:
+        """Width of the pre-logits pair features `h` (== mlp_hidden). The verb-anchor aux
+        head's input dim (research/jepa_v5_discriminative_design.md Term 1)."""
+        return self.fc2.in_features
 
     def forward_mask(
         self,

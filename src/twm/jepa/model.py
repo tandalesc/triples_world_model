@@ -418,6 +418,9 @@ class JEPAOperatorModelV2(nn.Module):
             "g_logits": g_logits,
             "g_prior_logits": g_prior_logits,
             "g_hard": g_hard,
+            # v5 Step-1a: posterior pre-logits pair features for the verb-anchor aux head
+            # (training-only; the loss reads it ONLY when w_verb_anchor>0).
+            "verb_features": getattr(self.transition, "_last_pair_features", None),
         }
 
         # v2.1 optional kind readout (design §7): diagnostic label only, never routes.
@@ -560,6 +563,8 @@ class JEPAOperatorModelV2(nn.Module):
                 "g_logits": g_logits,
                 "g_prior_logits": g_prior_logits,
                 "g_hard": g_hard,
+                # v5 Step-1a: this hop's posterior pre-logits features (verb-anchor aux head).
+                "verb_features": getattr(self.transition, "_last_pair_features", None),
             }
             if self.kind_head is not None:
                 hop_out["kind_ids"] = self.kind_head.assign(k_in)

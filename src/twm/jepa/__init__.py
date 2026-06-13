@@ -359,6 +359,15 @@ class LossConfig:
     tau_pool: float = 0.1      # cosine-sim temperature τ_pool for L_pool_nce
     n_pool_negs: int = 16      # in-batch NN hard negatives mined per anchor for L_pool_nce
     pool_nce_stop_grad_pos: bool = False  # detach the online positive pool (MoCo asymmetry)
+    # v5 Step-1a discriminative-first terms (research/jepa_v5_discriminative_design.md). ALL
+    # default to the bitwise-neutral value (w_verb_anchor=0.0 ⟹ no aux head, term skipped;
+    # w_sep=0.0 ⟹ term skipped), so every existing v3/v4 config parses and trains IDENTICALLY.
+    # verb_anchor_frac / sep_temperature / sep_hard_neg_weight read only when their weight>0.
+    w_verb_anchor: float = 0.0      # sparse oracle-verb CE weight (Term 1); 0.0 ⟹ off
+    verb_anchor_frac: float = 0.05  # fraction of labeled in-batch transitions supervised
+    w_sep: float = 0.0              # sibling-contrastive next-state SupCon weight (Term 2); 0.0 ⟹ off
+    sep_temperature: float = 0.1    # τ for the L_sep SupCon (cosine-sim divisor)
+    sep_hard_neg_weight: float = 2.0  # ω for same-chain sibling hard negatives in L_sep
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
     nce: NCEConfig = field(default_factory=NCEConfig)

@@ -258,6 +258,7 @@ class JEPAChainDataset:
         compute_diff_mask: bool = False,
         mask_mode: str = "diff",
         mask_seed: int = 0,
+        attach_labels: bool = False,
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
@@ -269,6 +270,15 @@ class JEPAChainDataset:
         self.max_text_tokens = max_text_tokens
         self.append_eos = append_eos
         self.mode = mode
+        # v5 Step-1a oracle labels (entity-world only). When True AND a `<stem>_labeled.jsonl`
+        # twin exists, each transition additionally carries oracle_verb_id (int, the GT verb
+        # mapped through entity_labels.ORACLE_VERBS; -1 if absent) and canonical_next_state_id
+        # (int, the oracle canonical next-state via apply_action replay). DEFAULT FALSE ⟹ the
+        # labeled twin is never read, NO label tensors are built, and the __getitem__/get_batch
+        # keys are absent — so GLUCOSE/unlabeled configs are bitwise-unchanged. Resolved to the
+        # actual availability in `self.has_labels` after the build (False if the twin is missing).
+        self.attach_labels = attach_labels
+        self.has_labels = False
         # v4.4 masked-reconstruction mode selector. "diff" (default) = the v4.2 causal
         # diff span (bitwise-unchanged). "random_span" = 1-3 contiguous spans covering
         # 20-35% of the target's non-pad tokens, sampled once per example at load with a
@@ -313,6 +323,23 @@ class JEPAChainDataset:
             ids_t = torch.tensor(ids, dtype=torch.long)
             return ids_t, (ids_t == pad_id)
 
+        # v5 Step-1a: load the labeled twin (oracle verbs + states) if requested AND present.
+        # `_labeled` is a list aligned 1:1 with the plain chain file (same generation order).
+        # The per-state canonical-next-state registry is shared across the whole dataset so
+        # positives (same canonical state) get the SAME id everywhere (the L_sep label).
+        self._labeled = None
+        self._canon_registry = None
+        if attach_labels:
+            from .entity_labels import (
+                load_labeled_records,
+                labeled_path_for,
+                CanonicalStateRegistry,
+            )
+            self._labeled = load_labeled_records(labeled_path_for(path))
+            if self._labeled is not None:
+                self._canon_registry = CanonicalStateRegistry()
+                self.has_labels = True
+
         if mode == "pairs":
             self._build_pairs(path, _encode, T)
         else:
@@ -331,6 +358,49 @@ class JEPAChainDataset:
         return _diff_mask(src_ids, tgt_ids, pad_id, T)
 
     # ------------------------------------------------------------------
+    # v5 Step-1a oracle-label helper (entity-world only)
+    # ------------------------------------------------------------------
+
+    def _chain_labels(self, chain_no: int, n_states: int):
+        """Per-transition oracle labels for the chain at `chain_no` (v5 Step-1a).
+
+        Returns (verb_ids, canon_ids) where:
+          - verb_ids[i]  = oracle verb id of transition state_i -> state_{i+1}
+                           (entity_labels.ORACLE_VERBS index; -1 if no/unknown label).
+          - canon_ids[i] = canonical id of the oracle next-state (state_{i+1}),
+                           shared across the dataset so paraphrase renderings of the same
+                           underlying state collapse to one id; -1 if unavailable.
+        Both lists have length n_states-1 (one per transition). When labels are absent
+        (no twin, or this record lacks the fields) every entry is -1 — the loss treats
+        -1 as ignore (verb CE ignore_index) / excludes it from L_sep positives.
+        """
+        from .entity_labels import verb_to_id, replay_canonical_states
+
+        n_trans = max(0, n_states - 1)
+        verb_ids = [-1] * n_trans
+        canon_ids = [-1] * n_trans
+        if self._labeled is None or chain_no >= len(self._labeled):
+            return verb_ids, canon_ids
+        rec = self._labeled[chain_no]
+        actions = rec.get("actions", []) or []
+        types = rec.get("types", []) or []
+        inits = rec.get("initial_states", []) or []
+        # Verb ids straight from the action labels.
+        for i in range(min(n_trans, len(actions))):
+            from .entity_labels import parse_action_label
+            verb, _ = parse_action_label(actions[i])
+            verb_ids[i] = verb_to_id(verb)
+        # Canonical next-state ids from an oracle replay (one canonical string per state).
+        canon_strs = replay_canonical_states(types, inits, actions)
+        if canon_strs is not None:
+            for i in range(n_trans):
+                # transition i targets state_{i+1} -> canon string at index i+1.
+                ci = i + 1
+                if ci < len(canon_strs):
+                    canon_ids[i] = self._canon_registry.get(canon_strs[ci])
+        return verb_ids, canon_ids
+
+    # ------------------------------------------------------------------
     # Build helpers (mode-specific; one populates _src/_tgt, the other _s0/_s1/_s2)
     # ------------------------------------------------------------------
 
@@ -341,15 +411,24 @@ class JEPAChainDataset:
         src_texts: list[str] = []
         tgt_texts: list[str] = []
         chain_ids: list[int] = []
+        # v5 Step-1a per-pair oracle labels (parallel to src/tgt; all -1 when no twin).
+        verb_lbls: list[int] = []
+        canon_lbls: list[int] = []
 
         with open(path) as f:
             for chain_no, line in enumerate(f):
                 data = json.loads(line)
                 chain: list[str] = data["chain"]
+                v_ids, c_ids = (
+                    self._chain_labels(chain_no, len(chain))
+                    if self.has_labels else ([-1] * (len(chain) - 1), [-1] * (len(chain) - 1))
+                )
                 for i in range(len(chain) - 1):
                     src_texts.append(chain[i])
                     tgt_texts.append(chain[i + 1])
                     chain_ids.append(chain_no)
+                    verb_lbls.append(v_ids[i] if i < len(v_ids) else -1)
+                    canon_lbls.append(c_ids[i] if i < len(c_ids) else -1)
 
         n = len(src_texts)
         self._src_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
@@ -387,6 +466,13 @@ class JEPAChainDataset:
         self._tgt_texts: list[str] = tgt_texts
         # Per-pair originating chain id (design §8.2). len == len(dataset).
         self._chain_ids: list[int] = chain_ids
+        # v5 Step-1a per-pair oracle labels (None when no twin; else (N,) long tensors).
+        if self.has_labels:
+            self._verb_id: Tensor | None = torch.tensor(verb_lbls, dtype=torch.long)
+            self._canon_id: Tensor | None = torch.tensor(canon_lbls, dtype=torch.long)
+        else:
+            self._verb_id = None
+            self._canon_id = None
 
     def _build_triples(self, path, _encode, T: int) -> None:
         """v3 triples mode (design §2.1). Emit ONE example per length-3 chain holding all
@@ -400,6 +486,11 @@ class JEPAChainDataset:
         s2_texts: list[str] = []
         chain_ids: list[int] = []
         n_skipped = 0
+        # v5 Step-1a per-hop oracle labels (one row per chain, two hops). All -1 w/o twin.
+        verb_h1: list[int] = []
+        verb_h2: list[int] = []
+        canon_h1: list[int] = []
+        canon_h2: list[int] = []
 
         with open(path) as f:
             for chain_no, line in enumerate(f):
@@ -414,6 +505,15 @@ class JEPAChainDataset:
                 s1_texts.append(chain[1])
                 s2_texts.append(chain[2])
                 chain_ids.append(chain_no)
+                # Hop-1 = transition 0 (s0->s1), hop-2 = transition 1 (s1->s2).
+                v_ids, c_ids = (
+                    self._chain_labels(chain_no, len(chain))
+                    if self.has_labels else ([-1, -1], [-1, -1])
+                )
+                verb_h1.append(v_ids[0] if len(v_ids) > 0 else -1)
+                verb_h2.append(v_ids[1] if len(v_ids) > 1 else -1)
+                canon_h1.append(c_ids[0] if len(c_ids) > 0 else -1)
+                canon_h2.append(c_ids[1] if len(c_ids) > 1 else -1)
 
         n = len(s0_texts)
         self.n_skipped = n_skipped
@@ -469,6 +569,15 @@ class JEPAChainDataset:
         self._s2_texts: list[str] = s2_texts
         # One id per chain (== example index's originating chain).
         self._chain_ids: list[int] = chain_ids
+        # v5 Step-1a per-hop oracle labels (None when no twin; else (N,) long tensors).
+        if self.has_labels:
+            self._verb_id_h1: Tensor | None = torch.tensor(verb_h1, dtype=torch.long)
+            self._verb_id_h2: Tensor | None = torch.tensor(verb_h2, dtype=torch.long)
+            self._canon_id_h1: Tensor | None = torch.tensor(canon_h1, dtype=torch.long)
+            self._canon_id_h2: Tensor | None = torch.tensor(canon_h2, dtype=torch.long)
+        else:
+            self._verb_id_h1 = self._verb_id_h2 = None
+            self._canon_id_h1 = self._canon_id_h2 = None
 
     # ------------------------------------------------------------------
     # Core dataset interface
@@ -516,6 +625,11 @@ class JEPAChainDataset:
             if self._s1_diff_mask is not None:
                 out["s1_diff_mask"] = self._s1_diff_mask[idx]
                 out["s2_diff_mask"] = self._s2_diff_mask[idx]
+            if self.has_labels:
+                out["verb_id_h1"] = self._verb_id_h1[idx]
+                out["verb_id_h2"] = self._verb_id_h2[idx]
+                out["canon_id_h1"] = self._canon_id_h1[idx]
+                out["canon_id_h2"] = self._canon_id_h2[idx]
             return out
         out = {
             "src_ids": self._src_ids[idx],
@@ -526,6 +640,9 @@ class JEPAChainDataset:
         }
         if self._tgt_diff_mask is not None:
             out["tgt_diff_mask"] = self._tgt_diff_mask[idx]
+        if self.has_labels:
+            out["verb_id"] = self._verb_id[idx]
+            out["canon_id"] = self._canon_id[idx]
         return out
 
     def get_batch(self, indices) -> dict:
@@ -554,6 +671,11 @@ class JEPAChainDataset:
             if self._s1_diff_mask is not None:
                 out["s1_diff_mask"] = self._s1_diff_mask[indices]
                 out["s2_diff_mask"] = self._s2_diff_mask[indices]
+            if self.has_labels:
+                out["verb_id_h1"] = self._verb_id_h1[indices]
+                out["verb_id_h2"] = self._verb_id_h2[indices]
+                out["canon_id_h1"] = self._canon_id_h1[indices]
+                out["canon_id_h2"] = self._canon_id_h2[indices]
             return out
         out = {
             "src_ids": self._src_ids[indices],
@@ -564,6 +686,9 @@ class JEPAChainDataset:
         }
         if self._tgt_diff_mask is not None:
             out["tgt_diff_mask"] = self._tgt_diff_mask[indices]
+        if self.has_labels:
+            out["verb_id"] = self._verb_id[indices]
+            out["canon_id"] = self._canon_id[indices]
         return out
 
     # ------------------------------------------------------------------
