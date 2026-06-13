@@ -1,5 +1,18 @@
 # JEPA v5 — Discriminative-First Objective (Step-1a)
 
+> **DEPRECATED (2026-06-13). DO NOT USE.** The v5 arm (`L_verb_anchor` = oracle-verb CE;
+> `L_sep` = SupCon keyed on oracle canonical-next-state / changed-attribute ids) put
+> GROUND-TRUTH ORACLE SIGNAL into the TRAINING loss. The project's thesis is an
+> UNSUPERVISED world model that transfers to unseen processes — no oracle may enter the
+> training loss. Both terms, their heads, config fields (`w_verb_anchor`, `verb_anchor_frac`,
+> `n_oracle_verbs`, `w_sep`, `sep_temperature`, `sep_hard_neg_weight`, `sep_label`), the
+> data-side label attach, and the `jepa_v5_*` / `jepa_v5fix_*` configs (moved to
+> `configs/archive/jepa_v5_supervised/`) have been REMOVED. The oracle (`entity_labels.py`,
+> `*_labeled.jsonl`) is retained for EVAL/DIAGNOSTICS ONLY. The label-free replacement is
+> **v6** (`research/jepa_v6_unsupervised_design.md`): PRIMARY `L_lam_inv` — surface-
+> augmentation invariance (arXiv:2506.15691); SECONDARY `L_self_nce` — self-supervised
+> InfoNCE on `zhat`. This document is kept for historical context only.
+
 **Status: IMPLEMENTED (pending GPU validation).** Supersedes the earlier
 `jepa_v5_usepressure_design.md` draft (slot-use pressure). The Step-0 baseline retired
 that direction: slot occupancy is ~7/8 — slots ARE used, so collapse-onto-few-slots is

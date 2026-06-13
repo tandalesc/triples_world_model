@@ -258,8 +258,7 @@ class JEPAChainDataset:
         compute_diff_mask: bool = False,
         mask_mode: str = "diff",
         mask_seed: int = 0,
-        attach_labels: bool = False,
-        sep_label: str = "joint",
+        lam_augment: bool = False,
     ) -> None:
         if mode not in ("pairs", "triples"):
             raise ValueError(f"mode must be 'pairs' or 'triples', got {mode!r}")
@@ -267,34 +266,24 @@ class JEPAChainDataset:
             raise ValueError(
                 f"mask_mode must be 'diff' or 'random_span', got {mask_mode!r}"
             )
-        if sep_label not in ("joint", "changed_attr"):
-            raise ValueError(
-                f"sep_label must be 'joint' or 'changed_attr', got {sep_label!r}"
-            )
         self.tokenizer = tokenizer
         self.max_text_tokens = max_text_tokens
         self.append_eos = append_eos
         self.mode = mode
-        # v5 Step-1a oracle labels (entity-world only). When True AND a `<stem>_labeled.jsonl`
-        # twin exists, each transition additionally carries oracle_verb_id (int, the GT verb
-        # mapped through entity_labels.ORACLE_VERBS; -1 if absent) and canonical_next_state_id
-        # (int, the oracle canonical next-state via apply_action replay). DEFAULT FALSE ⟹ the
-        # labeled twin is never read, NO label tensors are built, and the __getitem__/get_batch
-        # keys are absent — so GLUCOSE/unlabeled configs are bitwise-unchanged. Resolved to the
-        # actual availability in `self.has_labels` after the build (False if the twin is missing).
-        self.attach_labels = attach_labels
-        self.has_labels = False
-        # v5fix: which oracle label L_sep groups on for its SupCon positives.
-        #   "joint" (default)        — the full joint multi-entity canonical NEXT-STATE string
-        #                              (current behavior; ~33K classes, 78% singletons ⟹ L_sep
-        #                              ~97% inactive at batch 64). BITWISE-UNCHANGED path.
-        #   "changed_attr"           — the entity-agnostic CHANGED-ATTRIBUTE DELTA: the sorted
-        #                              multiset of (attribute, direction) pairs of the transition
-        #                              (tens of classes ⟹ most anchors get an in-batch positive,
-        #                              the verb-anchor coverage that already works). The id still
-        #                              flows through the SAME _canon_id* tensors / loss path; only
-        #                              the STRING the registry hashes changes (see _chain_labels).
-        self.sep_label = sep_label
+        # v6 §B surface-augmentation invariance (research/jepa_v6_unsupervised_design.md,
+        # arXiv:2506.15691). When True AND the chain JSONL carries a `chain_aug` field (a
+        # SECOND independent surface frame φ' of the SAME chain states, emitted by the data
+        # generator with a fresh chain_template_seed), each transition additionally carries:
+        #   posterior frame φ : the existing `chain` rendering (posterior + noun path)
+        #   decoder target φ' : the `chain_aug` rendering of the SAME s_{t+1} (the CE target)
+        # The loss/trainer only ever see RENDERED TEXT — never an oracle state/label. The
+        # underlying-state access that produced the two frames is the data generator's, not
+        # the trainer's (the augmentation interface is pluggable: a text-level paraphraser
+        # could supply `chain_aug` instead of the renderer — see the design doc). DEFAULT
+        # FALSE ⟹ no second-frame tensors are built and the dataset is bitwise v4. Resolved
+        # to actual availability in `self.lam_augment` after the build (False if no field).
+        self._lam_augment_requested = lam_augment
+        self.lam_augment = False
         # v4.4 masked-reconstruction mode selector. "diff" (default) = the v4.2 causal
         # diff span (bitwise-unchanged). "random_span" = 1-3 contiguous spans covering
         # 20-35% of the target's non-pad tokens, sampled once per example at load with a
@@ -339,22 +328,7 @@ class JEPAChainDataset:
             ids_t = torch.tensor(ids, dtype=torch.long)
             return ids_t, (ids_t == pad_id)
 
-        # v5 Step-1a: load the labeled twin (oracle verbs + states) if requested AND present.
-        # `_labeled` is a list aligned 1:1 with the plain chain file (same generation order).
-        # The per-state canonical-next-state registry is shared across the whole dataset so
-        # positives (same canonical state) get the SAME id everywhere (the L_sep label).
-        self._labeled = None
-        self._canon_registry = None
-        if attach_labels:
-            from .entity_labels import (
-                load_labeled_records,
-                labeled_path_for,
-                CanonicalStateRegistry,
-            )
-            self._labeled = load_labeled_records(labeled_path_for(path))
-            if self._labeled is not None:
-                self._canon_registry = CanonicalStateRegistry()
-                self.has_labels = True
+        self._encode_fn = _encode  # bound for the v6 §B paired-frame builders
 
         if mode == "pairs":
             self._build_pairs(path, _encode, T)
@@ -374,92 +348,43 @@ class JEPAChainDataset:
         return _diff_mask(src_ids, tgt_ids, pad_id, T)
 
     # ------------------------------------------------------------------
-    # v5 Step-1a oracle-label helper (entity-world only)
-    # ------------------------------------------------------------------
-
-    def _chain_labels(self, chain_no: int, n_states: int):
-        """Per-transition oracle labels for the chain at `chain_no` (v5 Step-1a).
-
-        Returns (verb_ids, canon_ids) where:
-          - verb_ids[i]  = oracle verb id of transition state_i -> state_{i+1}
-                           (entity_labels.ORACLE_VERBS index; -1 if no/unknown label).
-          - canon_ids[i] = canonical id of the oracle next-state (state_{i+1}),
-                           shared across the dataset so paraphrase renderings of the same
-                           underlying state collapse to one id; -1 if unavailable.
-        Both lists have length n_states-1 (one per transition). When labels are absent
-        (no twin, or this record lacks the fields) every entry is -1 — the loss treats
-        -1 as ignore (verb CE ignore_index) / excludes it from L_sep positives.
-        """
-        from .entity_labels import (
-            verb_to_id,
-            replay_canonical_states,
-            replay_changed_attr_labels,
-        )
-
-        n_trans = max(0, n_states - 1)
-        verb_ids = [-1] * n_trans
-        canon_ids = [-1] * n_trans
-        if self._labeled is None or chain_no >= len(self._labeled):
-            return verb_ids, canon_ids
-        rec = self._labeled[chain_no]
-        actions = rec.get("actions", []) or []
-        types = rec.get("types", []) or []
-        inits = rec.get("initial_states", []) or []
-        # Verb ids straight from the action labels.
-        for i in range(min(n_trans, len(actions))):
-            from .entity_labels import parse_action_label
-            verb, _ = parse_action_label(actions[i])
-            verb_ids[i] = verb_to_id(verb)
-        # L_sep grouping label (canon_ids). The registry maps whichever STRING we hash to a
-        # stable int; only the string differs between sep_label modes (the loss path is shared).
-        if self.sep_label == "changed_attr":
-            # Entity-agnostic changed-attribute delta, ONE label PER TRANSITION (not per state):
-            # entry i is already aligned to transition i (state_i -> state_{i+1}).
-            delta_strs = replay_changed_attr_labels(types, inits, actions)
-            if delta_strs is not None:
-                for i in range(min(n_trans, len(delta_strs))):
-                    canon_ids[i] = self._canon_registry.get(delta_strs[i])
-        else:
-            # "joint" (default): canonical next-state string, ONE per state — transition i
-            # targets state_{i+1}, so we read the canon string at index i+1.
-            canon_strs = replay_canonical_states(types, inits, actions)
-            if canon_strs is not None:
-                for i in range(n_trans):
-                    ci = i + 1
-                    if ci < len(canon_strs):
-                        canon_ids[i] = self._canon_registry.get(canon_strs[ci])
-        return verb_ids, canon_ids
-
-    # ------------------------------------------------------------------
     # Build helpers (mode-specific; one populates _src/_tgt, the other _s0/_s1/_s2)
     # ------------------------------------------------------------------
 
     def _build_pairs(self, path, _encode, T: int) -> None:
-        """v2 pairs mode (unchanged behavior). A chain of length L yields L-1 adjacent
-        (state_t, state_{t+1}) pairs. The two pairs of a length-3 chain SHARE a chain_id
-        so the hard-negative MRR builds true same-chain negative pools (design §8.2)."""
+        """v2 pairs mode (unchanged behavior at lam_augment off). A chain of length L yields
+        L-1 adjacent (state_t, state_{t+1}) pairs. The two pairs of a length-3 chain SHARE a
+        chain_id so the hard-negative MRR builds true same-chain negative pools (design §8.2).
+
+        v6 §B: when lam_augment is requested AND the record has a `chain_aug` field (a second
+        independent surface frame φ' of the SAME chain states), the φ' renderings of s_t and
+        s_{t+1} are captured per pair for the surface-invariance forward (posterior frame φ =
+        `chain`, decoder target frame φ' = `chain_aug`). LABEL-FREE — text only."""
         src_texts: list[str] = []
         tgt_texts: list[str] = []
         chain_ids: list[int] = []
-        # v5 Step-1a per-pair oracle labels (parallel to src/tgt; all -1 when no twin).
-        verb_lbls: list[int] = []
-        canon_lbls: list[int] = []
+        # v6 §B: φ' (chain_aug) renderings of the same s_t / s_{t+1} (empty when lam off/absent).
+        aug_src_texts: list[str] = []
+        aug_tgt_texts: list[str] = []
+        saw_aug = False
 
         with open(path) as f:
             for chain_no, line in enumerate(f):
                 data = json.loads(line)
                 chain: list[str] = data["chain"]
-                v_ids, c_ids = (
-                    self._chain_labels(chain_no, len(chain))
-                    if self.has_labels else ([-1] * (len(chain) - 1), [-1] * (len(chain) - 1))
-                )
+                chain_aug = data.get("chain_aug") if self._lam_augment_requested else None
+                if chain_aug is not None and len(chain_aug) == len(chain):
+                    saw_aug = True
                 for i in range(len(chain) - 1):
                     src_texts.append(chain[i])
                     tgt_texts.append(chain[i + 1])
                     chain_ids.append(chain_no)
-                    verb_lbls.append(v_ids[i] if i < len(v_ids) else -1)
-                    canon_lbls.append(c_ids[i] if i < len(c_ids) else -1)
+                    if chain_aug is not None and len(chain_aug) == len(chain):
+                        aug_src_texts.append(chain_aug[i])
+                        aug_tgt_texts.append(chain_aug[i + 1])
 
+        self.lam_augment = bool(self._lam_augment_requested and saw_aug
+                                and len(aug_src_texts) == len(src_texts))
         n = len(src_texts)
         self._src_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
         self._src_pad: Tensor = torch.ones((n, T), dtype=torch.bool)
@@ -496,13 +421,23 @@ class JEPAChainDataset:
         self._tgt_texts: list[str] = tgt_texts
         # Per-pair originating chain id (design §8.2). len == len(dataset).
         self._chain_ids: list[int] = chain_ids
-        # v5 Step-1a per-pair oracle labels (None when no twin; else (N,) long tensors).
-        if self.has_labels:
-            self._verb_id: Tensor | None = torch.tensor(verb_lbls, dtype=torch.long)
-            self._canon_id: Tensor | None = torch.tensor(canon_lbls, dtype=torch.long)
-        else:
-            self._verb_id = None
-            self._canon_id = None
+
+        # v6 §B: per-pair φ-frame posterior tensors (== src/tgt, the `chain` frame) and the
+        # φ'-frame decoder target tensors (the `chain_aug` rendering of s_{t+1}). The posterior
+        # sees frame φ of BOTH inputs; the decoder reconstructs φ' of s_{t+1}. The posterior φ
+        # frame == the existing src/tgt tensors (no new tensors), so we only build the φ'
+        # decoder target (+ the φ s_t/s_{t+1} aliases for an explicit, swappable interface).
+        if self.lam_augment:
+            self._lam_post_src_ids = self._src_ids
+            self._lam_post_src_pad = self._src_pad
+            self._lam_post_tgt_ids = self._tgt_ids
+            self._lam_post_tgt_pad = self._tgt_pad
+            dec_ids = torch.zeros((n, T), dtype=torch.long)
+            dec_pad = torch.ones((n, T), dtype=torch.bool)
+            for i, atxt in enumerate(aug_tgt_texts):
+                dec_ids[i], dec_pad[i] = _encode(atxt)
+            self._lam_dec_tgt_ids = dec_ids
+            self._lam_dec_tgt_pad = dec_pad
 
     def _build_triples(self, path, _encode, T: int) -> None:
         """v3 triples mode (design §2.1). Emit ONE example per length-3 chain holding all
@@ -516,11 +451,11 @@ class JEPAChainDataset:
         s2_texts: list[str] = []
         chain_ids: list[int] = []
         n_skipped = 0
-        # v5 Step-1a per-hop oracle labels (one row per chain, two hops). All -1 w/o twin.
-        verb_h1: list[int] = []
-        verb_h2: list[int] = []
-        canon_h1: list[int] = []
-        canon_h2: list[int] = []
+        # v6 §B: φ' (chain_aug) renderings of s0/s1/s2 (empty when lam off/absent).
+        aug_s0: list[str] = []
+        aug_s1: list[str] = []
+        aug_s2: list[str] = []
+        saw_aug = False
 
         with open(path) as f:
             for chain_no, line in enumerate(f):
@@ -535,18 +470,17 @@ class JEPAChainDataset:
                 s1_texts.append(chain[1])
                 s2_texts.append(chain[2])
                 chain_ids.append(chain_no)
-                # Hop-1 = transition 0 (s0->s1), hop-2 = transition 1 (s1->s2).
-                v_ids, c_ids = (
-                    self._chain_labels(chain_no, len(chain))
-                    if self.has_labels else ([-1, -1], [-1, -1])
-                )
-                verb_h1.append(v_ids[0] if len(v_ids) > 0 else -1)
-                verb_h2.append(v_ids[1] if len(v_ids) > 1 else -1)
-                canon_h1.append(c_ids[0] if len(c_ids) > 0 else -1)
-                canon_h2.append(c_ids[1] if len(c_ids) > 1 else -1)
+                chain_aug = data.get("chain_aug") if self._lam_augment_requested else None
+                if chain_aug is not None and len(chain_aug) >= 3:
+                    saw_aug = True
+                    aug_s0.append(chain_aug[0])
+                    aug_s1.append(chain_aug[1])
+                    aug_s2.append(chain_aug[2])
 
         n = len(s0_texts)
         self.n_skipped = n_skipped
+        self.lam_augment = bool(self._lam_augment_requested and saw_aug
+                                and len(aug_s0) == n)
         # Triple-mode tensors are ADDITIVE; the pairs-mode _src/_tgt attrs are NOT set
         # in triple mode (design §2.1 back-compat: each mode populates only its own attrs).
         self._s0_ids: Tensor = torch.zeros((n, T), dtype=torch.long)
@@ -599,15 +533,27 @@ class JEPAChainDataset:
         self._s2_texts: list[str] = s2_texts
         # One id per chain (== example index's originating chain).
         self._chain_ids: list[int] = chain_ids
-        # v5 Step-1a per-hop oracle labels (None when no twin; else (N,) long tensors).
-        if self.has_labels:
-            self._verb_id_h1: Tensor | None = torch.tensor(verb_h1, dtype=torch.long)
-            self._verb_id_h2: Tensor | None = torch.tensor(verb_h2, dtype=torch.long)
-            self._canon_id_h1: Tensor | None = torch.tensor(canon_h1, dtype=torch.long)
-            self._canon_id_h2: Tensor | None = torch.tensor(canon_h2, dtype=torch.long)
-        else:
-            self._verb_id_h1 = self._verb_id_h2 = None
-            self._canon_id_h1 = self._canon_id_h2 = None
+
+        # v6 §B: per-hop two-frame tensors. For each hop h (0: s0→s1, 1: s1→s2) the posterior
+        # frame φ is the existing s{h}/s{h+1} `chain` tensors; the decoder target frame φ' is
+        # the `chain_aug` rendering of the hop's target state (s1 for hop-1, s2 for hop-2).
+        # The lists are indexed by hop in the trainer (`_lam_*_hop[h]`). LABEL-FREE.
+        if self.lam_augment:
+            # Posterior φ pairs per hop (aliases of the existing `chain` tensors).
+            self._lam_post_src_ids_hop = [self._s0_ids, self._s1_ids]
+            self._lam_post_src_pad_hop = [self._s0_pad, self._s1_pad]
+            self._lam_post_tgt_ids_hop = [self._s1_ids, self._s2_ids]
+            self._lam_post_tgt_pad_hop = [self._s1_pad, self._s2_pad]
+            # Decoder φ' targets per hop (chain_aug renderings of the hop's target state).
+            d1_ids = torch.zeros((n, T), dtype=torch.long)
+            d1_pad = torch.ones((n, T), dtype=torch.bool)
+            d2_ids = torch.zeros((n, T), dtype=torch.long)
+            d2_pad = torch.ones((n, T), dtype=torch.bool)
+            for i in range(n):
+                d1_ids[i], d1_pad[i] = _encode(aug_s1[i])
+                d2_ids[i], d2_pad[i] = _encode(aug_s2[i])
+            self._lam_dec_tgt_ids_hop = [d1_ids, d2_ids]
+            self._lam_dec_tgt_pad_hop = [d1_pad, d2_pad]
 
     # ------------------------------------------------------------------
     # Core dataset interface
@@ -655,11 +601,9 @@ class JEPAChainDataset:
             if self._s1_diff_mask is not None:
                 out["s1_diff_mask"] = self._s1_diff_mask[idx]
                 out["s2_diff_mask"] = self._s2_diff_mask[idx]
-            if self.has_labels:
-                out["verb_id_h1"] = self._verb_id_h1[idx]
-                out["verb_id_h2"] = self._verb_id_h2[idx]
-                out["canon_id_h1"] = self._canon_id_h1[idx]
-                out["canon_id_h2"] = self._canon_id_h2[idx]
+            if self.lam_augment:
+                out["lam_dec_tgt_ids_h1"] = self._lam_dec_tgt_ids_hop[0][idx]
+                out["lam_dec_tgt_ids_h2"] = self._lam_dec_tgt_ids_hop[1][idx]
             return out
         out = {
             "src_ids": self._src_ids[idx],
@@ -670,9 +614,8 @@ class JEPAChainDataset:
         }
         if self._tgt_diff_mask is not None:
             out["tgt_diff_mask"] = self._tgt_diff_mask[idx]
-        if self.has_labels:
-            out["verb_id"] = self._verb_id[idx]
-            out["canon_id"] = self._canon_id[idx]
+        if self.lam_augment:
+            out["lam_dec_tgt_ids"] = self._lam_dec_tgt_ids[idx]
         return out
 
     def get_batch(self, indices) -> dict:
@@ -701,11 +644,9 @@ class JEPAChainDataset:
             if self._s1_diff_mask is not None:
                 out["s1_diff_mask"] = self._s1_diff_mask[indices]
                 out["s2_diff_mask"] = self._s2_diff_mask[indices]
-            if self.has_labels:
-                out["verb_id_h1"] = self._verb_id_h1[indices]
-                out["verb_id_h2"] = self._verb_id_h2[indices]
-                out["canon_id_h1"] = self._canon_id_h1[indices]
-                out["canon_id_h2"] = self._canon_id_h2[indices]
+            if self.lam_augment:
+                out["lam_dec_tgt_ids_h1"] = self._lam_dec_tgt_ids_hop[0][indices]
+                out["lam_dec_tgt_ids_h2"] = self._lam_dec_tgt_ids_hop[1][indices]
             return out
         out = {
             "src_ids": self._src_ids[indices],
@@ -716,10 +657,37 @@ class JEPAChainDataset:
         }
         if self._tgt_diff_mask is not None:
             out["tgt_diff_mask"] = self._tgt_diff_mask[indices]
-        if self.has_labels:
-            out["verb_id"] = self._verb_id[indices]
-            out["canon_id"] = self._canon_id[indices]
+        if self.lam_augment:
+            out["lam_dec_tgt_ids"] = self._lam_dec_tgt_ids[indices]
         return out
+
+    # ------------------------------------------------------------------
+    # v6 §B max_chains-cap slicers for the paired-frame tensors
+    # ------------------------------------------------------------------
+
+    def _slice_lam_pairs(self, cap: int) -> None:
+        """Truncate the pairs-mode φ' decoder-target tensors to `cap` (max_chains path).
+
+        The φ posterior tensors are aliases of self._src_ids/_tgt_ids (sliced by the trainer
+        already), so re-point them after slicing the φ' targets."""
+        self._lam_dec_tgt_ids = self._lam_dec_tgt_ids[:cap].contiguous()
+        self._lam_dec_tgt_pad = self._lam_dec_tgt_pad[:cap].contiguous()
+        self._lam_post_src_ids = self._src_ids
+        self._lam_post_src_pad = self._src_pad
+        self._lam_post_tgt_ids = self._tgt_ids
+        self._lam_post_tgt_pad = self._tgt_pad
+
+    def _slice_lam_triples(self, cap: int) -> None:
+        """Truncate the triples-mode per-hop φ' decoder-target tensors to `cap`.
+
+        The φ posterior tensors are aliases of self._s{0,1,2}_ids (sliced by the trainer
+        already), so re-point the per-hop posterior aliases after slicing the φ' targets."""
+        self._lam_dec_tgt_ids_hop = [t[:cap].contiguous() for t in self._lam_dec_tgt_ids_hop]
+        self._lam_dec_tgt_pad_hop = [t[:cap].contiguous() for t in self._lam_dec_tgt_pad_hop]
+        self._lam_post_src_ids_hop = [self._s0_ids, self._s1_ids]
+        self._lam_post_src_pad_hop = [self._s0_pad, self._s1_pad]
+        self._lam_post_tgt_ids_hop = [self._s1_ids, self._s2_ids]
+        self._lam_post_tgt_pad_hop = [self._s1_pad, self._s2_pad]
 
     # ------------------------------------------------------------------
     # Operator-fit pass-2 interface (spec §7)

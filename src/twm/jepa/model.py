@@ -351,6 +351,8 @@ class JEPAOperatorModelV2(nn.Module):
         tgt_pad: torch.Tensor,
         tau: float = 1.0,
         hard: bool = True,
+        posterior_inputs: tuple | None = None,
+        decoder_target: tuple | None = None,
     ) -> dict:
         """Training forward (design §1).
 
@@ -366,14 +368,39 @@ class JEPAOperatorModelV2(nn.Module):
             logits    (B, T, V)   token decoder logits over text_t+1 (PRIMARY grounding)
 
         Leakage (design §6): the decoder receives `a` (== operator output) as its ONLY
-        memory; tgt_ids enter only as the standard teacher-forced AR target.
-        """
-        # --- noun path: text_t only (no t+1 info reaches k) ---
-        _, k, _ = self.encoder(src_ids, src_pad)  # verb_logits IGNORED in v2
+        memory; the teacher-forced CE target enters only as the AR target.
 
-        # --- posterior: sees BOTH texts, emits ONE discrete action per pair ---
+        v6 §B surface-augmentation invariance (research/jepa_v6_unsupervised_design.md):
+        two OPTIONAL overrides decouple the surface frame the posterior/noun-path sees from
+        the surface frame the decoder reconstructs (LABEL-FREE — both are rendered TEXT):
+          - `posterior_inputs = (p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad)`: frame φ for
+            BOTH posterior inputs AND the noun-path encoder of s_t. The surface variance
+            common to the φ pair cannot route into v (it is held constant across the pair),
+            so v is pushed onto the controllable semantic delta. Default None ⟹ use
+            (src_ids, src_pad, tgt_ids, tgt_pad) — the bitwise v4 single-frame path.
+          - `decoder_target = (d_tgt_ids, d_tgt_pad)`: frame φ' of s_{t+1} — the decoder's
+            teacher-forced CE TARGET (the allowed φ'→decoder channel, §6). It does NOT enter
+            the posterior or the noun path. Default None ⟹ the decoder target is tgt_ids
+            (single-frame path).
+        The leakage invariant is PRESERVED: the decoder memory is still ONLY a*; φ' enters
+        only as the AR target; v is inferred only from the φ pair.
+        """
+        # v6 §B: resolve the φ pair (posterior + noun path) and the φ' decoder CE target.
+        if posterior_inputs is not None:
+            p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad = posterior_inputs
+        else:
+            p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad = src_ids, src_pad, tgt_ids, tgt_pad
+        if decoder_target is not None:
+            dec_tgt_ids, dec_tgt_pad = decoder_target
+        else:
+            dec_tgt_ids, dec_tgt_pad = tgt_ids, tgt_pad
+
+        # --- noun path: φ(text_t) only (no t+1 info reaches k) ---
+        _, k, _ = self.encoder(p_src_ids, p_src_pad)  # verb_logits IGNORED in v2
+
+        # --- posterior: sees the φ pair, emits ONE discrete action per pair ---
         v_onehot, v_logits, pool_t = self.transition(
-            src_ids, src_pad, tgt_ids, tgt_pad, tau, hard
+            p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad, tau, hard
         )
 
         # --- prior p(v | text_t) for autonomous rollout (KL target is stopgrad q) ---
@@ -381,9 +408,11 @@ class JEPAOperatorModelV2(nn.Module):
 
         # --- v4 targeted mask (jepa_v4_design §1.1/§1.3): posterior emits the per-slot
         # target mask from `[k ; k_tgt ; |k_tgt − k|]` (k_tgt = detached EMA encode of
-        # s_{t+1}); the prior distills it from `k` alone. Both None when targeted off. ---
+        # s_{t+1}); the prior distills it from `k` alone. Both None when targeted off.
+        # v6 §B: k_tgt reads the φ frame of s_{t+1} (the posterior's frame), NOT φ' — the
+        # mask is a location signal inferred from the same φ pair the posterior conditions on. ---
         if self.use_targeted_actions:
-            k_tgt = self._target_slots(tgt_ids, tgt_pad)        # (B, M, dn) detached
+            k_tgt = self._target_slots(p_tgt_ids, p_tgt_pad)     # (B, M, dn) detached
             g_logits = self.transition.forward_mask(k, k_tgt)    # (B, M)
             g_prior_logits = self.prior.forward_mask(k)          # (B, M)
         else:
@@ -399,8 +428,10 @@ class JEPAOperatorModelV2(nn.Module):
         )
         s_acc = scale_delta  # single hop: s_acc == this step's (gated) scale_delta
 
-        # --- token decoder: memory = a* ONLY (structural leakage block) ---
-        logits = self.decoder(a, tgt_ids, tgt_pad)  # (B, T, V)
+        # --- token decoder: memory = a* ONLY (structural leakage block). v6 §B: the CE
+        # target is the φ' frame (dec_tgt_*); a* is built from the φ pair, so the only
+        # frame-invariant signal the decoder can rely on through v is the semantic delta. ---
+        logits = self.decoder(a, dec_tgt_ids, dec_tgt_pad)  # (B, T, V)
 
         out = {
             "k": k,
@@ -418,21 +449,20 @@ class JEPAOperatorModelV2(nn.Module):
             "g_logits": g_logits,
             "g_prior_logits": g_prior_logits,
             "g_hard": g_hard,
-            # v5 Step-1a: posterior pre-logits pair features for the verb-anchor aux head
-            # (training-only; the loss reads it ONLY when w_verb_anchor>0).
-            "verb_features": getattr(self.transition, "_last_pair_features", None),
         }
 
         # v2.1 optional kind readout (design §7): diagnostic label only, never routes.
         if self.kind_head is not None:
             out["kind_ids"] = self.kind_head.assign(k)  # (B, M)
 
-        # --- L_pred aux branch (optional; design §5) ---
+        # --- L_pred aux branch (optional; design §5). v6 §B: the EMA target reads the φ'
+        # frame (dec_tgt_*) so the anchor zhat is contrasted against the SAME frame the
+        # decoder reconstructs — invariance pressure flows into the readout geometry too. ---
         if self.use_pred:
             pooled = self._anchor_pool(a, s_acc)  # (B, dn) — carries s_acc when budget on
             zhat = self.predictor(pooled)   # (B, dn)
             with torch.no_grad():
-                z = self.ema.pool_raw(tgt_ids, tgt_pad)  # (B, dn) raw-noun pool of t+1
+                z = self.ema.pool_raw(dec_tgt_ids, dec_tgt_pad)  # (B, dn) raw-noun pool of t+1
             out["zhat"] = zhat
             out["z_target"] = z.detach()
         else:
@@ -563,8 +593,6 @@ class JEPAOperatorModelV2(nn.Module):
                 "g_logits": g_logits,
                 "g_prior_logits": g_prior_logits,
                 "g_hard": g_hard,
-                # v5 Step-1a: this hop's posterior pre-logits features (verb-anchor aux head).
-                "verb_features": getattr(self.transition, "_last_pair_features", None),
             }
             if self.kind_head is not None:
                 hop_out["kind_ids"] = self.kind_head.assign(k_in)

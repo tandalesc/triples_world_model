@@ -97,6 +97,18 @@ CONFIG = {
     # state and oracle are UNTOUCHED; paraphrase affects RENDERING only.
     # ---------------------------------------------------------------------------
     "surface_variety": False,
+    # ---------------------------------------------------------------------------
+    # v6 §B LAM surface-augmentation invariance (research/jepa_v6_unsupervised_design.md,
+    # arXiv:2506.15691). Default OFF -> output is unchanged. When ON, each chain ALSO emits
+    # a `chain_aug` field: a SECOND independent surface frame φ' of the SAME state sequence,
+    # rendered with a FRESH chain_template_seed (and surface_variety forced on for the φ'
+    # frame). The posterior/noun path sees the primary `chain` frame (φ); the decoder CE
+    # target is the `chain_aug` frame (φ'). The two frames render the SAME underlying states
+    # (the renderer is an INPUT TRANSFORM — augmentation, not a label). The trainer/loss only
+    # ever see rendered text. The augmentation interface is PLUGGABLE: a text-level
+    # paraphraser could supply `chain_aug` instead of the renderer (see the design doc).
+    # ---------------------------------------------------------------------------
+    "emit_lam_aug": False,
 }
 
 # =====================================================================================
@@ -894,7 +906,7 @@ def generate_chain(rng, type_names, chain_len, wait_weight=0.15,
     label is "<action>@<entity_index>" so action-recovery eval can align actor + verb.
     """
     entities = [(tn, _random_state(rng, tn)) for tn in type_names]
-    texts, actions, _ = _generate_chain_from_entities(
+    texts, actions, _, _ = _generate_chain_from_entities(
         rng, entities, chain_len, wait_weight, surface_variety=surface_variety)
     return texts, actions
 
@@ -980,6 +992,7 @@ def build_split(rng, allowed_types, n_chains, cfg):
         ent_range = cfg["entities_per_chain"]
 
     surface_variety = cfg.get("surface_variety", False)
+    emit_lam_aug = cfg.get("emit_lam_aug", False)
 
     plain, labeled = [], []
     for _ in range(n_chains):
@@ -987,13 +1000,17 @@ def build_split(rng, allowed_types, n_chains, cfg):
         type_names = _sample_type_names(rng, allowed_types, ent_range)
         entities_init = [(tn, _random_state(rng, tn)) for tn in type_names]
         initial_states = [dict(st) for _, st in entities_init]
-        texts, actions, oracle_dists = _generate_chain_from_entities(
+        texts, actions, oracle_dists, chain_aug = _generate_chain_from_entities(
             rng, entities_init, chain_len,
             cfg.get("wait_weight", 0.15),
             stochastic_v2=stochastic_v2,
             surface_variety=surface_variety,
+            emit_lam_aug=emit_lam_aug,
         )
-        plain.append({"chain": texts})
+        plain_rec = {"chain": texts}
+        if chain_aug is not None:
+            plain_rec["chain_aug"] = chain_aug  # v6 §B second surface frame φ' (label-free text)
+        plain.append(plain_rec)
         rec = {
             "chain": texts,
             "actions": actions,
@@ -1009,16 +1026,19 @@ def build_split(rng, allowed_types, n_chains, cfg):
 
 def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
                                    stochastic_v2: bool = False,
-                                   surface_variety: bool = False):
+                                   surface_variety: bool = False,
+                                   emit_lam_aug: bool = False):
     """Generate a chain starting from the given (mutable) entities list.
 
     Mirrors the body of ``generate_chain`` but accepts pre-constructed entities so
     ``build_split`` can capture the initial states before generation begins.
 
-    Returns (chain_texts, action_labels, oracle_dists) where oracle_dists is a list
-    of per-step oracle-distribution dicts (one per action, same length as action_labels).
-    Each entry is {"type": type_name, "action": action, "dist": [{"effects": ..., "prob": p}]}.
-    For deterministic steps or stochastic_v2=False the dist has a single entry with prob=1.0.
+    Returns (chain_texts, action_labels, oracle_dists, chain_aug) where oracle_dists is a
+    list of per-step oracle-distribution dicts (one per action, same length as
+    action_labels). `chain_aug` is None unless emit_lam_aug is set (v6 §B), in which case it
+    is a SECOND independent surface frame φ' of the SAME state sequence (a parallel list of
+    the same length as chain_texts), rendered with a FRESH template seed and surface_variety
+    forced on — the LAM surface-augmentation invariance second view.
 
     Mutates ``entities`` in place (same semantics as ``generate_chain``).
 
@@ -1031,8 +1051,12 @@ def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
     # Per-chain template seed: stable within the chain, varies across chains. Drawn ONLY
     # in the paraphrase path so the deterministic campaign RNG stream is untouched.
     chain_template_seed = rng.getrandbits(63) if surface_variety else 0
+    # v6 §B: a FRESH, INDEPENDENT template seed for the φ' frame (always surface_variety=True).
+    # Drawn only when emit_lam_aug so the non-aug RNG stream / output is byte-identical.
+    aug_seed = rng.getrandbits(63) if emit_lam_aug else 0
 
     chain_texts = [render_state(entities, surface_variety, chain_template_seed)]
+    chain_aug = [render_state(entities, True, aug_seed)] if emit_lam_aug else None
     action_labels = []
     oracle_dists = []
     for _ in range(chain_len - 1):
@@ -1048,9 +1072,13 @@ def _generate_chain_from_entities(rng, entities, chain_len, wait_weight=0.15,
                                          surface_variety, chain_template_seed)
         state_sentence = render_state(entities, surface_variety, chain_template_seed)
         chain_texts.append(f"{action_sentence} {state_sentence}")
+        if emit_lam_aug:
+            aug_action = render_action(entities, action, actor_idx, True, aug_seed)
+            aug_state = render_state(entities, True, aug_seed)
+            chain_aug.append(f"{aug_action} {aug_state}")
         action_labels.append(f"{action}@{actor_idx}")
         oracle_dists.append({"type": type_name, "action": action, "dist": dist})
-    return chain_texts, action_labels, oracle_dists
+    return chain_texts, action_labels, oracle_dists, chain_aug
 
 
 # =====================================================================================

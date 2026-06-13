@@ -90,12 +90,8 @@ def build_token_emb(vocab_size: int, d_model: int) -> nn.Embedding:
     return emb
 
 
-def build_loss_v2(cfg, operator, verb_anchor_in_dim=None):
-    """Construct JEPALossV2 (Task D). Filters kwargs to what the class accepts.
-
-    `verb_anchor_in_dim` (v5 Step-1a) is the width of the posterior's pre-logits pair
-    features (== TransitionEncoder.pair_features_dim); the verb-anchor aux head is built
-    over it ONLY when w_verb_anchor>0. None ⟹ the head is not built (bitwise-neutral)."""
+def build_loss_v2(cfg, operator):
+    """Construct JEPALossV2 (Task D). Filters kwargs to what the class accepts."""
     from twm.jepa import JEPALossV2
     import inspect
 
@@ -127,14 +123,13 @@ def build_loss_v2(cfg, operator, verb_anchor_in_dim=None):
         tau_pool=getattr(lc, "tau_pool", 0.1),
         n_pool_negs=getattr(lc, "n_pool_negs", 16),
         pool_nce_stop_grad_pos=getattr(lc, "pool_nce_stop_grad_pos", False),
-        # v5 Step-1a discriminative-first terms. Defaults (w_verb_anchor=0.0, w_sep=0.0)
-        # reproduce v4 bitwise — the loss builds no aux head and skips both terms.
-        w_verb_anchor=getattr(lc, "w_verb_anchor", 0.0),
-        verb_anchor_frac=getattr(lc, "verb_anchor_frac", 0.05),
-        verb_anchor_in_dim=verb_anchor_in_dim,
-        w_sep=getattr(lc, "w_sep", 0.0),
-        sep_temperature=getattr(lc, "sep_temperature", 0.1),
-        sep_hard_neg_weight=getattr(lc, "sep_hard_neg_weight", 2.0),
+        # v6 UNSUPERVISED self-supervised contrastive (label-free). Defaults (w_self_nce=0.0)
+        # reproduce v4 bitwise — the loss skips the term. L_lam_inv (§B) is NOT a loss kwarg;
+        # it is the φ'-target weight applied to L_token in the augmented forward (handled in
+        # the train step, scaled by cfg.loss.w_lam_inv).
+        w_self_nce=getattr(lc, "w_self_nce", 0.0),
+        self_nce_temperature=getattr(lc, "self_nce_temperature", 0.1),
+        self_nce_hard_neg_weight=getattr(lc, "self_nce_hard_neg_weight", 2.0),
         n_slices=lc.sigreg.n_slices,
         n_knots=lc.sigreg.n_knots,
         knot_max=lc.sigreg.knot_max,
@@ -207,7 +202,48 @@ def chain_contiguous_perm(chain_ids: list[int], generator=None) -> torch.Tensor:
     return torch.tensor(flat, dtype=torch.long)
 
 
-def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1):
+def _self_nce_positive_index(out, dataset, idx, device, mode, aug_zhat=None):
+    """Resolve the LABEL-FREE self-positive row index for L_self_nce (v6 §C).
+
+    Returns a (B,) long tensor; entry i is the row index of anchor i's self-positive, or -1.
+      - "paraphrase": positive is anchor i's OWN paraphrase view. Because the augmented
+        forward `aug_zhat` is the φ' (decoder-target frame) prediction of the SAME transition,
+        the natural same-transition positive is the diagonal — but a single-batch InfoNCE
+        cannot use a self column. We instead select an in-batch SAME-CHAIN sibling (a different
+        transition on the same narrative is the closest available paraphrase-like positive when
+        no second view is in-batch). When the augmented frame IS available we still keep it
+        label-free: the φ' readout is appended conceptually, but to stay within the (B,B)
+        in-batch contrast we fall back to the same-chain-sibling positive.
+      - "inferred_action": positive is another in-batch transition sharing anchor i's OWN
+        argmax inferred action code v (out["v"], the model's self-label — NOT an oracle id).
+    No oracle/ground-truth is read in either branch."""
+    B = out["zhat"].shape[0]
+    pos = torch.full((B,), -1, dtype=torch.long, device=device)
+    if mode == "inferred_action":
+        v = out["v"].to(device)                      # (B,) model's own argmax code (self-label)
+        same = (v.view(-1, 1) == v.view(1, -1))      # (B, B)
+        eye = torch.eye(B, dtype=torch.bool, device=device)
+        cand = same & (~eye)                         # share v, not self
+        # First available same-v sibling per row (label-free, deterministic).
+        has = cand.any(dim=1)
+        first = torch.argmax(cand.to(torch.int8), dim=1)
+        pos = torch.where(has, first, pos)
+        return pos
+    # "paraphrase" (default): nearest same-chain sibling as the paraphrase-like positive.
+    chain = torch.tensor(
+        [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long, device=device
+    )
+    same = (chain.view(-1, 1) == chain.view(1, -1))
+    eye = torch.eye(B, dtype=torch.bool, device=device)
+    cand = same & (~eye)
+    has = cand.any(dim=1)
+    first = torch.argmax(cand.to(torch.int8), dim=1)
+    pos = torch.where(has, first, pos)
+    return pos
+
+
+def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1,
+               lam_cfg=None, w_lam_inv=0.0):
     """One v2 pairs-mode training step. When w_nce==0 this is BITWISE the v2.1 step
     (no chain_ids passed → loss skips InfoNCE). When w_nce>0, same-chain negatives are
     enabled via the batch's chain_ids (the in-batch (B,B) matrix already holds the hard
@@ -217,7 +253,14 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1
     threaded as `token_weights`; when w_margin>0 a same-chain neighbor decoder pass on the
     SAME a* memory is supplied; when the model emits prior-mask logits (targeting on) they
     are threaded for the mask-prior KL. All of these are no-ops at v3 defaults (the dataset
-    weights are all-ones, w_margin=0, targeting off ⟹ g_logits None)."""
+    weights are all-ones, w_margin=0, targeting off ⟹ g_logits None).
+
+    v6 §B L_lam_inv: when `w_lam_inv>0` AND the dataset supplies a second surface frame
+    (lam_augment), an EXTRA forward is run where the posterior sees frame φ of BOTH (s_t,
+    s_{t+1}) and the decoder CE target is frame φ' of s_{t+1}. The φ'-target L_token is
+    added with weight `w_lam_inv` — surface variance common to the φ pair cannot route into
+    v, so v is pushed onto the controllable semantic delta. LABEL-FREE (rendered text only).
+    """
     src_ids, src_pad, tgt_ids, tgt_pad = _get_batch(dataset, idx)
     src_ids = src_ids.to(device)
     src_pad = src_pad.to(device)
@@ -232,6 +275,23 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1
 
     # Hard ST one-hot posterior action (design §6 L3: bounds future->decoder bits).
     out = model(src_ids, src_pad, tgt_ids, tgt_pad, tau=tau, hard=True)
+
+    # v6 §B: augmented (two-frame) forward. The dataset supplies a φ frame for the posterior
+    # pair (posterior_*_ids) and a φ' frame for the decoder target (decoder_tgt_*). The
+    # posterior infers v from φ(s_t), φ(s_{t+1}); the decoder reconstructs φ'(s_{t+1}) from a*.
+    aug_out = aug_tgt_ids = None
+    if w_lam_inv > 0 and getattr(dataset, "lam_augment", False):
+        p_src_ids = dataset._lam_post_src_ids[idx].to(device)
+        p_src_pad = dataset._lam_post_src_pad[idx].to(device)
+        p_tgt_ids = dataset._lam_post_tgt_ids[idx].to(device)
+        p_tgt_pad = dataset._lam_post_tgt_pad[idx].to(device)
+        d_tgt_ids = dataset._lam_dec_tgt_ids[idx].to(device)
+        d_tgt_pad = dataset._lam_dec_tgt_pad[idx].to(device)
+        aug_out = model(
+            p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad, tau=tau, hard=True,
+            decoder_target=(d_tgt_ids, d_tgt_pad),
+        )
+        aug_tgt_ids = d_tgt_ids
 
     # v4 §2.2: diff-token CE weights (baked w_diff at load). w_diff==1.0 ⟹ all-ones over
     # non-pad == uniform CE, so we pass None to keep the EXACT v3-bitwise CE path.
@@ -275,17 +335,17 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1
         corrupt_ids = corrupt_masked_input(tgt_ids, diff_mask, mask_token_id)
         masked_diff_logits = model.decoder(out["a"], corrupt_ids, tgt_pad)
 
-    # v5 Step-1a: oracle labels (verb id + canonical next-state id). Threaded ONLY when the
-    # corresponding term is active AND the dataset carries labels (else None ⟹ term skipped).
-    verb_features = verb_ids = sep_z = canon_ids = None
-    if getattr(loss_fn, "w_verb_anchor", 0.0) > 0 and getattr(dataset, "has_labels", False):
-        verb_features = out.get("verb_features")
-        verb_ids = dataset._verb_id[idx].to(device)
-    if getattr(loss_fn, "w_sep", 0.0) > 0 and getattr(dataset, "has_labels", False):
-        # sep_z = the pooled predicted-next-state readout — the SAME vector
-        # diagnostics._separation_auc uses as its query (out["zhat"]).
-        sep_z = out.get("zhat")
-        canon_ids = dataset._canon_id[idx].to(device)
+    # v6 §C: self-supervised InfoNCE positive index (LABEL-FREE). Resolved ONLY when active.
+    # "paraphrase": the augmented frame's predicted-next-state readout is the positive (the
+    # decoder-target φ' view of the same transition). "inferred_action": in-batch transitions
+    # sharing the model's OWN argmax v. Both are the model's own signal — no oracle id.
+    self_nce_z = self_nce_pos_idx = None
+    if getattr(loss_fn, "w_self_nce", 0.0) > 0:
+        self_nce_z = out["zhat"]
+        self_nce_pos_idx = _self_nce_positive_index(
+            out, dataset, idx, device, mode=getattr(lam_cfg, "self_nce_positive", "paraphrase"),
+            aug_zhat=(aug_out["zhat"] if aug_out is not None else None),
+        )
         if chain_ids is None:
             chain_ids = torch.tensor(
                 [dataset._chain_ids[int(i)] for i in idx], dtype=torch.long, device=device
@@ -310,15 +370,23 @@ def _pair_step(model, loss_fn, dataset, idx, device, tau, w_nce, mask_token_id=1
         z_pool_pos=z_pool_pos,
         masked_diff_logits=masked_diff_logits,
         diff_mask=diff_mask,
-        verb_features=verb_features,
-        verb_ids=verb_ids,
-        sep_z=sep_z,
-        canon_ids=canon_ids,
+        self_nce_z=self_nce_z,
+        self_nce_pos_idx=self_nce_pos_idx,
     )
+    # v6 §B L_lam_inv: when the augmented forward is active, add the φ'-target L_token (the
+    # surface-invariance pressure: v inferred from frame φ of the pair, CE target frame φ').
+    if w_lam_inv > 0 and aug_out is not None:
+        from twm.jepa.losses import token_ce
+        l_lam = token_ce(
+            aug_out["logits"], aug_tgt_ids, pad_id=loss_fn.pad_id, token_weights=None,
+        )
+        loss = loss + w_lam_inv * l_lam
+        comps["L_lam_inv"] = float(l_lam.item())
     return loss, comps
 
 
-def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_token_id=1):
+def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_token_id=1,
+                 lam_cfg=None, w_lam_inv=0.0):
     """One v3 triple-mode two-hop unroll step (design §2.3/§2.4).
 
     Calls model.forward_unroll (Task C) to get per-hop outputs, then assembles the total
@@ -356,25 +424,6 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_to
         ]
     else:
         hop_diff_mask = [None, None]
-
-    # v5 Step-1a: per-hop oracle labels (verb id + canonical next-state id). hop-1 labels the
-    # s0→s1 transition, hop-2 the s1→s2 transition. Threaded ONLY when a term is active AND
-    # the dataset carries labels (else [None, None] ⟹ term skipped per hop).
-    have_labels = getattr(dataset, "has_labels", False)
-    if have_labels and getattr(loss_fn, "w_verb_anchor", 0.0) > 0:
-        hop_verb_ids = [
-            dataset._verb_id_h1[idx].to(device),
-            dataset._verb_id_h2[idx].to(device),
-        ]
-    else:
-        hop_verb_ids = [None, None]
-    if have_labels and getattr(loss_fn, "w_sep", 0.0) > 0:
-        hop_canon_ids = [
-            dataset._canon_id_h1[idx].to(device),
-            dataset._canon_id_h2[idx].to(device),
-        ]
-    else:
-        hop_canon_ids = [None, None]
 
     # Cross-hop hard negatives: hop h's negative is the OTHER hop's z_target (the EMA pool
     # of the sibling future), shaped (B, 1, dn). Only available when use_pred built the EMA
@@ -416,10 +465,15 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_to
             corrupt_ids = corrupt_masked_input(tids, diff_mask_h, mask_token_id)
             masked_diff_logits = model.decoder(out["a"], corrupt_ids, tpad)
 
-        # v5 Step-1a: this hop's oracle labels + the verb-anchor pre-logits features / the
-        # L_sep readout (out["zhat"] for this hop, the AUC query). None when the term is off.
-        verb_features = out.get("verb_features") if hop_verb_ids[h] is not None else None
-        sep_z = out.get("zhat") if hop_canon_ids[h] is not None else None
+        # v6 §C: this hop's self-supervised InfoNCE positive (LABEL-FREE). Same-chain sibling
+        # (paraphrase mode) or shared-argmax-v sibling (inferred_action). No oracle id.
+        self_nce_z = self_nce_pos_idx = None
+        if getattr(loss_fn, "w_self_nce", 0.0) > 0:
+            self_nce_z = out["zhat"]
+            self_nce_pos_idx = _self_nce_positive_index(
+                out, dataset, idx, device,
+                mode=getattr(lam_cfg, "self_nce_positive", "paraphrase"),
+            )
 
         loss_h, comps_h = loss_fn(
             logits=out["logits"],
@@ -441,14 +495,32 @@ def _unroll_step(model, loss_fn, dataset, idx, device, tau, hop_weights, mask_to
             z_pool_pos=z_pool_pos,
             masked_diff_logits=masked_diff_logits,
             diff_mask=diff_mask_h,
-            verb_features=verb_features,
-            verb_ids=hop_verb_ids[h],
-            sep_z=sep_z,
-            canon_ids=hop_canon_ids[h],
+            self_nce_z=self_nce_z,
+            self_nce_pos_idx=self_nce_pos_idx,
         )
         total = wt * loss_h if total is None else total + wt * loss_h
+
+        # v6 §B L_lam_inv (per hop): posterior sees frame φ of (src, tgt); decoder CE target is
+        # frame φ' of tgt. Run a single-hop augmented forward for THIS hop's transition. The
+        # invariance pressure is identical to pairs mode, applied to each hop independently.
+        if w_lam_inv > 0 and getattr(dataset, "lam_augment", False):
+            p_src_ids = dataset._lam_post_src_ids_hop[h][idx].to(device)
+            p_src_pad = dataset._lam_post_src_pad_hop[h][idx].to(device)
+            p_tgt_ids = dataset._lam_post_tgt_ids_hop[h][idx].to(device)
+            p_tgt_pad = dataset._lam_post_tgt_pad_hop[h][idx].to(device)
+            d_tgt_ids = dataset._lam_dec_tgt_ids_hop[h][idx].to(device)
+            d_tgt_pad = dataset._lam_dec_tgt_pad_hop[h][idx].to(device)
+            aug_out = model(
+                p_src_ids, p_src_pad, p_tgt_ids, p_tgt_pad, tau=tau, hard=True,
+                decoder_target=(d_tgt_ids, d_tgt_pad),
+            )
+            from twm.jepa.losses import token_ce
+            l_lam_h = token_ce(aug_out["logits"], d_tgt_ids, pad_id=loss_fn.pad_id)
+            total = total + wt * w_lam_inv * l_lam_h
+            agg["L_lam_inv"] = agg.get("L_lam_inv", 0.0) + wt * float(l_lam_h.item())
+
         # Aggregate components for logging: weighted sums (matching `total`) plus per-hop CE.
-        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior", "L_masked_diff", "L_pool_nce", "L_verb_anchor", "L_sep"):
+        for key in ("L_token", "L_prior", "L_sigreg", "L_pred", "L_nce", "L_margin", "L_mask_prior", "L_masked_diff", "L_pool_nce", "L_self_nce"):
             agg[key] = agg.get(key, 0.0) + wt * float(comps_h.get(key, 0.0))
         agg[f"L_token_h{h + 1}"] = float(comps_h.get("L_token", 0.0))
 
@@ -583,13 +655,13 @@ def train(config_path: str):
     # are extra (N,T) bool tensors + an O(T²) alignment per pair, gated so v3/v4.0/v4.1 pay
     # nothing. The mask-token id is the BPE's reserved <mask> special (id 1 in entity-world).
     w_masked_diff = getattr(cfg.loss, "w_masked_diff", 0.0)
-    # v5 Step-1a: attach oracle labels (verb id + canonical next-state id) ONLY when a
-    # discriminative-first term is active AND the labeled twin exists. Default off ⟹ the
-    # labeled twin is never read and no label tensors are built (GLUCOSE/v4 bitwise).
-    attach_labels = (
-        getattr(cfg.loss, "w_verb_anchor", 0.0) > 0
-        or getattr(cfg.loss, "w_sep", 0.0) > 0
-    )
+    # v6 §B: surface-augmentation invariance (L_lam_inv). Build the two-surface-frame (φ, φ')
+    # data path ONLY when `lam_augment` is set in the loss block. Default off ⟹ no second-frame
+    # tensors are built and the trainer runs the single-frame v4 path (bitwise). LABEL-FREE:
+    # the augmented frames are rendered TEXT only (the data generator owns the underlying
+    # state access; the trainer/loss never see an oracle state or label).
+    lam_augment = bool(getattr(cfg.loss, "lam_augment", False))
+    w_lam_inv = float(getattr(cfg.loss, "w_lam_inv", 0.0))
     dataset = JEPAChainDataset(
         path=cfg.data.path,
         tokenizer=tokenizer,
@@ -602,16 +674,14 @@ def train(config_path: str):
         # contiguous spans for free-form corpora (Wikipedia). Seeded by cfg.seed for repro.
         mask_mode=getattr(cfg.data, "mask_mode", "diff"),
         mask_seed=cfg.seed,
-        attach_labels=attach_labels,
-        # v5fix: L_sep grouping label. "joint" (default) = full canonical next-state string
-        # (bitwise-unchanged); "changed_attr" = entity-agnostic changed-attribute delta (the
-        # coarse, frequent label that gives L_sep a healthy positive-coverage regime).
-        sep_label=getattr(cfg.loss, "sep_label", "joint"),
+        # v6 §B: read the two-frame surface fields (chain_aug) when present. Off ⟹ bitwise v4.
+        lam_augment=lam_augment,
     )
-    if attach_labels and not getattr(dataset, "has_labels", False):
+    if lam_augment and not getattr(dataset, "lam_augment", False):
         print(
-            "  WARNING: w_verb_anchor/w_sep > 0 but no labeled twin found beside "
-            f"{cfg.data.path} — L_verb_anchor/L_sep will see all -1 labels and stay 0."
+            "  WARNING: loss.lam_augment=true but no paired-frame fields (chain_aug) found "
+            f"beside {cfg.data.path} — L_lam_inv will be skipped (the augmented forward needs "
+            "a regenerated paired-frame dataset; see research/jepa_v6_unsupervised_design.md)."
         )
     mask_token_id = getattr(tokenizer, "mask_token_id", 1)
     n_train = len(dataset)
@@ -634,12 +704,9 @@ def train(config_path: str):
                 if dataset._s1_diff_mask is not None:
                     dataset._s1_diff_mask = dataset._s1_diff_mask[:cap].contiguous()
                     dataset._s2_diff_mask = dataset._s2_diff_mask[:cap].contiguous()
-                # v5 Step-1a: keep the per-hop oracle label tensors aligned with the cap.
-                if getattr(dataset, "has_labels", False):
-                    dataset._verb_id_h1 = dataset._verb_id_h1[:cap].contiguous()
-                    dataset._verb_id_h2 = dataset._verb_id_h2[:cap].contiguous()
-                    dataset._canon_id_h1 = dataset._canon_id_h1[:cap].contiguous()
-                    dataset._canon_id_h2 = dataset._canon_id_h2[:cap].contiguous()
+                # v6 §B: keep the per-hop two-frame (φ, φ') tensors aligned with the cap.
+                if getattr(dataset, "lam_augment", False):
+                    dataset._slice_lam_triples(cap)
                 dataset._s0_texts = dataset._s0_texts[:cap]
                 dataset._s1_texts = dataset._s1_texts[:cap]
                 dataset._s2_texts = dataset._s2_texts[:cap]
@@ -657,10 +724,9 @@ def train(config_path: str):
                 # v4.2: keep the diff mask aligned with the cap (when built).
                 if dataset._tgt_diff_mask is not None:
                     dataset._tgt_diff_mask = dataset._tgt_diff_mask[:cap].contiguous()
-                # v5 Step-1a: keep the per-pair oracle label tensors aligned with the cap.
-                if getattr(dataset, "has_labels", False):
-                    dataset._verb_id = dataset._verb_id[:cap].contiguous()
-                    dataset._canon_id = dataset._canon_id[:cap].contiguous()
+                # v6 §B: keep the per-pair two-frame (φ, φ') tensors aligned with the cap.
+                if getattr(dataset, "lam_augment", False):
+                    dataset._slice_lam_pairs(cap)
                 dataset._src_texts = dataset._src_texts[:cap]
                 dataset._tgt_texts = dataset._tgt_texts[:cap]
                 # Keep chain_ids aligned with the truncated dataset (design §8.2).
@@ -674,9 +740,7 @@ def train(config_path: str):
     # ---- model ----
     token_emb = build_token_emb(cfg.data.vocab_size, cfg.model.d_model)
     model = build_jepa_model_v2(cfg, token_emb).to(device)
-    # v5 Step-1a: the verb-anchor aux head reads the posterior's pre-logits pair features.
-    verb_anchor_in_dim = getattr(model.transition, "pair_features_dim", None)
-    loss_fn = build_loss_v2(cfg, model.operator, verb_anchor_in_dim=verb_anchor_in_dim).to(device)
+    loss_fn = build_loss_v2(cfg, model.operator).to(device)
 
     n_online = model.trainable_param_count()
     print(f"Online (trainable) params: {n_online:,}")
@@ -725,7 +789,7 @@ def train(config_path: str):
         ep_total = ep_token = ep_prior = ep_sig = ep_pred = ep_nce = 0.0
         ep_margin = ep_mask_prior = ep_pool_nce = 0.0
         ep_masked_diff = 0.0
-        ep_verb_anchor = ep_sep = 0.0
+        ep_self_nce = ep_lam_inv = 0.0
         ep_tok_h1 = ep_tok_h2 = 0.0
         n_batches = 0
 
@@ -740,12 +804,12 @@ def train(config_path: str):
             if mode == "triples":
                 loss, comps = _unroll_step(
                     model, loss_fn, dataset, idx, device, tau, hop_weights,
-                    mask_token_id=mask_token_id,
+                    mask_token_id=mask_token_id, lam_cfg=cfg.loss, w_lam_inv=w_lam_inv,
                 )
             else:
                 loss, comps = _pair_step(
                     model, loss_fn, dataset, idx, device, tau, w_nce,
-                    mask_token_id=mask_token_id,
+                    mask_token_id=mask_token_id, lam_cfg=cfg.loss, w_lam_inv=w_lam_inv,
                 )
 
             optimizer.zero_grad()
@@ -765,8 +829,8 @@ def train(config_path: str):
             ep_mask_prior += float(comps.get("L_mask_prior", 0.0))
             ep_masked_diff += float(comps.get("L_masked_diff", 0.0))
             ep_pool_nce += float(comps.get("L_pool_nce", 0.0))
-            ep_verb_anchor += float(comps.get("L_verb_anchor", 0.0))
-            ep_sep += float(comps.get("L_sep", 0.0))
+            ep_self_nce += float(comps.get("L_self_nce", 0.0))
+            ep_lam_inv += float(comps.get("L_lam_inv", 0.0))
             ep_tok_h1 += float(comps.get("L_token_h1", 0.0))
             ep_tok_h2 += float(comps.get("L_token_h2", 0.0))
             n_batches += 1
@@ -779,7 +843,7 @@ def train(config_path: str):
             f"L_margin={ep_margin/nb:.4f} L_mask_prior={ep_mask_prior/nb:.4f} "
             f"L_masked_diff={ep_masked_diff/nb:.4f} "
             f"L_pool_nce={ep_pool_nce/nb:.4f} "
-            f"L_verb_anchor={ep_verb_anchor/nb:.4f} L_sep={ep_sep/nb:.4f} "
+            f"L_self_nce={ep_self_nce/nb:.4f} L_lam_inv={ep_lam_inv/nb:.4f} "
         )
         if mode == "triples":
             line += f"L_tok_h1={ep_tok_h1/nb:.4f} L_tok_h2={ep_tok_h2/nb:.4f} "

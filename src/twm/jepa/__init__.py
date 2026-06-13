@@ -359,23 +359,24 @@ class LossConfig:
     tau_pool: float = 0.1      # cosine-sim temperature τ_pool for L_pool_nce
     n_pool_negs: int = 16      # in-batch NN hard negatives mined per anchor for L_pool_nce
     pool_nce_stop_grad_pos: bool = False  # detach the online positive pool (MoCo asymmetry)
-    # v5 Step-1a discriminative-first terms (research/jepa_v5_discriminative_design.md). ALL
-    # default to the bitwise-neutral value (w_verb_anchor=0.0 ⟹ no aux head, term skipped;
-    # w_sep=0.0 ⟹ term skipped), so every existing v3/v4 config parses and trains IDENTICALLY.
-    # verb_anchor_frac / sep_temperature / sep_hard_neg_weight read only when their weight>0.
-    w_verb_anchor: float = 0.0      # sparse oracle-verb CE weight (Term 1); 0.0 ⟹ off
-    verb_anchor_frac: float = 0.05  # fraction of labeled in-batch transitions supervised
-    w_sep: float = 0.0              # sibling-contrastive next-state SupCon weight (Term 2); 0.0 ⟹ off
-    sep_temperature: float = 0.1    # τ for the L_sep SupCon (cosine-sim divisor)
-    sep_hard_neg_weight: float = 2.0  # ω for same-chain sibling hard negatives in L_sep
-    # v5fix: which oracle label L_sep's SupCon positives group on. DEFAULT "joint" ⟹ the
-    # current full joint multi-entity canonical NEXT-STATE string (bitwise-unchanged for every
-    # existing config, incl. v5_s0). "changed_attr" ⟹ the entity-agnostic CHANGED-ATTRIBUTE
-    # DELTA (sorted multiset of (attribute, direction) pairs) — a coarse, FREQUENT label (tens
-    # of classes) so most in-batch anchors get a positive, fixing the ~97%-inactive L_sep. The
-    # dataset reads this and hashes the chosen string into the SAME _canon_id* tensors; the loss
-    # path is identical (only the grouping label changes). Read only when w_sep > 0.
-    sep_label: str = "joint"
+    # v6 UNSUPERVISED (label-free) path (research/jepa_v6_unsupervised_design.md). ALL default
+    # to the bitwise-neutral value, so every existing v3/v4 config parses and trains
+    # IDENTICALLY. NO oracle/ground-truth ever enters the training loss (the v5 supervised
+    # arm — w_verb_anchor / w_sep / sep_label — was removed; the oracle is eval-only).
+    #   PRIMARY (§B) L_lam_inv — surface-augmentation invariance (arXiv:2506.15691). NOT a
+    #   loss term: the posterior sees frame φ of BOTH (s_t, s_{t+1}); the decoder CE target is
+    #   a DIFFERENT frame φ' of s_{t+1}. So `w_lam_inv` scales the L_token computed against the
+    #   φ' target on the augmented forward, and `lam_augment` turns the two-frame data path on.
+    #   `w_lam_inv=0.0` / `lam_augment=False` ⟹ single-frame v4 (bitwise).
+    w_lam_inv: float = 0.0     # weight on the φ'-target L_token of the augmented forward; 0.0 ⟹ off
+    lam_augment: bool = False  # master switch for the two-surface-frame (φ, φ') data + model path
+    #   SECONDARY (§C) L_self_nce — self-supervised InfoNCE on zhat. Positives: a paraphrase
+    #   of the same transition, OR transitions sharing the model's OWN argmax inferred action
+    #   code v (self-label, NOT oracle). Negatives: in-batch; same-chain siblings up-weighted.
+    w_self_nce: float = 0.0           # self-supervised InfoNCE weight (§C); 0.0 ⟹ off
+    self_nce_temperature: float = 0.1  # τ for L_self_nce (cosine-sim divisor)
+    self_nce_hard_neg_weight: float = 2.0  # ω for same-chain sibling hard negatives in L_self_nce
+    self_nce_positive: str = "paraphrase"  # {"paraphrase","inferred_action"} — self-positive source
     sigreg: SIGRegConfig = field(default_factory=SIGRegConfig)
     verb: VerbConfig = field(default_factory=VerbConfig)
     nce: NCEConfig = field(default_factory=NCEConfig)

@@ -550,136 +550,91 @@ def pool_info_nce(
 
 
 # ---------------------------------------------------------------------------
-# v5 Step-1a discriminative-first terms (research/jepa_v5_discriminative_design.md)
+# v6 L_self_nce: self-supervised contrastive on zhat (label-free, default-off)
 # ---------------------------------------------------------------------------
 
-def verb_anchor_ce(
-    aux_logits: torch.Tensor,    # (B, N_oracle_verbs) aux-head logits over the posterior pair features
-    verb_ids: torch.Tensor,      # (B,) long — oracle verb id per transition; -1 == ignore/no label
-    anchor_frac: float = 0.05,
-    generator: torch.Generator | None = None,
-) -> torch.Tensor:
-    """L_verb_anchor — sparse oracle-verb supervision of the action bottleneck (Term 1).
-
-    On a DETERMINISTIC ~`anchor_frac` fraction of the in-batch transitions that HAVE an
-    oracle verb label (verb_id >= 0), add CE(aux_logits, verb_id). The aux head reads the
-    posterior's pre-logits pair features (training-only), so this biases the bottleneck to
-    encode the ACTION factor rather than the highest-variance surface direction — the
-    "1% labels flip PCA-on-noise → PCA-on-action" lever (LAM-augmentation provenance).
-
-    Subset selection: among the rows with a valid label, keep a fixed fraction chosen by a
-    seeded shuffle (reproducible per call) so roughly `anchor_frac` of EACH batch's labeled
-    rows are supervised — sparse by construction, not a full-batch CE. At least 1 row is kept
-    when any label exists (so the term is never silently empty on a labeled batch). When NO
-    row carries a label the loss is 0.0 (clamped) — bitwise-neutral on unlabeled data.
-
-    Args:
-        aux_logits:  (B, N_oracle_verbs) aux-head logits.
-        verb_ids:    (B,) long oracle verb ids; -1 marks "no label" (excluded).
-        anchor_frac: fraction of labeled rows to supervise (default 0.05).
-        generator:   optional torch.Generator for the deterministic subset shuffle.
-
-    Returns:
-        scalar mean CE over the selected labeled subset (0.0 when no labeled rows).
-    """
-    valid = (verb_ids >= 0)
-    n_valid = int(valid.sum().item())
-    if n_valid == 0:
-        return aux_logits.new_zeros(())
-    valid_idx = torch.nonzero(valid, as_tuple=False).squeeze(-1)  # (n_valid,)
-    # Deterministic fraction: shuffle the valid rows, keep the first ceil(frac · n_valid).
-    k = max(1, int(round(anchor_frac * n_valid)))
-    k = min(k, n_valid)
-    perm = torch.randperm(n_valid, generator=generator, device=valid_idx.device)
-    sel = valid_idx[perm[:k]]                                    # (k,) selected rows
-    return F.cross_entropy(aux_logits[sel], verb_ids[sel])
-
-
-def sep_supcon(
-    z: torch.Tensor,                          # (B, dn) pooled predicted-next-state readout (the AUC query)
-    canon_ids: torch.Tensor,                  # (B,) long — oracle canonical next-state id; -1 == no label
-    chain_ids: torch.Tensor | None = None,    # (B,) long — same-start/chain hard-negative weighting
+def self_nce(
+    zhat: torch.Tensor,                       # (B, dn) pooled predicted-next-state readout (anchor)
+    pos_idx: torch.Tensor | None = None,      # (B,) long — index of the self-positive for each anchor; -1 == none
+    chain_ids: torch.Tensor | None = None,    # (B,) long — same-chain siblings up-weighted as hard negatives
     temperature: float = 0.1,
     hard_neg_weight: float = 2.0,
 ) -> torch.Tensor:
-    """L_sep — sibling-contrastive next-state separation (SupCon-style, Term 2).
+    """L_self_nce — SELF-SUPERVISED InfoNCE on the pooled predicted-next-state readout
+    `zhat` (v6 §C, label-free). NO oracle/ground-truth: positives come either from a
+    surface PARAPHRASE of the SAME transition (`self_nce_positive="paraphrase"`) or from
+    transitions sharing the model's OWN argmax inferred action code v
+    (`self_nce_positive="inferred_action"`). The caller resolves the positive index per
+    anchor; this function is label-source-agnostic.
 
-    A supervised-contrastive loss on the PREDICTED next-latent `z` (the pooled noun readout
-    of the predicted next-state — the SAME vector diagnostics._separation_auc uses as its
-    query). Labels = oracle CANONICAL NEXT-STATE id: positives are transitions whose oracle
-    next-state is the SAME (this captures paraphrase-invariance — different surface forms of
-    one underlying state share a canon id), negatives are different next-states. Negatives
-    that share the anchor's chain (siblings — "what else could change from here") are weighted
-    as HARD negatives (`hard_neg_weight`) in the denominator.
+    The contrast mirrors the SHAPE of the deprecated v5 `sep_supcon` (cosine sim /
+    temperature, same-chain hard negatives up-weighted) but the positive label is the
+    model's own signal, never an oracle id:
 
-    SupCon math (Khosla et al. 2020), cosine similarity / temperature:
+        s_ij = cos(zhat_i, zhat_j) / τ
+        L_i  = -log( exp(s_{i,pos(i)}) / Σ_{a≠i} ω_ia · exp(s_ia) )
+        L    = mean_i L_i        (over anchors that HAVE a positive)
 
-        s_ij = cos(z_i, z_j) / τ
-        L_i  = -1/|P(i)| Σ_{p∈P(i)}  log( exp(s_ip) / Σ_{a≠i} ω_ia · exp(s_ia) )
-        L    = mean_i L_i        (over anchors with ≥1 positive)
+    where pos(i) is anchor i's self-positive (paraphrase row, or a same-v sibling) and the
+    per-negative weight ω_ia = hard_neg_weight when a is a same-chain sibling of i (and not
+    the positive), else 1.0. Anchors with no positive contribute 0 (excluded from the mean).
+    When no anchor has a positive the loss is 0.0.
 
-    where P(i) = {j≠i : canon_id_j == canon_id_i} (same canonical next-state) and the
-    per-negative weight ω_ia = hard_neg_weight when a is a same-chain sibling of i (and not a
-    positive), else 1.0. Anchors with no in-batch positive contribute 0 (excluded from the
-    mean). Rows without a label (canon_id < 0) are excluded as anchors AND never count as a
-    positive of another row (they may still appear as ordinary negatives). When no anchor has
-    a positive the loss is 0.0 — bitwise-neutral.
-
-    This forces distinct next-state sub-manifolds to be compact + separated at the granularity
-    `disc_delta_r2` / `separation_auc` measure (the packing idea). No stop-grad: gradient flows
-    into the predicted-next-state readout (the geometry the AUC probes), which is the point.
+    NB on the inferred-action mode: the positive is selected ON the model's CURRENT argmax
+    code v (a self-label). To keep the gradient stable we DETACH the positive's `zhat`
+    column so only the anchor is pulled (BYOL/MoCo asymmetry — the self-label cannot drive
+    representational collapse by also being pushed). The paraphrase positive is a different
+    surface frame of the same transition and is likewise detached.
 
     Args:
-        z:               (B, dn) pooled predicted next-state (the AUC query; receives gradient).
-        canon_ids:       (B,) long oracle canonical next-state ids; -1 == no label (excluded).
-        chain_ids:       optional (B,) long; same-chain siblings get hard-negative weight.
+        zhat:            (B, dn) pooled predicted next-state (the AUC query; receives gradient).
+        pos_idx:         (B,) long — for each anchor i, the row index of its self-positive,
+                         or -1 if it has none. Required (None ⟹ loss 0.0).
+        chain_ids:       optional (B,) long; same-chain siblings up-weighted as hard negatives.
         temperature:     τ (cosine-sim divisor); 0.1 default (SimCLR/SupCon).
         hard_neg_weight: ω for same-chain sibling negatives (default 2.0).
 
     Returns:
-        scalar SupCon loss (≥ 0; 0.0 when no anchor has an in-batch positive).
+        scalar InfoNCE loss (≥ 0; 0.0 when no anchor has a positive).
     """
-    B = z.shape[0]
-    device = z.device
-    zn = F.normalize(z, dim=-1)                       # (B, dn)
-    sim = (zn @ zn.t()) / temperature                 # (B, B)
+    B = zhat.shape[0]
+    device = zhat.device
+    if pos_idx is None:
+        return zhat.new_zeros(())
+
+    qn = F.normalize(zhat, dim=-1)                    # (B, dn) anchor (gradient)
+    # Positive key column is the DETACHED normalized zhat (asymmetry: only the anchor moves).
+    kn = F.normalize(zhat.detach(), dim=-1)           # (B, dn) candidate pool
+    sim = (qn @ kn.t()) / temperature                 # (B, B)
 
     eye = torch.eye(B, dtype=torch.bool, device=device)
-    labeled = (canon_ids >= 0)                        # (B,)
-    # Positive mask: same canon id, off-diagonal, BOTH rows labeled.
-    same_canon = (canon_ids.view(-1, 1) == canon_ids.view(1, -1))  # (B, B)
-    pos_mask = same_canon & (~eye)
-    pos_mask = pos_mask & labeled.view(-1, 1) & labeled.view(1, -1)
+    has_pos = pos_idx >= 0                             # (B,)
+    # Clamp -1 to 0 for the gather; masked out below for rows without a positive.
+    pos_safe = pos_idx.clamp_min(0)                    # (B,)
+    pos_onehot = torch.zeros(B, B, dtype=torch.bool, device=device)
+    pos_onehot[torch.arange(B, device=device), pos_safe] = True
+    pos_onehot = pos_onehot & has_pos.view(-1, 1) & (~eye)  # a row's own index is never its positive
 
-    # Per-negative weights: same-chain (sibling) hard negatives up-weighted; a positive is
-    # never a negative, so weighting is applied to the (non-positive, off-diagonal) columns.
+    # Per-negative weights: same-chain siblings (not the positive, off-diagonal) up-weighted.
     weights = torch.ones(B, B, device=device, dtype=sim.dtype)
     if chain_ids is not None and hard_neg_weight != 1.0:
         same_chain = (chain_ids.view(-1, 1) == chain_ids.view(1, -1))  # (B, B)
-        hard = same_chain & (~eye) & (~pos_mask)
+        hard = same_chain & (~eye) & (~pos_onehot)
         weights = torch.where(hard, weights.new_full((), float(hard_neg_weight)), weights)
 
-    # Numerically-stable log-softmax-style denominator over all a≠i (weighted). The self
-    # (diagonal) column is dropped from the denominator: mask it to -inf for the row-max and
-    # the exp (exp(-inf)=0). row_max is detached (constant shift; no effect on the gradient).
-    sim_masked = sim.masked_fill(eye, float("-inf"))  # exclude self from the denominator
+    # Numerically-stable weighted log-softmax denominator over all a≠i. Self column dropped.
+    sim_masked = sim.masked_fill(eye, float("-inf"))
     row_max = sim_masked.max(dim=1, keepdim=True).values.detach()
     row_max = torch.nan_to_num(row_max, neginf=0.0)   # guard all-(-inf) rows (B==1)
-    exp_sim = torch.exp(sim_masked - row_max) * weights  # (B, B); self column is 0 (exp(-inf))
-    denom = exp_sim.sum(dim=1, keepdim=True).clamp_min(1e-12)  # (B, 1)
-    # log p_ij = (s_ij - row_max) - log(denom). Compute only where it is USED (positives):
-    # elsewhere the diagonal is -inf and (-inf)·0 = NaN, so zero non-positive entries with a
-    # `where` (NOT a multiply) to keep the sum finite. The positive entries are always finite.
-    log_prob_pos = (sim - row_max) - denom.log()      # (B, B); finite at off-diagonal positives
-    contrib = torch.where(pos_mask, log_prob_pos, torch.zeros_like(log_prob_pos))  # (B, B)
+    exp_sim = torch.exp(sim_masked - row_max) * weights
+    denom = exp_sim.sum(dim=1, keepdim=True).clamp_min(1e-12)
+    log_prob = (sim - row_max) - denom.log()          # (B, B)
+    # Pull each anchor toward its single positive column.
+    contrib = torch.where(pos_onehot, log_prob, torch.zeros_like(log_prob))  # (B, B)
 
-    pos_count = pos_mask.sum(dim=1)                    # (B,) #positives per anchor
-    has_pos = pos_count > 0
     if not bool(has_pos.any()):
-        return z.new_zeros(())
-    # Mean log-prob over each anchor's positives, then negate and average over anchors w/ pos.
-    pos_log_prob = contrib.sum(dim=1)                  # (B,)
-    per_anchor = -pos_log_prob[has_pos] / pos_count[has_pos].to(contrib.dtype)
+        return zhat.new_zeros(())
+    per_anchor = -contrib.sum(dim=1)[has_pos]         # (n_with_pos,)
     return per_anchor.mean()
 
 
@@ -792,17 +747,17 @@ class JEPALossV2(nn.Module):
         tau_pool: float = 0.1,
         n_pool_negs: int = 16,
         pool_nce_stop_grad_pos: bool = False,
-        # v5 Step-1a discriminative-first terms (research/jepa_v5_discriminative_design.md).
-        # ALL default to the bitwise-neutral value (w_verb_anchor=0.0 ⟹ no aux head built and
-        # the term skipped; w_sep=0.0 ⟹ term skipped), so every existing config parses and
-        # trains IDENTICALLY. verb_anchor_frac / sep_temperature read only when their weight>0.
-        w_verb_anchor: float = 0.0,
-        verb_anchor_frac: float = 0.05,
-        n_oracle_verbs: int = 11,
-        verb_anchor_in_dim: int | None = None,
-        w_sep: float = 0.0,
-        sep_temperature: float = 0.1,
-        sep_hard_neg_weight: float = 2.0,
+        # v6 UNSUPERVISED (label-free) self-supervised contrastive on zhat (research/
+        # jepa_v6_unsupervised_design.md §C). ALL default to the bitwise-neutral value
+        # (w_self_nce=0.0 ⟹ the term is skipped), so every existing config parses and trains
+        # IDENTICALLY. self_nce_temperature / self_nce_hard_neg_weight read only when active.
+        # NOTE: L_lam_inv (§B, the PRIMARY v6 term) is NOT a new loss term here — it is wiring
+        # in the model.forward (the posterior sees frame φ of the pair, the decoder CE target
+        # is frame φ' of s_{t+1}); L_token does the work against the φ' target. So there is no
+        # `w_lam_inv` field in the loss — it lives in the config/model/data path.
+        w_self_nce: float = 0.0,
+        self_nce_temperature: float = 0.1,
+        self_nce_hard_neg_weight: float = 2.0,
         nce_temperature: float = 0.1,
         n_slices: int = 256,
         n_knots: int = 17,
@@ -837,20 +792,13 @@ class JEPALossV2(nn.Module):
         self.tau_pool = tau_pool
         self.n_pool_negs = n_pool_negs
         self.pool_nce_stop_grad_pos = pool_nce_stop_grad_pos
-        # v5 Step-1a: L_verb_anchor (sparse oracle-verb CE) + L_sep (SupCon next-state sep).
-        # The aux head is a TRAINING-ONLY nn.Linear from the posterior's pre-logits pair
-        # features to N_oracle_verbs. Built ONLY when w_verb_anchor>0 (and an input dim is
-        # supplied); never used at inference. When off it is None ⟹ no params, bitwise-neutral.
-        self.w_verb_anchor = w_verb_anchor
-        self.verb_anchor_frac = verb_anchor_frac
-        self.n_oracle_verbs = n_oracle_verbs
-        self.w_sep = w_sep
-        self.sep_temperature = sep_temperature
-        self.sep_hard_neg_weight = sep_hard_neg_weight
-        if w_verb_anchor > 0 and verb_anchor_in_dim is not None:
-            self.verb_anchor_head = nn.Linear(verb_anchor_in_dim, n_oracle_verbs)
-        else:
-            self.verb_anchor_head = None
+        # v6: L_self_nce (label-free self-supervised InfoNCE on zhat). w_self_nce=0.0 ⟹ off
+        # (bitwise-neutral; the term is skipped). No aux head, no params — the positive index
+        # is supplied by the trainer (paraphrase row, or shared-argmax-v sibling). Read only
+        # when active.
+        self.w_self_nce = w_self_nce
+        self.self_nce_temperature = self_nce_temperature
+        self.self_nce_hard_neg_weight = self_nce_hard_neg_weight
         self.nce_temperature = nce_temperature
         self.n_slices = n_slices
         self.n_knots = n_knots
@@ -881,11 +829,9 @@ class JEPALossV2(nn.Module):
         z_pool_pos: torch.Tensor | None = None,       # (B, dn) ONLINE pooled true next state (§C5)
         masked_diff_logits: torch.Tensor | None = None,  # (B, T, V) decoder on mask-corrupted input (v4.2)
         diff_mask: torch.Tensor | None = None,        # (B, T) bool changed-span mask (v4.2)
-        # v5 Step-1a discriminative-first terms (research/jepa_v5_discriminative_design.md).
-        verb_features: torch.Tensor | None = None,    # (B, h) posterior pre-logits pair features (L_verb_anchor)
-        verb_ids: torch.Tensor | None = None,         # (B,) long oracle verb id; -1 == ignore (L_verb_anchor)
-        sep_z: torch.Tensor | None = None,            # (B, dn) pooled predicted-next-state readout (L_sep)
-        canon_ids: torch.Tensor | None = None,        # (B,) long oracle canonical next-state id; -1 == no label (L_sep)
+        # v6 self-supervised contrastive (research/jepa_v6_unsupervised_design.md §C).
+        self_nce_z: torch.Tensor | None = None,       # (B, dn) pooled predicted-next-state readout (L_self_nce anchor)
+        self_nce_pos_idx: torch.Tensor | None = None,  # (B,) long — self-positive row index per anchor; -1 == none
     ) -> tuple[torch.Tensor, dict]:
         """Compute total loss and per-term components.
 
@@ -981,36 +927,20 @@ class JEPALossV2(nn.Module):
         else:
             l_pool_nce = None
 
-        # L_verb_anchor: sparse oracle-verb CE on the aux head over the posterior pair
-        # features (v5 Step-1a Term 1). Computed ONLY when active AND the trainer supplies
-        # the pre-logits features + oracle verb ids (entity-world labeled path). When
-        # w_verb_anchor=0.0 (or the head/inputs absent) it is skipped ⟹ bitwise-neutral.
-        if (
-            self.w_verb_anchor > 0
-            and self.verb_anchor_head is not None
-            and verb_features is not None
-            and verb_ids is not None
-        ):
-            aux_logits = self.verb_anchor_head(verb_features)        # (B, N_oracle_verbs)
-            l_verb_anchor = verb_anchor_ce(
-                aux_logits, verb_ids, anchor_frac=self.verb_anchor_frac,
-            )
-        else:
-            l_verb_anchor = None
-
-        # L_sep: sibling-contrastive next-state separation (SupCon) on the predicted-next-
-        # state readout (v5 Step-1a Term 2). Computed ONLY when active AND the trainer
-        # supplies the readout + oracle canonical next-state ids. When w_sep=0.0 (or inputs
-        # absent) it is skipped ⟹ bitwise-neutral.
-        if self.w_sep > 0 and sep_z is not None and canon_ids is not None:
-            l_sep = sep_supcon(
-                sep_z, canon_ids,
+        # L_self_nce: SELF-SUPERVISED InfoNCE on the predicted-next-state readout (v6 §C,
+        # LABEL-FREE). Computed ONLY when active AND the trainer supplies the anchor readout
+        # + the self-positive index (a paraphrase row, or a shared-argmax-v sibling — the
+        # model's own signal, never an oracle id). When w_self_nce=0.0 (or inputs absent) it
+        # is skipped ⟹ bitwise-neutral.
+        if self.w_self_nce > 0 and self_nce_z is not None and self_nce_pos_idx is not None:
+            l_self_nce = self_nce(
+                self_nce_z, self_nce_pos_idx,
                 chain_ids=chain_ids,
-                temperature=self.sep_temperature,
-                hard_neg_weight=self.sep_hard_neg_weight,
+                temperature=self.self_nce_temperature,
+                hard_neg_weight=self.self_nce_hard_neg_weight,
             )
         else:
-            l_sep = None
+            l_self_nce = None
 
         total = (
             self.w_token  * l_token
@@ -1028,10 +958,8 @@ class JEPALossV2(nn.Module):
             total = total + self.w_masked_diff * l_masked_diff
         if l_pool_nce is not None:
             total = total + self.w_pool_nce * l_pool_nce
-        if l_verb_anchor is not None:
-            total = total + self.w_verb_anchor * l_verb_anchor
-        if l_sep is not None:
-            total = total + self.w_sep * l_sep
+        if l_self_nce is not None:
+            total = total + self.w_self_nce * l_self_nce
 
         components = {
             "loss":       total.item(),
@@ -1044,8 +972,7 @@ class JEPALossV2(nn.Module):
             "L_mask_prior": (l_mask_prior.item() if l_mask_prior is not None else 0.0),
             "L_masked_diff": (l_masked_diff.item() if l_masked_diff is not None else 0.0),
             "L_pool_nce": (l_pool_nce.item() if l_pool_nce is not None else 0.0),
-            "L_verb_anchor": (l_verb_anchor.item() if l_verb_anchor is not None else 0.0),
-            "L_sep": (l_sep.item() if l_sep is not None else 0.0),
+            "L_self_nce": (l_self_nce.item() if l_self_nce is not None else 0.0),
             "gumbel_tau": float(tau),
             # weights logged for interpretability
             "w_token":    float(self.w_token),
@@ -1057,8 +984,7 @@ class JEPALossV2(nn.Module):
             "w_mask_prior": float(self.w_mask_prior),
             "w_masked_diff": float(self.w_masked_diff),
             "w_pool_nce": float(self.w_pool_nce),
-            "w_verb_anchor": float(self.w_verb_anchor),
-            "w_sep": float(self.w_sep),
+            "w_self_nce": float(self.w_self_nce),
         }
         return total, components
 
