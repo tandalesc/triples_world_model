@@ -4,7 +4,7 @@ The paper, [decision-student-paper.html](decision-student-paper.html), tells the
 whole story; this page keeps the detailed numbers and how to reproduce them.
 
 Hearthvale's non-player actors ask a decision model ("System 1", LiquidAI d1-3B
-served on `rrh-llm-1`) what to do: a resident's routine, a household's move, a
+served on a local GPU server) what to do: a resident's routine, a household's move, a
 faction's stance. Every question is a banded snapshot of the town plus a few
 facts about who is asking, and every answer is a probability distribution over
 a fixed set of options. This directory's code trains small students that copy
