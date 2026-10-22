@@ -45,7 +45,7 @@ result back to text. For the full 100-epoch run and every other result, see
 | **Compositional generalization (closed-vocab v1)** | 0.74 F1 on novel entity-state combos; Mini (178K) matches Base | [docs/REPRODUCING.md](docs/REPRODUCING.md) |
 | **Pet-sim demo** | 29K params, 98.9% exact match, runs client-side in 303 KB JS | [demo/](demo/) |
 | **JEPA v2 latent actions** | slot-LOO flips positive (all 8 slots constructive); `ce_gap` 0.166 | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
-| **Decision students (Hearthvale)** | attention over triples copies a 3B decision model at KL 0.025 in ~60–260 µs of browser JS; 1.04× penalty on unseen feature pairs vs MLP's 3.8× | [paper](docs/decision-student-paper.html) · [docs/DECISION_STUDENT.md](docs/DECISION_STUDENT.md) |
+| **Decision students (Hearthvale)** | attention over triples copies a 3B decision model at KL 0.025 in ~60–260 µs of browser JS; 1.04× penalty on unseen feature pairs vs MLP's 3.8× | [paper](docs/decision-student-paper.html) ([PDF](docs/decision-student-paper.pdf)) · [docs/DECISION_STUDENT.md](docs/DECISION_STUDENT.md) |
 | **JEPA v2.1 decoder arm** | bigger decoder cuts teacher-forced CE 1.39 → **0.95 nats**; fluent GLUCOSE | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
 
 **Honest status:** the v2 line has a working structural prior and a clean decoder, but
@@ -60,7 +60,7 @@ not yet green-lit. The numbers and the v3 recipe are in the synthesis below.
 students small enough to run in the game's sim worker. Questions are banded
 town snapshots written as `(scope, attribute, value)` triples; answers are
 distributions over a kind's options. The paper,
-[Distilling a Language-Model Decision Policy into Browser-Scale Students](docs/decision-student-paper.html)
+[Distilling a Language-Model Decision Policy into Browser-Scale Students](docs/decision-student-paper.html) ([PDF](docs/decision-student-paper.pdf))
 (a standalone page: open it in a browser), tells the whole story: the problem, prior
 work, the method, and results on accuracy, compositional generalization, real play
 and complete towns. On 30,667 questions from towns no model saw
