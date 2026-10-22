@@ -3,6 +3,7 @@ name = "twm"
 version = "0.1.0"
 description = "Triple World Model — learning temporal state dynamics over structured triples"
 requires-python = ">=3.11"
+license = "Apache-2.0"
 dependencies = [
     "torch>=2.1",
     "numpy>=1.24",

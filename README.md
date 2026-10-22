@@ -133,3 +133,7 @@ uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim
 uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --eigenspectrum
 uv run python scripts/visualize_dynamics.py --checkpoint results/pet_sim --flow-field
 ```
+
+## License
+
+Copyright 2026 Shishir Tandale. Licensed under the [Apache License 2.0](LICENSE).
