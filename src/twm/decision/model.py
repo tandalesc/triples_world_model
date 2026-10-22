@@ -94,9 +94,11 @@ class DecisionSetModel(nn.Module):
         self.embed = TripleEmbedding(vocab, d)
         self.register_buffer("state_scopes", torch.tensor(vocab.state_scope_ids or [0], dtype=torch.long), persistent=False)
         self.option_flag = nn.Parameter(torch.zeros(d))  # marks option tokens apart from question triples
+        # With no state layers the snapshot's facts reach the decision layer as their
+        # embeddings alone (normalised): the per-snapshot cache is then a lookup.
         self.state_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d, cfg.n_heads, cfg.d_ff, cfg.dropout, batch_first=True, norm_first=True),
-            cfg.state_layers, enable_nested_tensor=False)
+            cfg.state_layers, enable_nested_tensor=False) if cfg.state_layers > 0 else None
         self.state_norm = nn.LayerNorm(d)
         self.question = nn.TransformerDecoder(
             nn.TransformerDecoderLayer(d, cfg.n_heads, cfg.d_ff, cfg.dropout, batch_first=True, norm_first=True),
@@ -114,7 +116,7 @@ class DecisionSetModel(nn.Module):
         empty = ~is_state.any(dim=1)
         is_state = is_state.clone()
         is_state[empty, 0] = True
-        mem = self.state_encoder(x, src_key_padding_mask=~is_state)
+        mem = self.state_encoder(x, src_key_padding_mask=~is_state) if self.state_encoder is not None else x
         return self.state_norm(mem), ~is_state
 
     def forward(self, b: dict, return_hidden: bool = False):

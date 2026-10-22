@@ -155,6 +155,7 @@ svg .ico-fill { fill: var(--ink-2); }
 svg .arrow.acc { stroke: var(--accent); }
 svg .ah.acc { fill: var(--accent); }
 svg .dash { stroke-dasharray: 5 4; }
+svg .leader { fill: none; stroke: var(--ink-3); stroke-width: .8; opacity: .55; }
 .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--paper); color: var(--ink); border: 1px solid var(--rule);
   border-radius: 4px; padding: 8px 10px; font: 13px/1.45 var(--font-label); box-shadow: 0 4px 16px rgba(0,0,0,.12); max-width: 280px; }
 .tip .tv { font-family: var(--font-mono); font-weight: 500; }
@@ -276,13 +277,13 @@ svg .dash { stroke-dasharray: 5 4; }
 
 <h3><span class="secno">5.5</span>Learning after release</h3>
 <p>A fixed student will eventually meet towns its training never covered, so the deployed system continues to learn from the teacher. A small auxiliary network, trained on held-out towns, predicts the student's own error on each question from the internal state that produced its answer, the answer's entropy and the share of unknown inputs; a single scale fitted on the held-out data makes its output read in nats. Questions whose predicted error lies in the top twentieth, questions containing values the student has never seen, and questions of kinds it does not answer are sent, deduplicated and without any player identifier, to the game's server. The server validates them, records a salted hash of each client so that distinct reports can be counted without identifying anyone, and obtains the teacher's answer as soon as the GPU is idle.</p>
-<p>A job that wakes every hour turns these reports into the next version once at least fifty new labelled questions are waiting. A single report is enough for a question to be used. Labels come only from the teacher, so one player can at most direct the teacher's attention to unusual states, and the comparisons described below judge the result; requiring several players to report the same question would, in a game whose states rarely repeat exactly, discard nearly everything. What one player can contribute is bounded instead. A cycle takes at most 400 questions from any one client, in the order they arrived, and defers the rest to later cycles; questions whose categorical facts form more than two pairs never produced by any simulated town may make up at most a quarter of a cycle unless three clients reported them; and questions already trained on are skipped. The job then warm-starts the next version from the current one, appending new vocabulary entries initialised from the unknown token rather than retraining from scratch, retrains the error estimate, and compares the candidate with the current version on error in teacher-governed towns, error on every frequently asked kind, the largest bias on any answer, rare-answer ratios, error on held-out new questions, browser parity, size, speed and a set of short simulated towns. The candidate is published only if it passes every comparison. A new town adopts the latest version, while a saved game keeps the version it began with, so that no town changes character partway through.</p>
+<p>A job that runs once a day turns these reports into the next version when at least fifty new labelled questions are waiting. A single report is enough for a question to be used. Labels come only from the teacher, so one player can at most direct the teacher's attention to unusual states, and the comparisons described below judge the result; requiring several players to report the same question would, in a game whose states rarely repeat exactly, discard nearly everything. What one player can contribute is bounded instead. A cycle takes at most 400 questions from any one client, in the order they arrived, and defers the rest to later cycles; questions whose categorical facts form more than two pairs never produced by any simulated town may make up at most a quarter of a cycle unless three clients reported them; and questions already trained on are skipped. The job then warm-starts the next version from the current one, appending new vocabulary entries initialised from the unknown token rather than retraining from scratch, retrains the error estimate, and compares the candidate with the current version on error in teacher-governed towns, error on every frequently asked kind, the largest bias on any answer, rare-answer ratios, error on held-out new questions, browser parity, size, speed and a set of short simulated towns. The candidate is published only if it passes every comparison. Every town, new or saved, takes the latest version when it opens and never changes version during a session; because each version passed the comparisons against its predecessor, a saved town moves on in small steps, and the towns whose questions taught a new version are the first to benefit from it.</p>
 <p>When the teacher is available, the browser also refers the questions it is least certain of directly to it. Each player may send at most one such question per second, always the least certain first, so the share referred falls as the game speeds up; the server enforces a further budget shared by all players and refuses the excess with a time to wait, in which case the student's own answer, already computed, is used.</p>
 </div>
 
 <figure>
   <div class="chart" id="fig-loop"></div>
-  <figcaption><b>Figure 3.</b> The continual-learning loop. Labels come only from the teacher, and one player's report is enough, within a per-player cap; weights change only between versions, and each saved game keeps the version it began with.</figcaption>
+  <figcaption><b>Figure 3.</b> The continual-learning loop. Labels come only from the teacher, and one player's report is enough, within a per-player cap; weights change only between versions, and a town takes the latest version when it next opens.</figcaption>
 </figure>
 
 <div class="col">
@@ -294,7 +295,7 @@ svg .dash { stroke-dasharray: 5 4; }
 <figure>
   <div class="legend" id="leg-cost"></div>
   <div class="chart" id="fig-cost"></div>
-  <figcaption><b>Figure 4.</b> Divergence from the teacher on held-out towns against cost per question in the browser (left) and the size of the shipped model (right). Lower and further left is better. Gradient-boosted trees have no browser implementation and appear only on the right.</figcaption>
+  <figcaption><b>Figure 4.</b> Divergence from the teacher on held-out towns against cost per question in the browser (left) and the size of the shipped model (right). Lower and further left is better. Each model keeps its colour and marker in both panels. Gradient-boosted trees have no browser implementation and appear only on the right.</figcaption>
 </figure>
 
 <div class="col">
@@ -361,22 +362,50 @@ svg .dash { stroke-dasharray: 5 4; }
 
 <h3><span class="secno">6.6</span>Confidence and the first learning cycle</h3>
 <p>The student's estimate of its own error proved useful. Its rank correlation with the actual error on teacher-governed towns is 0.53; marking the 5% of questions it judged most uncertain captured 42% of its worst errors, eight times what random selection would achieve, and its predictions match the observed error closely across the range. The first cycle of the learning loop ran on the questions reported during a single four-minute session of the game in a browser: 307 questions from one client, chiefly where to build and how factions stand, each labelled by the server within seconds of being reported. They are the only data from play in a browser so far, and they are not a sample of play: each was reported because the student was unsure of it or met an unknown value. Version 1's error on them is 0.080 nats (90% interval 0.065 to 0.097, resampling snapshots), four times its error on teacher-governed towns, which is what the selection should produce. Version 2 trained on four fifths of them. On the 68 it held out, its error is 0.086 against version 1's 0.095, a reduction of a tenth (paired interval for the difference −0.018 to −0.001). It passed every comparison against its predecessor and published itself.</p>
+<p>Since release the loop has run on the game's server, on questions from play. In its first day it received 613 questions, all from a single player; the per-player limit admitted 400 to the first cycle and kept the rest for the next. The resulting version 3 lowered the error on the 63 of them it held out from 0.075 to 0.055 nats, about a quarter, left the error on teacher-governed towns unchanged at 0.020, and kept the share of residents at work in the canary towns within a third of a point of its predecessor's. It passed every comparison and was published to the game.</p>
 
 <h2><span class="secno">7</span>Discussion</h2>
 <h3><span class="secno">7.1</span>What the triple route contributed</h3>
 <p>The results bear out the properties that motivated the approach. The ordering of the architectures follows from the structure of the decisions: most of the teacher's answers depend on individual facts and on pairs of facts, such as a faction and the interests a proposal favours, or a trade and the jobs available. Attention and factorization both compute products of features, whereas a multilayer perceptron over a sum of embeddings must approximate such products with successive nonlinear layers, which demands more data than the problem supplies. Factorization machines capture pairs efficiently but assign each pair a fixed strength, while attention can make an interaction depend on a third fact and disregard irrelevant ones. The resulting order, set model, then factorization machine, then perceptron, mirrors how much multiplicative structure each design builds in, and the withheld-pair test shows the same order with the largest margins.</p>
 <p>The economy of the representation proved equally valuable in practice. A single set model of about 125,000 parameters answers every kind of question; the snapshot encoding it shares across questions keeps the common case cheap; and because new facts are new tokens, the learning loop extends the vocabulary and fine-tunes rather than rebuilding. These are the properties the Triple World Model was designed to demonstrate, and they transfer to a commercial setting with little modification.</p>
 
-<h3><span class="secno">7.2</span>The three-token layout</h3>
+<h3><span class="secno">7.2</span>Why the student is fast</h3>
+<p>The student's speed does not come from a clever kernel. It follows from four decisions, each of which removes work that a general model must do, and together they explain how a model of 125,000 parameters answers in about a tenth of a millisecond on one processor core.</p>
+<p>The first is that the input is never text. The teacher reads some three hundred tokens of prose for each question and must interpret them with three billion parameters before it can weigh the options. The student receives the same information as about fifty facts, each of which is already a single token, so reading a question reduces to looking up three vectors per fact and adding them. This is also why most of the model's parameters cost nothing to run: the table of value embeddings holds over two thirds of them, and a question touches only the rows its facts name (Table 4).</p>
+<p>The second is the division of the model into two stages around the snapshot. A town's facts change once a season, while dozens of questions of every kind are asked about it each month. The snapshot encoder, the only stage that relates the town's facts to one another, therefore runs once per snapshot, and its output, already projected into the keys and values the decision layer needs, is reused by every question until the season turns. A question pays only for the decision layer, in which a handful of option tokens attend to the question's few facts and to the cached town: about 125 microseconds, against about 680 when the town must be encoded afresh.</p>
+<p>The third is that the options are tokens rather than output units. Each permitted answer enters the decision layer as a token built from an embedding of its own and one shared across kinds, and leaves it as a single score. A question with five options costs five tokens' worth of work, one model serves all twenty-two kinds of decision without a separate output for each, and an answer such as leaving town draws on what is learned about leaving in other decisions. Because attention multiplies features, the interactions between pairs of facts that drive most answers come from a single narrow layer rather than from depth.</p>
+<p>The fourth is that the model is small enough to need no special machinery. With a width of 32 and one layer in each stage, the arithmetic per question suits plain JavaScript loops over typed arrays. The runtime needs no graphics processor, no WebAssembly and no framework, so it never competes with the game's renderer, and it runs in the simulation's own worker thread. Weights ship as eight-bit integers and are expanded once on loading, and the runtime spreads a burst of questions over successive simulation steps rather than stalling any one of them.</p>
+<p>The same structure keeps training cheap. Learning the teacher's full distribution gives each example far more information than a single label would; the on-policy stage spends labels where the student's own play leads; and a new version starts from the old one, adding vocabulary rather than retraining. A complete cycle of the learning loop, from labels to the final comparison, takes under twenty minutes on four processor cores.</p>
+<p>Set against the alternatives, these decisions account for the results of Section 6.1. The factorization machine is faster still, at about 21 microseconds, because it computes only fixed pairwise products, but it cannot let a third fact change the strength of a pair, and it pays for that in accuracy. Gradient-boosted trees come close in accuracy but share nothing across kinds and need forty times the space. The perceptron must learn through depth the products that attention computes directly. The set model sits where the structure of the problem places it: the most accurate student, at a cost that is a small fraction of the game's own simulation.</p>
+</div>
+
+<div class="col">
+<div class="tablewrap">
+<table>
+  <caption><b>Table 4.</b> Where the shipped student's parameters go, and which of them each question uses. Times are per question on one processor core of the test machine.</caption>
+  <thead><tr><th>Part</th><th>Parameters</th><th>Share</th><th>Work per question</th></tr></thead>
+  <tbody>
+    <tr><td>Value embeddings</td><td>87,872</td><td>68.7%</td><td>one row looked up per fact</td></tr>
+    <tr><td>Scope, attribute, number and option embeddings</td><td>16,320</td><td>12.8%</td><td>rows looked up</td></tr>
+    <tr><td>Snapshot encoder</td><td>8,544</td><td>6.7%</td><td>none while the town is cached; about 680 µs in all when it is not</td></tr>
+    <tr class="best"><td>Decision layer and scores</td><td>13,025</td><td>10.2%</td><td>all of it: about 125 µs</td></tr>
+    <tr><td>Error estimate</td><td>2,209</td><td>1.7%</td><td>a small network on the decision layer's output</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="col">
+<h3><span class="secno">7.3</span>The three-token layout</h3>
 <p>The Triple World Model's original layout, which writes each triple as three separate tokens, learned more slowly here and was set aside. In its original setting a state holds several entities sharing the same attributes, and relating values to entities across tokens is the problem attention solves. In Hearthvale each scope describes a single entity, so summing a triple's three embeddings already binds them, and the three-token form must instead learn that binding from position, at three times the cost per question. The representation transferred; the tokenization did not need to.</p>
 
-<h3><span class="secno">7.3</span>Evaluating a policy that acts repeatedly</h3>
+<h3><span class="secno">7.4</span>Evaluating a policy that acts repeatedly</h3>
 <p>The evaluation design deserves emphasis. Because a game samples from the student's distribution at every step for a century, a small and consistent bias on one answer can alter a town more than larger random errors, and average divergence alone cannot reveal it. For this reason the evaluation compares the probability of each answer as well as the overall divergence, measures the student on the states its own decisions produce, and compares complete towns with the teacher's in both average and spread. The last point is easy to get wrong: a single ratio of distances between runs cannot distinguish a faithful student from one whose towns are merely less varied, and in this work it hid exactly that. We regard these measures as necessary for distilling any policy that acts repeatedly within a simulation.</p>
 
-<h3><span class="secno">7.4</span>The teacher's character</h3>
+<h3><span class="secno">7.5</span>The teacher's character</h3>
 <p>The experiments revealed something about the teacher itself. Its answers keep towns markedly smaller than the fallback rules do, chiefly because it sends few residents to work. The students copy this faithfully, which is the intended behaviour, but it is a property of the teacher that the game's designers may wish to examine, and one that a distilled student now makes cheap to study.</p>
 
-<h3><span class="secno">7.5</span>Limitations</h3>
+<h3><span class="secno">7.6</span>Limitations</h3>
 <p>The comparison of complete towns rests on four towns and three teacher runs of each, enough to separate regimes but not to detect small shifts such as the possible difference at the 150th year, nor to estimate the teacher's spread precisely. Simulated towns do not step every individual resident, so residents' needs were synthesised, and the teacher-governed towns are headless; the only questions from play in a browser come from one short session. Timings come from a single fast machine, and a mid-range phone will be several times slower, although the per-step budget accommodates this. The withheld-pair test covers six pairs chosen for strong interactions, and the error estimate misses more than half of the worst questions when it marks only a twentieth of them.</p>
 
 <h2><span class="secno">8</span>Conclusion</h2>
@@ -439,7 +468,7 @@ svg .dash { stroke-dasharray: 5 4; }
     <tr><td>Shipped weights</td><td>8-bit integers with one scale per row; error estimate in 32-bit floats</td></tr>
     <tr><td>Browser budget</td><td>4 ms of student work per turn of the event loop</td></tr>
     <tr><td>Live referrals</td><td>at most one per second per player; a shared server budget, 50 per second by default</td></tr>
-    <tr><td>Loop intake</td><td>one report suffices; at most 400 questions per client per cycle, the rest deferred; unusual states at most a quarter of a cycle unless three clients report them; questions already trained on skipped; a cycle when 50 new labelled questions wait, checked hourly</td></tr>
+    <tr><td>Loop intake</td><td>one report suffices; at most 400 questions per client per cycle, the rest deferred; unusual states at most a quarter of a cycle unless three clients report them; questions already trained on skipped; a cycle each day when 50 new labelled questions wait</td></tr>
     <tr><td>Loop gates</td><td>no more than 3% worse on teacher-governed towns overall or by traffic; no frequent kind more than 20% worse; largest answer bias no more than 5 points; rare-answer ratios between 0.67 and 1.5</td></tr>
   </tbody>
 </table>
@@ -706,7 +735,7 @@ function network(s, x, y, cols = [3, 4, 2], w = 90, h = 64, cls = 'netn') {
     [0, 'grow', ['Warm start', 'new words join the', 'vocabulary; fine-tune'], 'start'],
     [45, 'check', ['Model gates', 'teacher towns, bias, rare answers,', 'parity, size, canary towns'], 'start'],
     [90, 'tag', ['Publish', 'the manifest names the latest'], 'bottom'],
-    [135, 'house', ['New towns load it', 'a saved town keeps', 'the version it began with'], 'end'],
+    [135, 'house', ['Towns load it', 'when they next open,', 'never mid-session'], 'end'],
   ];
   // Arcs between stations, clockwise.
   st.forEach(([deg], i) => {
@@ -721,7 +750,7 @@ function network(s, x, y, cols = [3, 4, 2], w = 90, h = 64, cls = 'netn') {
   el('path', {d: `M${bx + R + 4},${by - 6} C${bx + 160},${by - 10} ${tx2 - 40},${ty2 + 90} ${tx2 - 6},${ty2 + R + 6}`, class: 'arrow acc dash', 'marker-end': 'url(#ah3a)'}, s);
   el('text', {x: 300, y: 245, 'text-anchor': 'middle', class: 'dsub t-acc'}, s, 'live, when the teacher is free:');
   el('text', {x: 300, y: 260, 'text-anchor': 'middle', class: 'dsub t-acc'}, s, 'one a second per player, 50 shared');
-  el('text', {x: cx + 70, y: cy + 52, 'text-anchor': 'middle', class: 'eyebrow'}, s, 'A CYCLE WHEN 50 ARE NEW');
+  el('text', {x: cx + 70, y: cy + 52, 'text-anchor': 'middle', class: 'eyebrow'}, s, 'ONE CYCLE A DAY');
   el('text', {x: cx + 70, y: cy + 69, 'text-anchor': 'middle', class: 'dsub'}, s, 'labels come only from the teacher;');
   el('text', {x: cx + 70, y: cy + 84, 'text-anchor': 'middle', class: 'dsub'}, s, 'weights change only between versions');
   for (const [deg, ic, text, side] of st) {
@@ -746,14 +775,14 @@ function rowSw(tr, cells, color, bold) {
 function bars(id, legendId, groups, series, yMax, yLabel, fmtV) {
   legend(legendId, series.map(([, , color, label]) => ['sq', color, label]));
   const W = 900, H = 270, L = 58, s = svgIn(id, W, H);
-  const y = lin(0, yMax, H - 40, 16);
+  const y = lin(0, yMax, H - 40, 24);
   const ticks = [0, yMax / 4, yMax / 2, 3 * yMax / 4, yMax];
   for (const t of ticks) {
     el('line', {x1: L, x2: W - 20, y1: y(t), y2: y(t), class: 'grid'}, s);
     el('text', {x: L - 8, y: y(t) + 4, 'text-anchor': 'end'}, s, fmtV(t));
   }
-  el('text', {x: L, y: 8, class: 't-muted'}, s, yLabel);
-  const groupW = (W - 20 - L) / groups.length, barW = 22, gap = 2;
+  el('text', {x: L, y: 11, class: 't-muted'}, s, yLabel);
+  const groupW = (W - 20 - L) / groups.length, barW = 34, gap = 4;
   groups.forEach(([label, values], gi) => {
     const gx = L + gi * groupW + groupW / 2;
     el('text', {x: gx, y: H - 18, 'text-anchor': 'middle'}, s, label);
@@ -763,7 +792,7 @@ function bars(id, legendId, groups, series, yMax, yLabel, fmtV) {
       const bx = gx - (series.length * (barW + gap)) / 2 + si * (barW + gap);
       const top = y(Math.min(v, yMax)), r = Math.min(4, (y(0) - top) / 2);
       el('path', {d: `M${bx},${y(0)} L${bx},${top + r} Q${bx},${top} ${bx + r},${top} L${bx + barW - r},${top} Q${bx + barW},${top} ${bx + barW},${top + r} L${bx + barW},${y(0)} Z`, class: cls}, s);
-      el('text', {x: bx + barW / 2, y: top - 5, 'text-anchor': 'middle'}, s, fmtV(v, true));
+      el('text', {x: bx + barW / 2, y: top - 5, 'text-anchor': 'middle', class: 'tiny'}, s, fmtV(v, true));
       hover(el('rect', {x: bx - 1, y: 16, width: barW + 2, height: y(0) - 16}, s), label, [[color, slabel, fmtV(v, true)]]);
     });
   });
@@ -804,8 +833,8 @@ const MODELS = [
 // ---------------------------------------------------------------- Figure 3: cost vs quality
 (function cost() {
   legend('leg-cost', [['dot', '--s-set', 'Set models'], ['dot', '--s-fm', 'Factorization machines'], ['dot', '--s-mlp', 'Multilayer perceptrons'], ['dia', '--s-muted', 'Gradient-boosted trees']]);
-  const W = 900, H = 360, s = svgIn('fig-cost', W, H);
-  const panel = (x0, w, xs, xlabel, ticks, key, tickFmt) => {
+  const W = 900, H = 420, s = svgIn('fig-cost', W, H);
+  const panel = (x0, w, xs, xlabel, ticks, key, tickFmt, column = null) => {
     const y = lin(.02, .066, H - 46, 18);
     for (const t of [.02, .03, .04, .05, .06]) {
       el('line', {x1: x0, x2: x0 + w, y1: y(t), y2: y(t), class: 'grid'}, s);
@@ -817,27 +846,56 @@ const MODELS = [
     }
     el('line', {x1: x0, x2: x0 + w, y1: H - 46, y2: H - 46, class: 'axis'}, s);
     el('text', {x: x0 + w / 2, y: H - 6, 'text-anchor': 'middle', class: 't-muted'}, s, xlabel);
-    const placed = [];
-    for (const m of MODELS) {
-      const v = m[key]; if (v == null) continue;
-      const cx = xs(v), cy = y(m.kl);
+    // Every point gets a short label, placed by trying spots around it in turn and
+    // taking the first that clears the other labels, the markers and the panel.
+    const SHORT = {set22: 'Set, 2+2 layers', set11: 'Set, 1+1 (shipped)', set16: 'Set, d16', fm3aux: 'FM order 3 + set labels', fmaux: 'FM + set labels',
+      fm3d64: 'FM order 3, d64', fm: 'FM', mlpaux: 'MLP + set labels', mlp: 'MLP', xgb: 'XGBoost'};
+    const pts = MODELS.filter((m) => m[key] != null).map((m) => ({m, cx: xs(m[key]), cy: y(m.kl)}));
+    for (const {m, cx, cy} of pts) {
       const g = el('g', {}, s);
       marker(g, m.shape, m.cls, cx, cy, 5.5);
       const hitc = el('circle', {cx, cy, r: 13}, g);
       hover(hitc, m.name, [[null, 'KL', fmt(m.kl)], [null, 'µs a question', m.us ? (m.scaled ? '~' : '') + m.us : 'n/a'], [null, 'shipped', m.kb >= 1000 ? (m.kb / 1000).toFixed(1) + ' MB' : m.kb + ' KB']]);
-      if (['set22', 'set16', 'fmaux', 'mlp', 'xgb', 'fm3d64', 'set11'].includes(m.id)) {
-        let ly = cy - 10, lx = cx + 9;
-        if (m.id === 'set11') ly = cy + 16;
-        if (m.id === 'xgb') { lx = cx - 9; }
-        while (placed.some((p) => Math.abs(p[0] - lx) < 70 && Math.abs(p[1] - ly) < 13)) ly -= 13;
-        placed.push([lx, ly]);
-        el('text', {x: lx, y: ly, 'text-anchor': m.id === 'xgb' ? 'end' : 'start', class: m.id === 'set22' ? 't-strong' : ''}, s, m.name.replace(', best of 4', '').replace(', depth 6', ''));
+    }
+    const boxes = pts.map(({cx, cy}) => [cx - 7, cy - 7, cx + 7, cy + 7]);
+    const clear = (b) => b[0] >= x0 - 4 && b[2] <= x0 + w + 6 && b[1] >= 16 && b[3] <= H - 48
+      && !boxes.some((o) => b[0] < o[2] + 2 && b[2] > o[0] - 2 && b[1] < o[3] + 1 && b[3] > o[1] - 1);
+    const SPOTS = [[10, 4, 'start'], [-10, 4, 'end'], [10, -9, 'start'], [10, 17, 'start'], [-10, -9, 'end'], [-10, 17, 'end'],
+      [0, -12, 'middle'], [0, 22, 'middle'], [18, -24, 'start'], [18, 32, 'start'], [-18, -24, 'end'], [-18, 32, 'end'],
+      [26, -38, 'start'], [26, 46, 'start'], [-26, -38, 'end'], [-26, 46, 'end']];
+    // column: {x, free}: labels of the crowded points stack in a column at x, in
+    // order of height, each joined to its point by a thin leader; `free` ids are
+    // placed around their points as usual.
+    if (column) {
+      const stack = pts.filter(({m}) => !column.free.includes(m.id)).sort((a, b) => a.cy - b.cy);
+      const ys = stack.map(({cy}) => cy + 4);
+      for (let i = 1; i < ys.length; i++) ys[i] = Math.max(ys[i], ys[i - 1] + 15);
+      const over = ys.length ? ys.at(-1) - (H - 52) : 0;
+      if (over > 0) for (let i = ys.length - 1; i >= 0; i--) ys[i] = Math.min(ys[i] - over, i < ys.length - 1 ? ys[i + 1] - 15 : Infinity);
+      stack.forEach(({m, cx, cy}, i) => {
+        el('path', {d: `M${cx + 7},${cy} L${column.x - 14},${ys[i] - 4} L${column.x - 4},${ys[i] - 4}`, class: 'leader'}, s);
+        el('text', {x: column.x, y: ys[i], class: m.id === 'set11' ? 't-strong' : ''}, s, SHORT[m.id] ?? m.name);
+      });
+    }
+    for (const {m, cx, cy} of [...pts].sort((a, b) => a.cy - b.cy)) {
+      if (column && !column.free.includes(m.id)) continue;
+      const text = SHORT[m.id] ?? m.name, tw = text.length * 6.1;
+      let pick = null;
+      for (const [dx, dy, anchor] of SPOTS) {
+        const lx = cx + dx, ly = cy + dy;
+        const bx = anchor === 'start' ? lx : anchor === 'end' ? lx - tw : lx - tw / 2;
+        const b = [bx, ly - 10, bx + tw, ly + 3];
+        if (clear(b)) { pick = {lx, ly, anchor, b, far: Math.abs(dy) > 20}; break; }
       }
+      if (!pick) { const lx = cx + 10, ly = cy + 4; pick = {lx, ly, anchor: 'start', b: [lx, ly - 10, lx + tw, ly + 3], far: false}; }
+      boxes.push(pick.b);
+      if (pick.far) el('line', {x1: cx, y1: cy + (pick.ly < cy ? -6 : 6), x2: pick.anchor === 'end' ? pick.b[2] : pick.anchor === 'start' ? pick.b[0] : (pick.b[0] + pick.b[2]) / 2, y2: pick.ly < cy ? pick.ly + 3 : pick.ly - 10, class: 'grid'}, s);
+      el('text', {x: pick.lx, y: pick.ly, 'text-anchor': pick.anchor, class: m.id === 'set11' ? 't-strong' : ''}, s, text);
     }
   };
   el('text', {x: 58, y: 12, class: 't-muted'}, s, 'KL to d1-3B (held-out towns)');
   panel(58, 380, logs(12, 400, 58, 438), 'µs per question, JS, state cached (log)', [15, 30, 60, 120, 250], 'us', (t) => t);
-  panel(520, 370, logs(150, 20000, 520, 890), 'shipped size (log)', [200, 500, 1000, 5000, 12700], 'kb', (t) => t >= 1000 ? (t / 1000).toFixed(t === 12700 ? 1 : 0) + ' MB' : t + ' KB');
+  panel(520, 370, logs(150, 20000, 520, 890), 'shipped size (log)', [200, 500, 1000, 5000, 12700], 'kb', (t) => t >= 1000 ? (t / 1000).toFixed(t === 12700 ? 1 : 0) + ' MB' : t + ' KB', {x: 668, free: ['xgb']});
 })();
 
 // ---------------------------------------------------------------- Figure 6: held-out pairs
