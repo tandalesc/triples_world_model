@@ -45,6 +45,7 @@ result back to text. For the full 100-epoch run and every other result, see
 | **Compositional generalization (closed-vocab v1)** | 0.74 F1 on novel entity-state combos; Mini (178K) matches Base | [docs/REPRODUCING.md](docs/REPRODUCING.md) |
 | **Pet-sim demo** | 29K params, 98.9% exact match, runs client-side in 303 KB JS | [demo/](demo/) |
 | **JEPA v2 latent actions** | slot-LOO flips positive (all 8 slots constructive); `ce_gap` 0.166 | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
+| **Decision students (Hearthvale)** | attention over triples copies a 3B decision model at KL 0.025 in ~60–260 µs of browser JS; 1.04× penalty on unseen feature pairs vs MLP's 3.8× | [docs/DECISION_STUDENT.md](docs/DECISION_STUDENT.md) |
 | **JEPA v2.1 decoder arm** | bigger decoder cuts teacher-forced CE 1.39 → **0.95 nats**; fluent GLUCOSE | [research/jepa_matrix_synthesis.md](research/jepa_matrix_synthesis.md) |
 
 **Honest status:** the v2 line has a working structural prior and a clean decoder, but
@@ -52,6 +53,31 @@ three capability gaps persist — next-state retrieval barely beats chance, the 
 action carries no recoverable semantics yet, and generations are fluent but generically
 wrong. The relative-representation interface (for mounting this inside an LLM) is *marginal*,
 not yet green-lit. The numbers and the v3 recipe are in the synthesis below.
+
+## Decision students (Hearthvale)
+
+`src/twm/decision/` distills Hearthvale's decision model (LiquidAI d1-3B) into
+students small enough to run in the game's sim worker. Questions are banded
+town snapshots written as `(scope, attribute, value)` triples; answers are
+distributions over a kind's options. On 30,667 questions from towns no model saw
+(full results in [docs/DECISION_STUDENT.md](docs/DECISION_STUDENT.md)):
+
+| student | KL to d1 | top-1 | browser bundle | µs / question |
+|---|---:|---:|---:|---:|
+| set model (attention over triples), d32 | **0.025** | **85.7%** | 307 KB | ~260 |
+| set model, d16, one layer each | 0.029 | 84.4% | 194 KB | ~60 |
+| factorization machine, d32 (+ set-model labels) | 0.031 | 84.0% | 239 KB | ~21 |
+| XGBoost, depth 6 | 0.028 | 85.4% | ~12.7 MB | — |
+| MLP (best of 4, dropout) | 0.062 | 80.5% | 484 KB | ~93 |
+
+With six interacting feature pairs held out of training, the set model's error
+on them rises 4%, the FMs' 13–15%, the MLP's 280%. Towns run by the students
+grow like towns run by d1, about 10× faster end to end.
+
+```bash
+uv run python scripts/train_decision_student.py train.jsonl --arch set|twm|fm|mlp --out results/decision_student/NAME
+uv run python scripts/export_decision_student.py results/decision_student/NAME bundle.json --data train.jsonl
+```
 
 ## Links
 
@@ -65,6 +91,7 @@ not yet green-lit. The numbers and the v3 recipe are in the synthesis below.
   diagnostics conventions).
 - **[CLAUDE.md](CLAUDE.md)** — the agent surface / project instructions.
 - **[demo/](demo/)** — client-side pet-simulation inference demo.
+- **[docs/DECISION_STUDENT.md](docs/DECISION_STUDENT.md)** — distilling Hearthvale's decision model: data, models, results.
 
 ## How the closed-vocab core works (the lineage)
 

@@ -1,0 +1,7 @@
+233076 rows: 203907 train, 29169 test (held-out towns); device mps
+twm: 132,577 parameters; vocab 144 attrs, 2194 values, 112 options
+epoch   1  train KL 0.1508  test KL 0.0920  top-1 71.9%  (245 s)
+epoch   2  train KL 0.0639  test KL 0.0728  top-1 76.1%  (562 s)
+epoch   3  train KL 0.0494  test KL 0.0627  top-1 78.5%  (1043 s)
+epoch   4  train KL 0.0429  test KL 0.0628  top-1 79.8%  (1530 s)
+epoch   5  train KL 0.0377  test KL 0.0564  top-1 80.5%  (1956 s)

@@ -1,0 +1,50 @@
+241647 rows: 210980 train, 30667 test (held-out towns); device mps
+fm: 87,712 parameters; vocab 144 attrs, 2195 values, 112 options
+epoch   1  train KL 0.3312  test KL 0.1311  top-1 65.7%  (39 s)
+epoch   2  train KL 0.0877  test KL 0.0877  top-1 74.3%  (54 s)
+epoch   3  train KL 0.0582  test KL 0.0609  top-1 76.7%  (64 s)
+epoch   4  train KL 0.0445  test KL 0.0578  top-1 77.7%  (74 s)
+epoch   5  train KL 0.0394  test KL 0.0492  top-1 79.2%  (84 s)
+epoch   6  train KL 0.0353  test KL 0.0545  top-1 78.3%  (93 s)
+epoch   7  train KL 0.0320  test KL 0.0456  top-1 79.9%  (103 s)
+epoch   8  train KL 0.0297  test KL 0.0405  top-1 81.0%  (112 s)
+epoch   9  train KL 0.0282  test KL 0.0422  top-1 80.7%  (124 s)
+epoch  10  train KL 0.0270  test KL 0.0378  top-1 82.1%  (136 s)
+epoch  11  train KL 0.0260  test KL 0.0374  top-1 82.4%  (148 s)
+epoch  12  train KL 0.0253  test KL 0.0367  top-1 82.3%  (160 s)
+epoch  13  train KL 0.0247  test KL 0.0361  top-1 82.7%  (171 s)
+epoch  14  train KL 0.0241  test KL 0.0355  top-1 82.7%  (183 s)
+epoch  15  train KL 0.0236  test KL 0.0356  top-1 82.8%  (196 s)
+epoch  16  train KL 0.0233  test KL 0.0349  top-1 82.8%  (208 s)
+epoch  17  train KL 0.0228  test KL 0.0348  top-1 82.9%  (220 s)
+epoch  18  train KL 0.0227  test KL 0.0346  top-1 83.0%  (233 s)
+epoch  19  train KL 0.0225  test KL 0.0346  top-1 83.0%  (245 s)
+epoch  20  train KL 0.0224  test KL 0.0346  top-1 83.0%  (258 s)
+
+kind                          rows       KL  base KL  top-1
+all                          30667   0.0346   0.1497  83.0%
+unseen snapshots             30653   0.0346   0.1497  83.0%
+household_home                2310   0.0167   0.0407  92.0%
+petition                      2254   0.0190   0.1288  86.1%
+faction_stance                2245   0.0186   0.4214  99.9%
+choose_trade                  2193   0.0634   0.6159  85.5%
+enterprise_plan               2159   0.0241   0.0962  79.2%
+institution_draft             1927   0.0436   0.0804  69.1%
+choose_site                   1869   0.0948   0.2173  55.8%
+household_stay_move           1688   0.0319   0.0944  97.7%
+newcomer_integrate            1684   0.0234   0.0668  79.2%
+crime_charity                 1604   0.0172   0.0747  94.7%
+enterprise_found              1523   0.0237   0.0646  67.2%
+resident_routine              1502   0.0168   0.0922  91.5%
+merchant_speculate            1484   0.0174   0.0577  87.9%
+react_to_policy               1312   0.0132   0.0431  81.2%
+festival_participation        1182   0.0168   0.0282  98.8%
+take_loan                     1093   0.0231   0.0525  84.2%
+where_to_settle                764   0.1859   0.1257  29.5%
+event_response                 654   0.0725   0.1508  83.9%
+farm_land                      582   0.0141   0.0266  79.0%
+migration_wave                 399   0.0307   0.1504  93.0%
+institution_form_support       146   0.0194   0.0605  80.8%
+institution_negotiate           93   0.0130   0.0219 100.0%
+worst 1% of rows: KL above 0.2916
+saved results/decision_student/cmp/fm3-d32-p1

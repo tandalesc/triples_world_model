@@ -1,0 +1,57 @@
+233076 rows: 203907 train, 29169 test (held-out towns); device mps
+set: 48,897 parameters; vocab 144 attrs, 2194 values, 112 options
+epoch   1  train KL 0.1734  test KL 0.0697  top-1 73.8%  (48 s)
+epoch   2  train KL 0.0473  test KL 0.0508  top-1 77.6%  (87 s)
+epoch   3  train KL 0.0320  test KL 0.0385  top-1 82.1%  (127 s)
+epoch   4  train KL 0.0263  test KL 0.0379  top-1 83.2%  (155 s)
+epoch   5  train KL 0.0235  test KL 0.0333  top-1 83.0%  (183 s)
+epoch   6  train KL 0.0217  test KL 0.0327  top-1 82.3%  (209 s)
+epoch   7  train KL 0.0207  test KL 0.0340  top-1 82.7%  (231 s)
+epoch   8  train KL 0.0199  test KL 0.0322  top-1 82.5%  (246 s)
+epoch   9  train KL 0.0190  test KL 0.0305  top-1 83.9%  (262 s)
+epoch  10  train KL 0.0185  test KL 0.0298  top-1 83.9%  (287 s)
+epoch  11  train KL 0.0179  test KL 0.0295  top-1 83.7%  (311 s)
+epoch  12  train KL 0.0173  test KL 0.0302  top-1 84.0%  (335 s)
+epoch  13  train KL 0.0170  test KL 0.0297  top-1 84.2%  (359 s)
+epoch  14  train KL 0.0165  test KL 0.0295  top-1 84.3%  (383 s)
+epoch  15  train KL 0.0161  test KL 0.0292  top-1 84.4%  (407 s)
+epoch  16  train KL 0.0159  test KL 0.0288  top-1 84.8%  (420 s)
+epoch  17  train KL 0.0156  test KL 0.0289  top-1 84.7%  (433 s)
+epoch  18  train KL 0.0154  test KL 0.0288  top-1 84.7%  (447 s)
+epoch  19  train KL 0.0152  test KL 0.0288  top-1 84.8%  (460 s)
+epoch  20  train KL 0.0152  test KL 0.0288  top-1 84.8%  (473 s)
+
+kind                          rows       KL  base KL  top-1
+all                          29169   0.0288   0.1390  84.7%
+unseen snapshots             29155   0.0288   0.1390  84.8%
+household_home                2310   0.0147   0.0407  93.2%
+petition                      2254   0.0174   0.1288  87.9%
+enterprise_plan               2159   0.0226   0.0962  77.2%
+faction_stance                2150   0.0202   0.3759  99.9%
+institution_draft             1927   0.0335   0.0804  72.0%
+choose_site                   1869   0.0817   0.2173  60.4%
+choose_trade                  1770   0.0427   0.5963  90.2%
+household_stay_move           1688   0.0198   0.0944  97.8%
+newcomer_integrate            1684   0.0147   0.0668  87.7%
+enterprise_found              1523   0.0183   0.0646  74.5%
+merchant_speculate            1484   0.0186   0.0577  88.4%
+resident_routine              1304   0.0144   0.0906  91.5%
+react_to_policy               1200   0.0131   0.0434  81.7%
+festival_participation        1182   0.0156   0.0282  98.9%
+take_loan                     1093   0.0173   0.0525  88.3%
+crime_charity                  934   0.0105   0.0429  99.5%
+where_to_settle                764   0.1732   0.1257  29.6%
+event_response                 654   0.0515   0.1508  83.3%
+farm_land                      582   0.0101   0.0266  83.0%
+migration_wave                 399   0.0251   0.1504  93.7%
+institution_form_support       146   0.0173   0.0605  84.2%
+institution_negotiate           93   0.0122   0.0219 100.0%
+worst 1% of rows: KL above 0.2473
+held-out pair crime_charity: q.alms=no × town.faith=low: 2476 rows, KL 0.0242 (baseline 0.1219), top-1 89.0%
+held-out pair react_to_policy: q.change=adopted × proposal.helps=trade: 848 rows, KL 0.0272 (baseline 0.0449), top-1 67.6%
+held-out pair choose_trade: q.openJobs:farm=none × town.wellbeing=poor: 2490 rows, KL 0.0559 (baseline 0.7485), top-1 82.8%
+held-out pair faction_stance: q.faction=crafters × proposal.helps=craft: 324 rows, KL 0.0718 (baseline 1.1208), top-1 99.4%
+held-out pair faction_stance: q.faction=labourers × proposal.hurts=labour: 316 rows, KL 0.0473 (baseline 1.7758), top-1 100.0%
+held-out pair resident_routine: q.timeOfDay=evening × town.jobs=scarce: 2117 rows, KL 0.0115 (baseline 0.0920), top-1 93.7%
+held-out pair all: 8571 rows, KL 0.0332 (baseline 0.3877), top-1 87.0%
+saved results/decision_student/holdout/set-d16-1x1

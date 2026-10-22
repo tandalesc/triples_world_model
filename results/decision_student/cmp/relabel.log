@@ -1,0 +1,16 @@
+797495 rows; 140904 from held-out towns dropped; labelling 656591 with student:set-p0 on mps
+  50000/656591 (21 s)
+  100000/656591 (34 s)
+  150000/656591 (47 s)
+  200000/656591 (65 s)
+  250000/656591 (85 s)
+  300000/656591 (111 s)
+  350000/656591 (130 s)
+  400000/656591 (147 s)
+  450000/656591 (167 s)
+  500000/656591 (184 s)
+  550000/656591 (202 s)
+  600000/656591 (227 s)
+  650000/656591 (241 s)
+  656591/656591 (244 s)
+wrote /Users/shishirtandale/Projects/hearthvale_decisions/.claude/worktrees/decision-distillation-review-bfaebb/data/distill/relabelled-set.jsonl

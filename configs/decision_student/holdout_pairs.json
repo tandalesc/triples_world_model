@@ -1,0 +1,8 @@
+[
+  {"kind": "faction_stance", "a": "q.faction=crafters", "b": "proposal.helps=craft"},
+  {"kind": "faction_stance", "a": "q.faction=labourers", "b": "proposal.hurts=labour"},
+  {"kind": "choose_trade", "a": "q.openJobs:farm=none", "b": "town.wellbeing=poor"},
+  {"kind": "crime_charity", "a": "q.alms=no", "b": "town.faith=low"},
+  {"kind": "react_to_policy", "a": "q.change=adopted", "b": "proposal.helps=trade"},
+  {"kind": "resident_routine", "a": "q.timeOfDay=evening", "b": "town.jobs=scarce"}
+]

@@ -1,0 +1,15 @@
+63184 rows: 55826 train (47341 fit, 8485 early-stopping), 7358 test (held-out towns)
+held-out pair faction_stance: q.faction=crafters × proposal.helps=craft: 324 rows, KL 0.0252, top-1 99.4%
+held-out pair faction_stance: q.faction=labourers × proposal.hurts=labour: 316 rows, KL 0.0168, top-1 100.0%
+faction_stance                2150   0.0102  99.9%    251 rounds,  1004 trees,   73040 nodes  (3 s)
+held-out pair choose_trade: q.openJobs:farm=none × town.wellbeing=poor: 2490 rows, KL 0.0369, top-1 85.8%
+choose_trade                  1770   0.0325  92.3%    289 rounds,  2023 trees,  169651 nodes  (10 s)
+held-out pair resident_routine: q.timeOfDay=evening × town.jobs=scarce: 2117 rows, KL 0.0075, top-1 94.3%
+resident_routine              1304   0.0091  93.8%    157 rounds,   942 trees,   88062 nodes  (14 s)
+held-out pair react_to_policy: q.change=adopted × proposal.helps=trade: 848 rows, KL 0.0198, top-1 65.9%
+react_to_policy               1200   0.0115  84.1%    232 rounds,  1392 trees,  100138 nodes  (18 s)
+held-out pair crime_charity: q.alms=no × town.faith=low: 2476 rows, KL 0.0214, top-1 90.7%
+crime_charity                  934   0.0092  99.0%     86 rounds,   430 trees,   40164 nodes  (20 s)
+
+all 7358 rows: KL 0.0155, worst 1% above 0.1205, top-1 94.3%
+browser: 5791 trees, 471,055 nodes, ~4600 KB packed, ~7371 node visits a question

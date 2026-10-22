@@ -1,0 +1,38 @@
+103936 rows: 88716 train, 15220 test (held-out towns); device mps
+set: 106,209 parameters; vocab 101 attrs, 1598 values, 89 options
+epoch   1  train KL 0.1845  test KL 0.0635  top-1 75.7%  (44 s)
+epoch   2  train KL 0.0420  test KL 0.0420  top-1 81.3%  (78 s)
+epoch   3  train KL 0.0289  test KL 0.0379  top-1 82.0%  (103 s)
+epoch   4  train KL 0.0242  test KL 0.0324  top-1 82.7%  (130 s)
+epoch   5  train KL 0.0208  test KL 0.0317  top-1 83.1%  (157 s)
+epoch   6  train KL 0.0188  test KL 0.0303  top-1 83.1%  (187 s)
+epoch   7  train KL 0.0170  test KL 0.0299  top-1 83.1%  (213 s)
+epoch   8  train KL 0.0158  test KL 0.0284  top-1 83.8%  (242 s)
+epoch   9  train KL 0.0147  test KL 0.0280  top-1 83.3%  (269 s)
+epoch  10  train KL 0.0137  test KL 0.0283  top-1 83.1%  (296 s)
+epoch  11  train KL 0.0129  test KL 0.0277  top-1 83.6%  (322 s)
+epoch  12  train KL 0.0123  test KL 0.0275  top-1 83.6%  (351 s)
+epoch  13  train KL 0.0118  test KL 0.0271  top-1 83.6%  (379 s)
+epoch  14  train KL 0.0115  test KL 0.0270  top-1 84.0%  (407 s)
+epoch  15  train KL 0.0113  test KL 0.0271  top-1 83.6%  (434 s)
+
+kind                          rows       KL  base KL  top-1
+all                          15220   0.0270   0.2082  84.0%
+unseen snapshots             15212   0.0270   0.2083  84.0%
+faction_stance                2248   0.0131   0.4210  99.9%
+choose_trade                  2193   0.0347   0.6159  89.5%
+enterprise_plan               2159   0.0195   0.0962  77.6%
+institution_draft             1928   0.0307   0.0804  73.4%
+petition                      1136   0.0169   0.1215  89.7%
+take_loan                     1093   0.0156   0.0525  85.9%
+household_home                1086   0.0126   0.0205  97.1%
+enterprise_found              1044   0.0249   0.0629  68.0%
+household_stay_move            664   0.0201   0.0702  95.5%
+newcomer_integrate             531   0.0200   0.0569  84.2%
+where_to_settle                503   0.1743   0.1279  26.8%
+migration_wave                 352   0.0178   0.1564  94.9%
+resident_routine               166   0.0264   0.0893  84.3%
+event_response                 114   0.0590   0.1256  57.0%
+festival_participation           3   0.0484   0.0357  66.7%
+worst 1% of rows: KL above 0.2404
+saved results/decision_student/snap-set
