@@ -19,6 +19,12 @@ Rows labelled by another student (``model: "student:..."``, from
 relabel_decision_student.py) are training-only: never scored, never in the
 baseline, weighted by ``--aux-weight``.
 
+``--init-from RUN`` warm-starts from a trained student instead of training
+from scratch: its config and weights carry over, its vocabulary keeps every
+id, new tokens are appended with embeddings started from its ``<unk>`` row,
+and training then fine-tunes everything (usually with fewer epochs and a lower
+learning rate). This is how a new version learns new values without a rebuild.
+
 ``--holdout-pairs FILE.json`` ([{"kind", "a": "scope.attr=value", "b": ...}])
 is the sharper compositional test: every row of that kind holding both triples
 is taken out of training (rows with either alone stay in) and scored
@@ -140,6 +146,29 @@ def print_summary(summary: dict) -> None:
     print(f"worst 1% of rows: KL above {summary['all']['kl_p99']:.4f}")
 
 
+def warm_start(model, old_state: dict) -> None:
+    """Copy a trained student's weights into a model whose embedding tables may have grown.
+
+    Rows the old tables had keep their values; new rows start from the old
+    ``<unk>`` row (index 1), which is what the old model used for those tokens.
+    """
+    state = model.state_dict()
+    for name, old in old_state.items():
+        if name not in state:
+            continue
+        new = state[name]
+        if new.shape == old.shape:
+            state[name] = old.clone()
+        elif new.dim() == 2 and new.shape[1] == old.shape[1] and new.shape[0] > old.shape[0]:
+            grown = new.clone()
+            grown[: old.shape[0]] = old
+            grown[old.shape[0]:] = old[1]
+            state[name] = grown
+        else:
+            raise ValueError(f"cannot warm-start {name}: {tuple(old.shape)} -> {tuple(new.shape)}")
+    model.load_state_dict(state)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("data", nargs="+")
@@ -164,6 +193,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--aux-weight", type=float, default=1.0, help="weight of rows labelled by another student")
     ap.add_argument("--holdout-pairs", default=None, help="JSON list of {kind, a, b} triple pairs to hold out")
+    ap.add_argument("--init-from", default=None, help="warm-start from this run's model.pt (config, weights, vocabulary)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -184,11 +214,22 @@ def main() -> None:
         print(f"{n_aux} training rows labelled by another student (weight {args.aux_weight})")
     print(f"{len(rows)} rows: {len(train_rows)} train, {len(test_rows)} test (held-out towns); device {device}")
 
-    vocab = DecisionVocab.build(train_rows, args.min_value_count)
-    cfg = StudentConfig(arch=args.arch, d_model=args.d_model, n_heads=args.heads, state_layers=args.state_layers,
-                        question_layers=args.question_layers, d_ff=args.d_ff, mlp_hidden=args.mlp_hidden,
-                        dropout=args.dropout, fm_order=args.fm_order)
-    model = build_student(vocab, cfg).to(device)
+    if args.init_from:
+        base = torch.load(Path(args.init_from) / "model.pt", map_location="cpu")
+        old_vocab = DecisionVocab.from_json(base["vocab"])
+        vocab = DecisionVocab.extend(old_vocab, train_rows, args.min_value_count)
+        cfg = StudentConfig(**base["config"])
+        model = build_student(vocab, cfg)
+        warm_start(model, base["state_dict"])
+        grown = {name: len(getattr(vocab, name)) - len(getattr(old_vocab, name)) for name in ("attrs", "values", "kind_options", "options")}
+        print(f"warm start from {args.init_from}: new tokens {grown}")
+        model = model.to(device)
+    else:
+        vocab = DecisionVocab.build(train_rows, args.min_value_count)
+        cfg = StudentConfig(arch=args.arch, d_model=args.d_model, n_heads=args.heads, state_layers=args.state_layers,
+                            question_layers=args.question_layers, d_ff=args.d_ff, mlp_hidden=args.mlp_hidden,
+                            dropout=args.dropout, fm_order=args.fm_order)
+        model = build_student(vocab, cfg).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"{args.arch}: {n_params:,} parameters; vocab {len(vocab.attrs)} attrs, {len(vocab.values)} values, {len(vocab.kind_options)} options")
 

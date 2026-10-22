@@ -117,7 +117,7 @@ class DecisionSetModel(nn.Module):
         mem = self.state_encoder(x, src_key_padding_mask=~is_state)
         return self.state_norm(mem), ~is_state
 
-    def forward(self, b: dict) -> torch.Tensor:
+    def forward(self, b: dict, return_hidden: bool = False):
         q, real, is_state = self.tokens(b)
         mem, mem_pad = self.encode_state(q, is_state)
         is_q = real & ~is_state
@@ -125,8 +125,10 @@ class DecisionSetModel(nn.Module):
         tgt = torch.cat([q, o], dim=1)
         tgt_pad = ~torch.cat([is_q, b["opt_mask"]], dim=1)
         h = self.question(tgt, mem, tgt_key_padding_mask=tgt_pad, memory_key_padding_mask=mem_pad)
-        logits = self.score(self.out_norm(h[:, q.shape[1]:])).squeeze(-1)
-        return logits.masked_fill(~b["opt_mask"], float("-inf"))
+        hidden = self.out_norm(h[:, q.shape[1]:])
+        logits = self.score(hidden).squeeze(-1).masked_fill(~b["opt_mask"], float("-inf"))
+        # The option tokens' final states, for the confidence head (confidence.py).
+        return (logits, hidden) if return_hidden else logits
 
 
 class DecisionTWMModel(DecisionSetModel):

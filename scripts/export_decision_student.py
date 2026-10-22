@@ -8,7 +8,8 @@ The bundle holds the config, the vocabularies, every weight and a fixture:
 rows from --data with the probabilities PyTorch gives them, so Hearthvale's JS
 forward pass can be checked against it
 (``node scripts/distill-check-student.js OUT.json``). ``kinds`` lists the
-kinds the student was trained on; the game only asks it about those.
+kinds the student was trained on (less --exclude-kinds); the game only asks
+it about those and sends the rest to the hosted model.
 
 Weights follow scripts/export_jepa_weights.py: 2-D matrices (embeddings,
 projections) as per-row symmetric INT8 with an fp32 scale per row, 1-D
@@ -33,6 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from twm.decision.data import DecisionVocab, encode_rows, load_rows  # noqa: E402
+from twm.decision.confidence import ErrorHead, features  # noqa: E402
 from twm.decision.model import StudentConfig, build_student, kl_teacher_student  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -63,6 +65,7 @@ def main() -> None:
     ap.add_argument("--data", required=True, nargs="+")
     ap.add_argument("--fixture", type=int, default=64)
     ap.add_argument("--kinds", default=None)
+    ap.add_argument("--exclude-kinds", default=None, help="kinds to leave to the hosted model (not answered locally)")
     ap.add_argument("--version", type=int, default=1)
     ap.add_argument("--float", action="store_true", help="float32 weights instead of INT8/fp16")
     args = ap.parse_args()
@@ -80,10 +83,20 @@ def main() -> None:
         trained_kinds = json.loads(metrics_path.read_text())["args"].get("kinds")
     kinds = (args.kinds or trained_kinds)
     kinds = kinds.split(",") if kinds else sorted({k.split(":")[0] for k in vocab.kind_options if ":" in k})
+    if args.exclude_kinds:
+        kinds = [k for k in kinds if k not in args.exclude_kinds.split(",")]
 
     weights, seen = {}, {}
     for name, t in ckpt["state_dict"].items():
         weights[name], seen[name] = export_weight(t, args.float)
+    # The confidence head (train_error_head.py), if trained: float32, it is tiny.
+    confidence = None
+    if "err_head" in ckpt:
+        for name, t in ckpt["err_head"].items():
+            weights[f"err_head.{name}"] = export_weight(t, True)[0]
+        rep = ckpt["err_head_report"]
+        confidence = {"scale": rep["scale"], "eps": 1e-3, "thresholds": {k: v for k, v in rep.items() if k.startswith("threshold_")},
+                      "quantiles": rep.get("quantiles"), "rank_corr": rep["rank_corr"]}
 
     rows = load_rows(args.data, kinds)
     random.Random(0).shuffle(rows)
@@ -95,8 +108,16 @@ def main() -> None:
         logits = model(b)
         probs = torch.softmax(logits, dim=-1)
         cost = kl_teacher_student(logits, full.nan_to_num(0.0), b["opt_mask"]).mean().item()
+    expected = None
+    if confidence:
+        head = ErrorHead(cfg.d_model)
+        head.load_state_dict(ckpt["err_head"])
+        with torch.no_grad():
+            _, f = features(model, b)
+            expected = (confidence["scale"] * ErrorHead.expected_kl(head(f))).tolist()
     fixture = [{"kind": r["kind"], "triples": r["triples"], "options": r["options"],
-                "probabilities": [round(p, 7) for p in probs[i, : len(r["options"])].tolist()]} for i, r in enumerate(rows)]
+                "probabilities": [round(p, 7) for p in probs[i, : len(r["options"])].tolist()],
+                **({"expected_kl": round(expected[i], 7)} if expected else {})} for i, r in enumerate(rows)]
 
     bundle = {
         "format": "hearthvale-decision-student",
@@ -107,6 +128,7 @@ def main() -> None:
         "config": cfg.to_dict(),
         "vocab": vocab.to_json(),
         "weights": weights,
+        "confidence": confidence,
         "fixture": fixture,
     }
     Path(args.out).write_text(json.dumps(bundle, separators=(",", ":")))

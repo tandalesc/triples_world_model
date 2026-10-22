@@ -123,8 +123,9 @@ def main() -> None:
             for r, _ in items:
                 prior = priors.get((k, tuple(r["options"])))
                 pri.append(kl(r["_p"], prior) if prior is not None else np.nan)
+            prior = float(np.nanmean(pri)) if pri and not all(np.isnan(pri)) else None
             per_kind[k] = {"rows": len(items), "share": share[k], "kl": float(kls.mean()), "kl_traffic": float((kls * w).sum() / w.sum()),
-                           "prior_kl": float(np.nanmean(pri)) if pri else None, "top1": float(top.mean())}
+                           "prior_kl": prior, "top1": float(top.mean())}
             # Signed bias and tails over rows offering the kind's full option set.
             full = max(len(r["options"]) for r, _ in items)
             sub = [(r, q, wi) for (r, q), wi in zip(items, w) if len(r["options"]) == full]
@@ -156,7 +157,7 @@ def main() -> None:
         print(f"{'kind':26s} {'share':>6s} {'KL':>7s} {'KLtraf':>7s} {'prior':>7s} {'top-1':>6s}")
         for k in sorted(per_kind, key=lambda k: -share[k]):
             s = per_kind[k]
-            pk = f"{s['prior_kl']:.4f}" if s["prior_kl"] is not None and not np.isnan(s["prior_kl"]) else "   -  "
+            pk = f"{s['prior_kl']:.4f}" if s["prior_kl"] is not None else "   -  "
             print(f"{k:26s} {s['share']:6.1%} {s['kl']:7.4f} {s['kl_traffic']:7.4f} {pk:>7s} {s['top1']:6.1%}")
         print("largest signed biases (student − teacher, traffic-weighted mean probability):")
         for b in report["runs"][run.name]["bias"][:10]:
@@ -168,7 +169,7 @@ def main() -> None:
         for k, f in free.items():
             print(f"free text {k}: top choice is the prior's slot for the student {f['student_picks_prior_slot']:.0%}, for the teacher {f['teacher_picks_prior_slot']:.0%} ({f['rows']} rows)")
     if args.out:
-        Path(args.out).write_text(json.dumps(report, indent=1))
+        Path(args.out).write_text(json.dumps(report, indent=1, allow_nan=False))
 
 
 if __name__ == "__main__":

@@ -79,6 +79,20 @@ class DecisionVocab:
         vocab.state_scope_ids = [vocab.scopes[s] for s in STATE_SCOPES if s in vocab.scopes]
         return vocab
 
+    @classmethod
+    def extend(cls, old: "DecisionVocab", rows: list[dict], min_value_count: int = 3) -> "DecisionVocab":
+        """The old vocabulary with any new tokens from `rows` appended: old ids keep their meaning."""
+        new = cls.build(rows, min_value_count)
+        def grow(a: dict, b: dict) -> dict:
+            out = dict(a)
+            for t in b:
+                out.setdefault(t, len(out))
+            return out
+        vocab = cls(grow(old.scopes, new.scopes), grow(old.attrs, new.attrs), grow(old.values, new.values),
+                    grow(old.kind_options, new.kind_options), grow(old.options, new.options))
+        vocab.state_scope_ids = [vocab.scopes[s] for s in STATE_SCOPES if s in vocab.scopes]
+        return vocab
+
     def to_json(self) -> dict:
         return {"scopes": self.scopes, "attrs": self.attrs, "values": self.values,
                 "kind_options": self.kind_options, "options": self.options, "state_scopes": list(STATE_SCOPES)}
