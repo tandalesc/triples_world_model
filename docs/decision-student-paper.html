@@ -85,6 +85,9 @@ tr.best td { font-weight: 600; }
 .props th, .props td { white-space: normal; text-align: left; vertical-align: top; }
 .props td:first-child { white-space: nowrap; font-weight: 600; color: var(--ink); }
 .squeeze td:first-child { white-space: normal; min-width: 150px; }
+.wrap-last td:last-child, .wrap-last td:first-child { white-space: normal; }
+.wrap-last td:last-child { text-align: left; min-width: 220px; }
+.wrap-last th:last-child { text-align: left; }
 .squeeze th { white-space: normal; }
 
 td .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
@@ -409,7 +412,7 @@ svg .leader { fill: none; stroke: var(--ink-3); stroke-width: .8; opacity: .55; 
 
 <div class="col">
 <div class="tablewrap">
-<table>
+<table class="wrap-last">
   <caption><b>Table 5.</b> Where the shipped student's parameters go, and which of them each question uses. Times are per question on one processor core of the test machine.</caption>
   <thead><tr><th>Part</th><th>Parameters</th><th>Share</th><th>Work per question</th></tr></thead>
   <tbody>
