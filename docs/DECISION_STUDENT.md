@@ -92,7 +92,7 @@ purest pairwise cases (crafters × "helps craft": fm³ 0.020 vs set 0.074).
 
 Four unseen towns grown to year 150, answered by d1, by students, and by the
 game's fallback rules: both set students land in d1's regime (median population
-1,399 and 1,729 vs d1's 1,098; fallback rules 7,409) with routine shares within a
+1,102 and 1,404 vs d1's 945; fallback rules 6,849) with routine shares within a
 few points of d1's (worship slightly over-picked). End to end a student-run
 town takes 82–288 s against 2,336–2,540 s waiting on d1. Four towns is low power.
 
