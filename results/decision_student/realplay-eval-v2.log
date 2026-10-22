@@ -1,0 +1,159 @@
+40119 labelled rows, 23 kinds; traffic from questions asked
+/Users/shishirtandale/Projects/twm-decision-student/scripts/eval_decision_student.py:127: RuntimeWarning: Mean of empty slice
+  "prior_kl": float(np.nanmean(pri)) if pri else None, "top1": float(top.mean())}
+
+== set-d32-1x1: KL 0.0204 over distinct questions, 0.0122 weighted by traffic
+kind                        share      KL  KLtraf   prior  top-1
+resident_routine            72.6%  0.0095  0.0097  0.0739  91.2%
+enterprise_plan              3.9%  0.0150  0.0150  0.0819  84.2%
+household_stay_move          3.7%  0.0105  0.0162  0.0748  98.9%
+faction_stance               3.1%  0.0098  0.0098  0.4251 100.0%
+choose_trade                 2.4%  0.0409  0.0446  0.6121  87.7%
+household_home               2.4%  0.0111  0.0111  0.0571  82.4%
+newcomer_integrate           1.9%  0.0114  0.0114  0.0572  89.5%
+crime_charity                1.9%  0.0139  0.0139  0.0917  93.5%
+petition                     1.4%  0.0128  0.0128  0.1439  89.8%
+choose_site                  1.2%  0.0686  0.0686  0.2380  64.1%
+festival_participation       1.1%  0.0092  0.0092  0.0338  98.1%
+merchant_speculate           1.1%  0.0083  0.0083  0.0310  98.2%
+react_to_policy              0.9%  0.0110  0.0109  0.0466  83.8%
+enterprise_found             0.8%  0.0132  0.0132  0.0667  68.0%
+institution_draft            0.7%  0.0238  0.0238  0.0725  77.7%
+take_loan                    0.4%  0.0126  0.0114  0.0695  89.7%
+where_to_settle              0.2%  0.1314  0.1312  0.1701  52.3%
+migration_wave               0.1%  0.0135  0.0124  0.1292  93.5%
+event_response               0.1%  0.0171  0.0171  0.1077  86.8%
+farm_land                    0.1%  0.0067  0.0066  0.0272  89.3%
+institution_form_support     0.0%  0.0149  0.0149  0.0570  88.0%
+institution_negotiate        0.0%  0.0082  0.0082  0.0180 100.0%
+strike_vote                  0.0%  0.3382  0.3382     -    15.0%
+largest signed biases (student − teacher, traffic-weighted mean probability):
+  resident_routine         shop                   teacher 0.257 student 0.249  bias -0.007
+  resident_routine         leisure                teacher 0.371 student 0.377  bias +0.006
+  resident_routine         worship                teacher 0.072 student 0.078  bias +0.006
+  household_stay_move      stay                   teacher 0.651 student 0.630  bias -0.021
+  resident_routine         gather                 teacher 0.111 student 0.106  bias -0.005
+  strike_vote              strike                 teacher 0.708 student 0.354  bias -0.353
+  strike_vote              partial                teacher 0.108 student 0.419  bias +0.311
+  household_stay_move      emigrate               teacher 0.093 student 0.109  bias +0.016
+  resident_routine         work                   teacher 0.093 student 0.091  bias -0.002
+  merchant_speculate       hoard                  teacher 0.447 student 0.431  bias -0.016
+rare options (teacher mean < 10%): student / teacher
+  household_stay_move      emigrate               teacher 0.0934 student 0.1095  ratio 1.17
+  react_to_policy          leave                  teacher 0.0157 student 0.0171  ratio 1.09
+  resident_routine         worship                teacher 0.0716 student 0.0776  ratio 1.08
+  enterprise_found         chapel_donation        teacher 0.0476 student 0.0516  ratio 1.08
+  enterprise_found         school                 teacher 0.0514 student 0.0552  ratio 1.07
+  household_home           buy_second             teacher 0.0524 student 0.0495  ratio 0.94
+  event_response           flee                   teacher 0.0855 student 0.0897  ratio 1.05
+  choose_trade             clergy                 teacher 0.0345 student 0.0361  ratio 1.05
+  enterprise_plan          sell_site              teacher 0.0486 student 0.0509  ratio 1.05
+  festival_participation   watch                  teacher 0.0964 student 0.1008  ratio 1.05
+free text institution_draft: top choice is the prior's slot for the student 61%, for the teacher 57% (2500 rows)
+free text choose_site: top choice is the prior's slot for the student 29%, for the teacher 28% (2500 rows)
+free text event_response: top choice is the prior's slot for the student 52%, for the teacher 55% (478 rows)
+free text where_to_settle: top choice is the prior's slot for the student 50%, for the teacher 50% (818 rows)
+
+== set-d16-1x1: KL 0.0265 over distinct questions, 0.0155 weighted by traffic
+kind                        share      KL  KLtraf   prior  top-1
+resident_routine            72.6%  0.0121  0.0123  0.0739  90.2%
+enterprise_plan              3.9%  0.0187  0.0187  0.0819  84.0%
+household_stay_move          3.7%  0.0127  0.0197  0.0748  99.0%
+faction_stance               3.1%  0.0110  0.0110  0.4251 100.0%
+choose_trade                 2.4%  0.0587  0.0611  0.6121  85.8%
+household_home               2.4%  0.0128  0.0127  0.0571  78.5%
+newcomer_integrate           1.9%  0.0145  0.0145  0.0572  87.2%
+crime_charity                1.9%  0.0132  0.0131  0.0917  94.6%
+petition                     1.4%  0.0145  0.0145  0.1439  89.0%
+choose_site                  1.2%  0.0902  0.0902  0.2380  59.0%
+festival_participation       1.1%  0.0167  0.0166  0.0338  96.6%
+merchant_speculate           1.1%  0.0098  0.0098  0.0310  97.8%
+react_to_policy              0.9%  0.0119  0.0119  0.0466  84.7%
+enterprise_found             0.8%  0.0234  0.0235  0.0667  59.6%
+institution_draft            0.7%  0.0256  0.0256  0.0725  76.4%
+take_loan                    0.4%  0.0149  0.0138  0.0695  91.6%
+where_to_settle              0.2%  0.1413  0.1416  0.1701  44.6%
+migration_wave               0.1%  0.0190  0.0174  0.1292  90.8%
+event_response               0.1%  0.0265  0.0265  0.1077  84.1%
+farm_land                    0.1%  0.0083  0.0082  0.0272  87.9%
+institution_form_support     0.0%  0.0183  0.0183  0.0570  84.3%
+institution_negotiate        0.0%  0.0073  0.0073  0.0180 100.0%
+strike_vote                  0.0%  1.3704  1.3704     -     0.0%
+largest signed biases (student − teacher, traffic-weighted mean probability):
+  resident_routine         shop                   teacher 0.257 student 0.246  bias -0.011
+  resident_routine         worship                teacher 0.072 student 0.079  bias +0.008
+  strike_vote              strike                 teacher 0.708 student 0.075  bias -0.632
+  strike_vote              work                   teacher 0.184 student 0.797  bias +0.613
+  household_stay_move      emigrate               teacher 0.093 student 0.110  bias +0.016
+  household_stay_move      stay                   teacher 0.651 student 0.640  bias -0.011
+  resident_routine         leisure                teacher 0.371 student 0.374  bias +0.003
+  where_to_settle          d4                     teacher 0.170 student 0.216  bias +0.046
+  where_to_settle          d1                     teacher 0.283 student 0.239  bias -0.044
+  choose_trade             labour                 teacher 0.191 student 0.202  bias +0.011
+rare options (teacher mean < 10%): student / teacher
+  enterprise_found         school                 teacher 0.0514 student 0.0427  ratio 0.83
+  event_response           flee                   teacher 0.0855 student 0.1014  ratio 1.19
+  household_stay_move      emigrate               teacher 0.0934 student 0.1095  ratio 1.17
+  crime_charity            join_gang              teacher 0.0158 student 0.0140  ratio 0.88
+  enterprise_found         chapel_donation        teacher 0.0476 student 0.0531  ratio 1.12
+  household_stay_move      bring_kin              teacher 0.0860 student 0.0775  ratio 0.90
+  resident_routine         worship                teacher 0.0716 student 0.0793  ratio 1.11
+  choose_trade             clergy                 teacher 0.0345 student 0.0381  ratio 1.10
+  take_loan                borrow_large           teacher 0.0191 student 0.0208  ratio 1.09
+  enterprise_plan          diversify              teacher 0.0816 student 0.0749  ratio 0.92
+free text institution_draft: top choice is the prior's slot for the student 63%, for the teacher 57% (2500 rows)
+free text choose_site: top choice is the prior's slot for the student 30%, for the teacher 28% (2500 rows)
+free text event_response: top choice is the prior's slot for the student 55%, for the teacher 55% (478 rows)
+free text where_to_settle: top choice is the prior's slot for the student 40%, for the teacher 50% (818 rows)
+
+== aux-fm-d32: KL 0.0265 over distinct questions, 0.0156 weighted by traffic
+kind                        share      KL  KLtraf   prior  top-1
+resident_routine            72.6%  0.0116  0.0119  0.0739  89.8%
+enterprise_plan              3.9%  0.0186  0.0185  0.0819  82.8%
+household_stay_move          3.7%  0.0186  0.0251  0.0748  98.5%
+faction_stance               3.1%  0.0113  0.0113  0.4251 100.0%
+choose_trade                 2.4%  0.0642  0.0669  0.6121  86.2%
+household_home               2.4%  0.0141  0.0140  0.0571  79.4%
+newcomer_integrate           1.9%  0.0156  0.0156  0.0572  87.4%
+crime_charity                1.9%  0.0155  0.0155  0.0917  93.8%
+petition                     1.4%  0.0166  0.0166  0.1439  87.9%
+choose_site                  1.2%  0.0899  0.0899  0.2380  59.8%
+festival_participation       1.1%  0.0171  0.0170  0.0338  97.2%
+merchant_speculate           1.1%  0.0097  0.0097  0.0310  98.4%
+react_to_policy              0.9%  0.0124  0.0123  0.0466  83.4%
+enterprise_found             0.8%  0.0201  0.0202  0.0667  59.8%
+institution_draft            0.7%  0.0271  0.0271  0.0725  76.2%
+take_loan                    0.4%  0.0141  0.0127  0.0695  90.8%
+where_to_settle              0.2%  0.1414  0.1418  0.1701  51.6%
+migration_wave               0.1%  0.0263  0.0244  0.1292  90.2%
+event_response               0.1%  0.0288  0.0288  0.1077  84.7%
+farm_land                    0.1%  0.0088  0.0085  0.0272  87.9%
+institution_form_support     0.0%  0.0133  0.0133  0.0570  85.3%
+institution_negotiate        0.0%  0.0078  0.0078  0.0180 100.0%
+strike_vote                  0.0%  0.1880  0.1880     -   100.0%
+largest signed biases (student − teacher, traffic-weighted mean probability):
+  resident_routine         shop                   teacher 0.257 student 0.250  bias -0.007
+  resident_routine         leisure                teacher 0.371 student 0.377  bias +0.006
+  household_stay_move      stay                   teacher 0.651 student 0.630  bias -0.021
+  resident_routine         worship                teacher 0.072 student 0.076  bias +0.004
+  resident_routine         rest                   teacher 0.097 student 0.093  bias -0.003
+  strike_vote              strike                 teacher 0.708 student 0.439  bias -0.269
+  choose_trade             trade                  teacher 0.200 student 0.184  bias -0.016
+  household_home           keep                   teacher 0.377 student 0.391  bias +0.014
+  strike_vote              partial                teacher 0.108 student 0.323  bias +0.215
+  merchant_speculate       invest_build           teacher 0.189 student 0.171  bias -0.018
+rare options (teacher mean < 10%): student / teacher
+  choose_trade             clergy                 teacher 0.0345 student 0.0410  ratio 1.19
+  enterprise_found         school                 teacher 0.0514 student 0.0451  ratio 0.88
+  enterprise_found         chapel_donation        teacher 0.0476 student 0.0528  ratio 1.11
+  crime_charity            join_gang              teacher 0.0158 student 0.0143  ratio 0.90
+  react_to_policy          leave                  teacher 0.0157 student 0.0143  ratio 0.91
+  household_stay_move      bring_kin              teacher 0.0860 student 0.0948  ratio 1.10
+  household_stay_move      emigrate               teacher 0.0934 student 0.1010  ratio 1.08
+  event_response           flee                   teacher 0.0855 student 0.0923  ratio 1.08
+  migration_wave           wave                   teacher 0.0766 student 0.0715  ratio 0.93
+  petition                 petition_body          teacher 0.0391 student 0.0418  ratio 1.07
+free text institution_draft: top choice is the prior's slot for the student 66%, for the teacher 57% (2500 rows)
+free text choose_site: top choice is the prior's slot for the student 32%, for the teacher 28% (2500 rows)
+free text event_response: top choice is the prior's slot for the student 51%, for the teacher 55% (478 rows)
+free text where_to_settle: top choice is the prior's slot for the student 62%, for the teacher 50% (818 rows)
