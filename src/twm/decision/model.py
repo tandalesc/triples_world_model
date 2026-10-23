@@ -21,10 +21,15 @@ distribution (KL(teacher || student)).
     position (``triple_pos_emb``). Numbers ride on the value token. Attention can
     then relate a value to other triples' parts, not only whole triples.
 
-``DecisionMLP`` (the baseline)
-    The same triple embeddings, summed (a multi-hot first layer), then an MLP;
-    option logits are dot products with option embeddings. Train it on one kind
-    (``--kinds resident_routine``) for a per-task model, or on all kinds.
+``DecisionMLP`` (the baseline: Deep Sets)
+    Each triple is read on its own first: its scope, attribute and value
+    embeddings (the value carrying any number) side by side, through a small
+    per-triple network φ; the triples' outputs are summed and an MLP ρ reads the
+    sum; option logits are dot products with option embeddings. Concatenating
+    the parts keeps which value belongs to which attribute: summing every
+    triple's scope + attribute + value directly would reduce a question to three
+    bags (scopes, attributes, values) and lose that binding. Train it on one
+    kind (``--kinds resident_routine``) for a per-task model, or on all kinds.
 
 ``DecisionFM`` (a factorization machine, multi-output)
     Every pair of triples interacts through the elementwise product of their
@@ -81,6 +86,11 @@ class TripleEmbedding(nn.Module):
     def triples(self, b: dict) -> torch.Tensor:
         x = self.scope(b["scope"]) + self.attr(b["attr"]) + self.value(b["value"])
         return x + (b["num"] * b["has_num"]).unsqueeze(-1) * self.num_dir(b["attr"])
+
+    def triple_parts(self, b: dict) -> torch.Tensor:
+        """Each triple's scope, attribute and value (with its number) side by side: (B, T, 3d)."""
+        value = self.value(b["value"]) + (b["num"] * b["has_num"]).unsqueeze(-1) * self.num_dir(b["attr"])
+        return torch.cat([self.scope(b["scope"]), self.attr(b["attr"]), value], dim=-1)
 
     def options(self, b: dict) -> torch.Tensor:
         return self.kind_opt(b["kind_opt"]) + self.opt(b["opt"])
@@ -160,14 +170,16 @@ class DecisionMLP(nn.Module):
         self.cfg = cfg
         d, h = cfg.d_model, cfg.mlp_hidden
         self.embed = TripleEmbedding(vocab, d)
-        # Dropout after each hidden layer; at play time (eval) it is the identity,
-        # so the exported layout (mlp.0, .1, .4, .7) is what the JS reads.
+        # φ: one triple's parts (3d) to a vector (d), applied to each triple alone.
+        self.phi = nn.Sequential(nn.Linear(3 * d, h), nn.GELU(), nn.Linear(h, d))
+        # ρ: dropout after each hidden layer; at play time (eval) it is the
+        # identity, so the exported layout (mlp.0, .1, .4, .7) is what the JS reads.
         p = cfg.dropout
         self.mlp = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, h), nn.GELU(), nn.Dropout(p), nn.Linear(h, h), nn.GELU(), nn.Dropout(p),
                                  nn.Linear(h, d))
 
     def forward(self, b: dict) -> torch.Tensor:
-        x = (self.embed.triples(b) * b["tok_mask"].unsqueeze(-1)).sum(dim=1)
+        x = (self.phi(self.embed.triple_parts(b)) * b["tok_mask"].unsqueeze(-1)).sum(dim=1)
         z = self.mlp(x)
         logits = torch.einsum("bd,bkd->bk", z, self.embed.options(b))
         return logits.masked_fill(~b["opt_mask"], float("-inf"))
